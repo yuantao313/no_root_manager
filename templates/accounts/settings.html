@@ -35,7 +35,7 @@
         <div class="panel panel-default" style="max-width:640px;">
             <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
             <div class="panel-body">
-                <p class="text-muted" style="font-size:13px;">先发送验证码，验证通过后"保存配置"按钮才可用，配置才会写入数据库。</p>
+                <p class="text-muted" style="font-size:13px;">先发送验证码，验证通过后才能保存配置。</p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
@@ -57,7 +57,7 @@
                         </div>
                     </p>
                     <p>
-                        <label>验证码（不填写验证码也可发送验证码，先发码再填）</label>
+                        <label>验证码</label>
                         <div class="input-group">
                             <input type="text" name="code" class="form-control" placeholder="收到的验证码">
                             <span class="input-group-btn">
