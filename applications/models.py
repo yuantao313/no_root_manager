@@ -17,7 +17,7 @@ class Application(models.Model):
         APPROVED = "approved", "已通过"
         REJECTED = "rejected", "已驳回"
 
-    # 申请人（匿名提交时为空，身份信息见 applicant_name/contact）
+    # 申请人（登录用户，地位平等；身份信息见 applicant_name/contact）
     applicant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -26,7 +26,7 @@ class Application(models.Model):
         null=True,
         blank=True,
     )
-    # 匿名申请时的申请人信息
+    # 申请时填写的身份信息
     applicant_name = models.CharField("申请人姓名", max_length=50, default="")
     username = models.CharField("用户名", max_length=50, default="")
     email = models.EmailField("邮箱", max_length=100, default="")

@@ -1,5 +1,4 @@
 from django.contrib import messages
-from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -18,30 +17,6 @@ from servers.management import grant_sudo, migrate_home_dir, provision_user
 
 def is_staff(user):
     return user.is_staff
-
-
-def _ensure_user_account(application, password):
-    """匿名申请者自动创建系统账户，密码即首次申请成功的密码。
-
-    已存在同名账号时不覆盖其密码（尊重用户已有账户）。
-    """
-    if application.applicant:
-        return None
-    User = get_user_model()
-    username = (application.username or "").strip()
-    if not username:
-        return None
-    user, created = User.objects.get_or_create(
-        username=username,
-        defaults={"email": application.email},
-    )
-    if created:
-        user.set_password(password)
-    user.email = application.email or user.email
-    user.save()
-    application.applicant = user
-    application.save(update_fields=["applicant"])
-    return user
 
 
 def _provision_on_approve(application, request):
@@ -76,8 +51,6 @@ def _provision_on_approve(application, request):
     application.provision_note = msg
     if ok:
         application.provisioned_at = timezone.now()
-        # 匿名申请者：自动创建系统账户，密码即本次开通密码
-        _ensure_user_account(application, password)
         application.save()
         messages.success(request, f"账号已开通：{msg}")
         send_provision_credentials(application, password, expire_date=expire_date)
@@ -137,22 +110,19 @@ def my_applications(request):
     return render(request, "applications/my_list.html", {"applications": applications})
 
 
+@login_required
 def application_create(request):
-    """提交新的申请（匿名即可提交，无需登录）。"""
+    """提交新的申请（需登录，用户与管理员地位平等）。"""
     if request.method == "POST":
         form = ApplicationForm(request.POST)
         if form.is_valid():
             application = form.save(commit=False)
-            # 已登录用户记录账号，匿名用户仅填写身份信息
-            if request.user.is_authenticated:
-                application.applicant = request.user
+            application.applicant = request.user
             application.save()
             messages.success(request, "申请已提交，等待管理员审批。")
             notify_new_application(application)
             webhook_new_application(application)
-            if request.user.is_authenticated:
-                return redirect("applications:detail", pk=application.pk)
-            return render(request, "applications/success.html", {"application": application})
+            return redirect("applications:my")
     else:
         form = ApplicationForm()
     return render(request, "applications/form.html", {"form": form})

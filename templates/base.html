@@ -46,24 +46,21 @@
             <div class="collapse navbar-collapse" id="main-nav">
                 <ul class="nav navbar-nav">
                     {% if user.is_authenticated %}
-                    {% if user.is_staff %}
-                    <li><a href="{% url 'applications:list' %}">申请列表</a></li>
-                    {% endif %}
                     <li><a href="{% url 'applications:my' %}">我的申请</a></li>
                     <li><a href="{% url 'applications:create' %}">新建申请</a></li>
                     {% if user.is_staff %}
+                    <li><a href="{% url 'applications:list' %}">申请列表</a></li>
                     <li><a href="{% url 'servers:list' %}">服务器</a></li>
                     <li><a href="{% url 'credentials:list' %}">凭据</a></li>
-                    <li><a href="{% url 'accounts:register' %}">注册管理员</a></li>
                     <li><a href="{% url 'admin:index' %}">后台管理</a></li>
                     {% endif %}
                     {% else %}
-                    <li class="active"><a href="{% url 'applications:create' %}">提交申请</a></li>
+                    <li class="active"><a href="{% url 'accounts:login' %}">登录</a></li>
                     {% endif %}
                 </ul>
                 <ul class="nav navbar-nav navbar-right">
                     {% if user.is_authenticated %}
-                    <li><p class="navbar-text">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</p></li>
+                    <li><p class="navbar-text"><a href="{% url 'accounts:profile' %}" style="color:#cfd8dc;">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</a></p></li>
                     <li>
                         <form method="post" action="{% url 'accounts:logout' %}" class="navbar-form">
                             {% csrf_token %}
@@ -71,7 +68,8 @@
                         </form>
                     </li>
                     {% else %}
-                    <li><a href="{% url 'accounts:login' %}">管理员登录</a></li>
+                    <li><a href="{% url 'accounts:login' %}">登录</a></li>
+                    <li><a href="{% url 'accounts:register' %}">注册</a></li>
                     {% endif %}
                 </ul>
             </div>
