@@ -49,7 +49,8 @@ def register(request):
 
 @login_required
 def profile(request):
-    """个人中心：展示并编辑当前用户基本信息。"""
+    """个人中心：默认只读展示，点击"编辑"按钮后进入编辑模式。"""
+    # POST：保存编辑结果
     if request.method == "POST":
         form = ProfileForm(request.POST, instance=request.user)
         if form.is_valid():
@@ -58,4 +59,10 @@ def profile(request):
             return redirect("accounts:profile")
     else:
         form = ProfileForm(instance=request.user)
-    return render(request, "accounts/profile.html", {"user": request.user, "form": form})
+
+    editing = request.GET.get("edit") == "1"
+    return render(
+        request,
+        "accounts/profile.html",
+        {"user": request.user, "form": form, "editing": editing},
+    )

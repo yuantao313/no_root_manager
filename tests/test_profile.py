@@ -12,14 +12,24 @@ User = get_user_model()
 
 
 class TestProfileEdit:
-    def test_get_shows_form(self, client):
+    def test_default_readonly_shows_edit_button(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
-        assert "保存个人信息" in html
+        # 默认只读：显示信息与编辑按钮，不显示表单
+        assert "编辑个人信息" in html
+        assert 'id="id_email"' not in html
+
+    def test_edit_mode_shows_form(self, client):
+        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
+        client.force_login(user)
+        resp = client.get(reverse("accounts:profile") + "?edit=1")
+        html = resp.content.decode()
+        assert resp.status_code == 200
         assert 'id="id_email"' in html
+        assert "保存" in html and "取消" in html
 
     def test_update_email_and_name(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")

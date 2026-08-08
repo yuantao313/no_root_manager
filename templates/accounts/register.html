@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load crispy_forms_tags %}
 {% block title %}注册 - NRM{% endblock %}
 {% block content %}
 <div class="row">
@@ -11,7 +12,7 @@
                 <p class="text-muted" style="font-size:13px;">所有用户（普通用户与管理员）使用同一账号体系，注册后即可提交申请。</p>
                 <form method="post">
                     {% csrf_token %}
-                    {{ form.as_p }}
+                    {{ form|crispy }}
                     <button type="submit" class="btn btn-primary btn-block">注册</button>
                 </form>
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">已有账号？<a href="{% url 'accounts:login' %}">去登录</a></p>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load crispy_forms_tags %}
 {% block title %}我的 Webhook - NRM{% endblock %}
 {% block content %}
 <div class="page-header-row">
@@ -45,7 +46,7 @@
                 <p class="text-muted" style="font-size:13px;">申请创建/审批事件会推送 JSON 到该地址，仅本人可见可管。</p>
                 <form method="post">
                     {% csrf_token %}
-                    {{ form.as_p }}
+                    {{ form|crispy }}
                     <button type="submit" class="btn btn-primary">添加</button>
                 </form>
             </div>

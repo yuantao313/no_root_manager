@@ -1,7 +1,9 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+
+from config.decorators import staff_required
 
 from .forms import ApplicationForm
 from .models import Application, SudoGrant
@@ -13,10 +15,6 @@ from notifications.services import (
     webhook_review_result,
 )
 from servers.management import grant_sudo, migrate_home_dir, provision_user
-
-
-def is_staff(user):
-    return user.is_staff
 
 
 def _provision_on_approve(application, request):
@@ -94,8 +92,7 @@ def _grant_sudo_for_application(application, request):
         messages.warning(request, f"sudo 权限授予失败：{msg}")
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def application_list(request):
     """申请列表（仅管理员）：查看全部申请。"""
     applications = Application.objects.all()
@@ -127,16 +124,14 @@ def application_create(request):
     return render(request, "applications/form.html", {"form": form})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def application_detail(request, pk):
     """申请详情（仅管理员可看）。"""
     application = get_object_or_404(Application, pk=pk)
     return render(request, "applications/detail.html", {"application": application})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def application_review(request, pk, action):
     """审批：action 为 approve（通过）或 reject（驳回），仅管理员可用。"""
     application = get_object_or_404(Application, pk=pk)

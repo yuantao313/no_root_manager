@@ -45,12 +45,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'crispy_forms',
+    'crispy_bootstrap3',
     'accounts',
     'applications',
     'servers',
     'credentials',
     'notifications',
 ]
+
+# 表单渲染：crispy-forms（Bootstrap 3 模板包）
+CRISPY_ALLOWED_TEMPLATE_PACKS = 'bootstrap3'
+CRISPY_TEMPLATE_PACK = 'bootstrap3'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

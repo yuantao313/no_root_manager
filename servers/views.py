@@ -1,16 +1,13 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+
+from config.decorators import staff_required
 
 from .forms import ServerForm
 from .management import ensure_nrm_group, sync_managed_users, take_over_user
 from .models import Server
 from .ssh import test_server_connection
-
-
-def is_staff(user):
-    return user.is_staff
 
 
 def server_groups_api(request, pk):
@@ -26,16 +23,14 @@ def server_groups_api(request, pk):
     )
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_list(request):
     """服务器列表（仅管理员）。"""
     servers = Server.objects.all()
     return render(request, "servers/list.html", {"servers": servers})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_create(request):
     """新增服务器（仅管理员）。选择“保存并测试连接”时先测试连通性，通过后才保存。"""
     if request.method == "POST":
@@ -58,8 +53,7 @@ def server_create(request):
     return render(request, "servers/form.html", {"form": form, "editing": False})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_edit(request, pk):
     """编辑服务器（仅管理员）：可修改基本信息与分组配置。"""
     server = get_object_or_404(Server, pk=pk)
@@ -83,8 +77,7 @@ def server_edit(request, pk):
     return render(request, "servers/form.html", {"form": form, "editing": True})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_test(request, pk):
     """对已保存的服务器执行连接测试（仅管理员）。"""
     server = get_object_or_404(Server, pk=pk)
@@ -99,16 +92,14 @@ def server_test(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_detail(request, pk):
     """服务器详情（仅管理员），含受管用户列表。"""
     server = get_object_or_404(Server, pk=pk)
     return render(request, "servers/detail.html", {"server": server})
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_sync_users(request, pk):
     """同步目标机器 nrm_managed 组成员到数据库（仅管理员）。"""
     server = get_object_or_404(Server, pk=pk)
@@ -127,8 +118,7 @@ def server_sync_users(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
-@login_required
-@user_passes_test(is_staff)
+@staff_required
 def server_takeover_user(request, pk):
     """将指定用户加入目标机器 nrm_managed 组（接管，仅管理员）。"""
     server = get_object_or_404(Server, pk=pk)

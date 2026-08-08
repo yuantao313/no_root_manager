@@ -5,8 +5,10 @@ description = "NRM (No Root Manager)：目标机器用户申请与接管管理�
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "crispy-bootstrap3>=2024.1",
     "cryptography>=50.0.0",
     "django>=6.1",
+    "django-crispy-forms>=2.7",
     "paramiko>=5.0.0",
     "pypinyin>=0.55.0",
 ]
