@@ -323,6 +323,7 @@ def settings(request):
                     "host": host, "port": port, "username": username,
                     "password": new_pw, "from_email": from_email,
                     "use_tls": use_tls, "enabled": enabled,
+                    "verify_email": target,
                 }
                 # 用"待验证配置"发验证码邮件（写库前即可确认 SMTP 可用）
                 def _send_with_pending(subject, body, to_list):
@@ -343,7 +344,7 @@ def settings(request):
             if not pending:
                 messages.error(request, "请先填写 SMTP 配置并发送验证码。")
                 return redirect("accounts:settings")
-            target = request.POST.get("verify_email", "").strip()
+            target = pending.get("verify_email", "")
             ok, err = verify_code(target, request.POST.get("code", ""),
                                   EmailVerification.PURPOSE_SMTP_CONFIG, user=None)
             if not ok:
