@@ -4,8 +4,8 @@
 
 | 应用 | 职责 |
 |------|------|
-| `accounts` | 管理员注册/登录、用户名建议接口（pypinyin 复姓/多音字生成） |
-| `applications` | 申请单模型、匿名申请、审批、开通联动、sudo 审计（SudoGrant） |
+| `accounts` | 用户注册/登录（用户与管理员地位平等）、用户名建议接口（pypinyin 复姓/多音字生成） |
+| `applications` | 申请单模型、登录申请、审批、开通联动、sudo 审计（SudoGrant） |
 | `servers` | 服务器/用户分组/受管用户模型、SSH 执行与接管/开通/迁移服务 |
 | `credentials` | 目标机器登录凭据（敏感字段加密存储） |
 | `notifications` | 邮件（SMTP 配置模型 + 发送服务）与 Webhook（配置模型 + 推送服务） |
@@ -26,7 +26,7 @@ erDiagram
 ### 申请生命周期
 
 ```
-匿名提交(pending) → 审批通过(approved) → 机器开通(provisioned_at) → 到期(valid_until / sudo当日失效)
+登录提交(pending) → 审批通过(approved) → 机器开通(provisioned_at) → 到期(valid_until / sudo当日失效)
 ```
 
 ## SSH 执行层（servers/ssh.py + management.py）

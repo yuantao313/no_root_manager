@@ -1,4 +1,4 @@
-"""申请流程测试：匿名提交、权限控制、审批开通（mock SSH）、sudo 审计。"""
+"""申请流程测试：登录提交、权限控制、审批开通（mock SSH）、sudo 审计。"""
 
 from unittest.mock import patch
 
@@ -31,8 +31,11 @@ def server():
     return Server.objects.create(name="web", host="10.0.0.1", port=22, credential=cred)
 
 
-class TestAnonymousSubmit:
-    def test_anonymous_can_submit(self, client):
+class TestRequireLogin:
+    def test_anonymous_redirected_to_login(self, client):
+        assert client.get(reverse("applications:create")).status_code == 302
+
+    def test_anonymous_cannot_submit(self, client):
         resp = client.post(
             reverse("applications:create"),
             {
@@ -46,13 +49,47 @@ class TestAnonymousSubmit:
                 "description": "需要登录",
             },
         )
-        assert resp.status_code == 200  # 成功页
+        assert resp.status_code == 302
+        assert Application.objects.count() == 0
+
+    def test_login_user_can_submit(self, client, normal):
+        client.force_login(normal)
+        resp = client.post(
+            reverse("applications:create"),
+            {
+                "applicant_name": "张三",
+                "username": "zhangsan",
+                "email": "zs@example.com",
+                "employee_id": "E001",
+                "apply_type": "account",
+                "target_server": "",
+                "title": "开通账号",
+                "description": "需要登录",
+            },
+        )
+        assert resp.status_code == 302
         app = Application.objects.get(title="开通账号")
-        assert app.applicant is None  # 匿名
-        assert app.applicant_name == "张三"
+        assert app.applicant == normal  # 记录登录用户
 
     def test_anonymous_cannot_see_list(self, client):
         assert client.get(reverse("applications:list")).status_code == 302
+
+
+class TestRegister:
+    def test_register_open_to_all(self, client):
+        """用户与管理员地位平等：注册对所有用户开放，注册后自动登录。"""
+        resp = client.post(
+            reverse("accounts:register"),
+            {"username": "newuser", "password1": "Aq12345678!", "password2": "Aq12345678!"},
+        )
+        assert resp.status_code == 302
+        user = User.objects.filter(username="newuser").first()
+        assert user is not None
+        assert user.is_staff is False  # 注册为普通用户
+        # 已自动登录
+        assert "_auth_user_id" in client.session
+        # 注册后可访问"我的申请"
+        assert client.get(reverse("applications:my")).status_code == 200
 
 
 class TestPermission:
@@ -77,7 +114,7 @@ class TestPermission:
 
 
 class TestReviewProvision:
-    def test_approve_provisions_and_creates_account(self, client, staff, server):
+    def test_approve_provisions(self, client, staff, server):
         app = Application.objects.create(
             applicant_name="张三", username="zhangsan", email="zs@x.com",
             employee_id="E1", title="开通", target_server=server,
@@ -91,11 +128,6 @@ class TestReviewProvision:
         app.refresh_from_db()
         assert app.status == Application.Status.APPROVED
         assert app.provisioned_at is not None
-        # 匿名申请者自动创建系统账户，密码即首次密码
-        user = User.objects.filter(username="zhangsan").first()
-        assert user is not None
-        assert user.check_password("Pass123")
-        assert app.applicant == user
 
     def test_reject_does_not_provision(self, client, staff, server):
         app = Application.objects.create(

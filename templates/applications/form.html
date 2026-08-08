@@ -6,7 +6,7 @@
         <h3 class="panel-title">提交申请</h3>
     </div>
     <div class="panel-body">
-        <p class="text-muted">无需登录，填写身份信息后即可提交申请，管理员将尽快审批。</p>
+        <p class="text-muted">填写申请信息后提交，管理员将尽快审批。</p>
         <form method="post">
             {% csrf_token %}
             {{ form.as_p }}

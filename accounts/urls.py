@@ -7,6 +7,7 @@ app_name = "accounts"
 
 urlpatterns = [
     path("register/", views.register, name="register"),
+    path("profile/", views.profile, name="profile"),
     path("api/username-suggestions/", views.username_suggestions, name="username-suggestions"),
     path(
         "login/",
