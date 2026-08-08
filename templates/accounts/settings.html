@@ -35,7 +35,6 @@
         <div class="panel panel-default" style="max-width:640px;">
             <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
             <div class="panel-body">
-                <p class="text-muted" style="font-size:13px;">先发送验证码，验证通过后才能保存配置。</p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
@@ -67,7 +66,7 @@
                     </p>
                     <p>
                         <button type="submit" name="save_email_final" class="btn btn-primary" {% if not smtp_verified %}disabled{% endif %}>保存配置</button>
-                        {% if smtp_verified %}<span class="text-success">✓ 验证通过，可保存</span>{% else %}<span class="text-muted" style="font-size:13px;">验证通过后此处才可点击</span>{% endif %}
+                        {% if smtp_verified %}<span class="text-success">✓ 验证通过，可保存</span>{% endif %}
                     </p>
                 </form>
             </div>
@@ -119,7 +118,6 @@
         <div class="panel panel-default">
             <div class="panel-heading"><h3 class="panel-title">普通管理员与服务器绑定</h3></div>
             <div class="panel-body">
-                <p class="text-muted" style="font-size:13px;">超级管理员可管理全部服务器；普通管理员仅能管理此处绑定的服务器（含审批对应服务器的申请）。</p>
                 <form method="post" class="form-inline" style="margin-bottom:12px;">
                     {% csrf_token %}
                     <div class="form-group">

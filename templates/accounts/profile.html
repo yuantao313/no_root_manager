@@ -98,7 +98,6 @@
             <div class="panel-body"><p class="text-muted">暂无个人 Webhook。</p></div>
             {% endif %}
             <div class="panel-body" style="border-top:1px solid #ddd;">
-                <p class="text-muted" style="font-size:13px;">申请创建/审批事件会推送 JSON 到该地址，仅本人可见可管。</p>
                 <form method="post">
                     {% csrf_token %}
                     {{ webhook_form|crispy }}
