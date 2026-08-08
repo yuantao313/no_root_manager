@@ -24,6 +24,9 @@ urlpatterns = [
     path("gitcode/bind/", views.gitcode_bind, name="gitcode_bind"),
     path("gitcode/unbind/", views.gitcode_unbind, name="gitcode_unbind"),
     path("api/username-suggestions/", views.username_suggestions, name="username-suggestions"),
-    path("login/", views.NRMLoginView.as_view(), name="login"),
+    path("login/", auth_views.LoginView.as_view(
+        template_name="accounts/login.html",
+        redirect_authenticated_user=True,
+    ), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
 ]

@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from accounts.models import GitCodeBinding, LoginLog
+from accounts.models import GitCodeBinding
 from credentials.models import Credential
 from notifications.models import EmailConfig
 from servers.models import Server, ServerAdminBinding
@@ -91,21 +91,26 @@ class TestUnbindRequiresPassword:
 
 
 class TestLoginThrottle:
-    def test_login_logged_and_locked(self, client):
+    """登录限流由 django-axes 提供：15 分钟内失败 5 次锁定。"""
+
+    def test_login_locked_after_failures(self, client):
+        from axes.models import AccessAttempt
+
         User.objects.create_user(username="u1", password="correct123")
         # 5 次失败
         for _ in range(5):
             client.post(reverse("accounts:login"), {"username": "u1", "password": "wrong"})
-        assert LoginLog.objects.filter(username="u1", success=False).count() == 5
-        # 锁定期内正确密码也被拒
+        # axes 已记录失败尝试
+        assert AccessAttempt.objects.filter(username="u1").exists()
+        # 锁定期间正确密码也被拒（axes 返回 429 或 200，关键是未登录）
         resp = client.post(reverse("accounts:login"), {"username": "u1", "password": "correct123"})
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 429)
         assert "_auth_user_id" not in client.session
-        # 清空失败记录（模拟解锁）后可登录
-        LoginLog.objects.all().delete()
+        # 清除尝试记录（模拟冷却结束）后登录成功
+        AccessAttempt.objects.all().delete()
         resp = client.post(reverse("accounts:login"), {"username": "u1", "password": "correct123"})
         assert resp.status_code == 302
-        assert LoginLog.objects.filter(success=True).exists()
+        assert "_auth_user_id" in client.session
 
 
 class TestCredentialVisibility:

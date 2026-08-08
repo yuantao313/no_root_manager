@@ -7,10 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
 from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
-from django.contrib.auth.views import (
-    LoginView,
-    PasswordResetView,
-)
+from django.contrib.auth.views import PasswordResetView
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
@@ -29,59 +26,8 @@ from .gitcode import (
     exchange_token,
     get_user,
 )
-from .models import EmailVerification, GitCodeBinding, LoginLog, SystemConfig
+from .models import EmailVerification, GitCodeBinding, SystemConfig
 from .username_gen import generate_username_groups
-
-# 登录限流：15 分钟内同一用户名+IP 失败达到阈值即锁定 15 分钟
-LOGIN_FAIL_LIMIT = 5
-LOGIN_LOCK_MINUTES = 15
-
-
-class NRMLoginView(LoginView):
-    """登录视图：记录登录日志，并对连续失败实施限流锁定。"""
-
-    template_name = "accounts/login.html"
-
-    def _client_ip(self):
-        return self.request.META.get("REMOTE_ADDR") or ""
-
-    def _is_locked(self, username):
-        """最近窗口内同一用户名+IP 失败达到阈值则锁定。"""
-        from datetime import timedelta
-
-        from django.utils import timezone
-
-        since = timezone.now() - timedelta(minutes=LOGIN_LOCK_MINUTES)
-        fails = LoginLog.objects.filter(
-            username=username, ip=self._client_ip(), success=False, created_at__gte=since
-        ).count()
-        return fails >= LOGIN_FAIL_LIMIT
-
-    def _lock_error(self, form):
-        form.add_error(
-            None,
-            f"登录失败次数过多，账号已临时锁定 {LOGIN_LOCK_MINUTES} 分钟，请稍后再试。",
-        )
-
-    def form_invalid(self, form):
-        username = form.data.get("username", "").strip()
-        LoginLog.objects.create(username=username, ip=self._client_ip(), success=False)
-        if self._is_locked(username):
-            self._lock_error(form)
-        return super().form_invalid(form)
-
-    def form_valid(self, form):
-        # 锁定期内拒绝一切登录尝试（含正确密码），防止爆破撞对
-        username = form.cleaned_data.get("username", "")
-        if self._is_locked(username):
-            LoginLog.objects.create(username=username, ip=self._client_ip(), success=False)
-            self._lock_error(form)
-            return self.form_invalid(form)
-        user = form.get_user()
-        LoginLog.objects.create(
-            username=user.username, user=user, ip=self._client_ip(), success=True
-        )
-        return super().form_valid(form)
 
 
 class ProfileForm(forms.Form):
@@ -140,7 +86,8 @@ def register(request):
         form = UserCreationForm(request.POST)
         if form.is_valid():
             user = form.save()
-            login(request, user)
+            # 多认证后端（axes + ModelBackend）必须显式指定 backend
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
             messages.success(request, f"注册成功，欢迎 {user.username}。")
             return redirect("applications:my")
     else:
@@ -524,7 +471,7 @@ def gitcode_callback(request):
     if binding:
         # 已绑定：直接登录绑定用户（已注册用户绑定的账号，或历史 gc<id> 用户）
         user = binding.user
-        login(request, user)
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         messages.success(request, f"欢迎回来，{user.first_name or user.username}。")
         return redirect("applications:my")
 
@@ -545,7 +492,7 @@ def gitcode_callback(request):
             gitcode_id=user_id,
             gitcode_username=(user_data.get("login") or "")[:100],
         )
-    login(request, user)
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
     if created:
         # 首次登录：引导设置个人姓名（申请与通知依赖，未设置前不能提交申请）
         messages.success(request, "GitCode 登录成功。请先设置个人姓名，再提交申请。")

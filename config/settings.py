@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'crispy_forms',
     'crispy_bootstrap3',
+    'axes',
     'accounts',
     'applications',
     'servers',
@@ -57,6 +58,17 @@ INSTALLED_APPS = [
 # 表单渲染：crispy-forms（Bootstrap 3 模板包）
 CRISPY_ALLOWED_TEMPLATE_PACKS = 'bootstrap3'
 CRISPY_TEMPLATE_PACK = 'bootstrap3'
+
+# 登录防爆破（django-axes）：15 分钟内同用户名+IP 失败 5 次锁定
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = 0.25  # 单位：小时；0.25 = 15 分钟
+AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]
+AXES_RESET_ON_SUCCESS = True
+
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 # GitCode OAuth 第三方登录（https://gitcode.com 应用管理页注册）
 GITCODE_CLIENT_ID = os.environ.get('GITCODE_CLIENT_ID', '')
@@ -70,6 +82,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'axes.middleware.AxesMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
