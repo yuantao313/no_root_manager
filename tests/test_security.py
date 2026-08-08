@@ -74,7 +74,7 @@ class TestUnbindRequiresPassword:
         client.force_login(user)
         html = client.get(reverse("accounts:profile")).content.decode()
         assert "先设置本地密码" in html
-        assert "action=\"/accounts/gitcode/unbind/\"" not in html
+        assert 'action="/accounts/gitcode/unbind/"' not in html
 
     def test_set_password_then_unbind(self, client):
         user = self._gc_user()

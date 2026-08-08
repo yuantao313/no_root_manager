@@ -79,8 +79,14 @@ class TestProfileGate:
         client.force_login(user)
         resp = client.post(
             reverse("applications:create"),
-            {"username": "m1", "employee_id": "E1", "apply_type": "account",
-             "target_server": "", "title": "t", "applied_groups": []},
+            {
+                "username": "m1",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": "",
+                "title": "t",
+                "applied_groups": [],
+            },
         )
         # 未设姓名被拦截，跳个人中心
         assert resp.status_code == 302
@@ -95,8 +101,14 @@ class TestProfileGate:
         assert user.first_name == "张三"
         resp = client.post(
             reverse("applications:create"),
-            {"username": "m1", "employee_id": "E1", "apply_type": "account",
-             "target_server": "", "title": "t", "applied_groups": []},
+            {
+                "username": "m1",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": "",
+                "title": "t",
+                "applied_groups": [],
+            },
         )
         # 设置姓名后可提交
         assert resp.status_code == 302
@@ -107,8 +119,14 @@ class TestProfileGate:
         client.force_login(user)
         resp = client.post(
             reverse("applications:create"),
-            {"username": "m1", "employee_id": "E1", "apply_type": "account",
-             "target_server": "", "title": "t", "applied_groups": []},
+            {
+                "username": "m1",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": "",
+                "title": "t",
+                "applied_groups": [],
+            },
         )
         # 非 GitCode 用户不受门禁限制
         assert resp.status_code == 302

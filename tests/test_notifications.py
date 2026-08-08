@@ -21,8 +21,11 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def application():
     return Application.objects.create(
-        applicant_name="张三", username="zs", email="zs@example.com",
-        employee_id="E1", title="通知测试",
+        applicant_name="张三",
+        username="zs",
+        email="zs@example.com",
+        employee_id="E1",
+        title="通知测试",
     )
 
 
@@ -36,8 +39,13 @@ class TestSendEmail:
 
     def test_enabled_sends_via_configured_backend(self, application):
         EmailConfig.objects.create(
-            host="smtp.example.com", port=587, username="nrm", password="pw",
-            from_email="nrm@x.com", use_tls=True, enabled=True,
+            host="smtp.example.com",
+            port=587,
+            username="nrm",
+            password="pw",
+            from_email="nrm@x.com",
+            use_tls=True,
+            enabled=True,
         )
         with patch("notifications.services.EmailBackend") as mock_backend:
             mock_backend.return_value = object()

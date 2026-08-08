@@ -12,8 +12,9 @@ from .models import EmailConfig, WebhookConfig
 logger = logging.getLogger(__name__)
 
 
-def send_email_with_config(host, port, username, password, from_email, use_tls,
-                           subject: str, body: str, to_list: list[str]) -> bool:
+def send_email_with_config(
+    host, port, username, password, from_email, use_tls, subject: str, body: str, to_list: list[str]
+) -> bool:
     """使用指定 SMTP 配置发送邮件（不依赖数据库 EmailConfig）。
 
     用于 SMTP 配置在写入数据库前验证可用性（发验证码邮件）。
@@ -50,8 +51,15 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
         logger.info("邮件未发送（未启用/未配置）：%s -> %s", subject, to_list)
         return False
     return send_email_with_config(
-        cfg.host, cfg.port, cfg.username, cfg.password,
-        cfg.from_email, cfg.use_tls, subject, body, to_list,
+        cfg.host,
+        cfg.port,
+        cfg.username,
+        cfg.password,
+        cfg.from_email,
+        cfg.use_tls,
+        subject,
+        body,
+        to_list,
     )
 
 
@@ -60,11 +68,7 @@ def admin_emails() -> list[str]:
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
-    return list(
-        User.objects.filter(is_staff=True)
-        .exclude(email="")
-        .values_list("email", flat=True)
-    )
+    return list(User.objects.filter(is_staff=True).exclude(email="").values_list("email", flat=True))
 
 
 def notify_new_application(application) -> bool:

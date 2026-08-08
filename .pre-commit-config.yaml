@@ -1,0 +1,27 @@
+# pre-commit 配置：静态检查固化到 git hook，提交前自动运行
+# 安装：pre-commit install（或 uv run pre-commit install）
+# 手动运行：uv run pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.2
+    hooks:
+      - id: ruff
+        name: ruff check (静态检查)
+        args: [--fix]
+      - id: ruff-format
+        name: ruff format (代码格式化)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: 去除行尾空白
+        exclude: ^static/vendor/
+      - id: end-of-file-fixer
+        name: 文件末尾换行
+        exclude: ^static/vendor/
+      - id: check-yaml
+        name: YAML 语法检查
+      - id: check-added-large-files
+        name: 大文件检查（默认 500KB）

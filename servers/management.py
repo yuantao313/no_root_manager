@@ -14,8 +14,17 @@ NRM_GROUP = "nrm_managed"
 
 # 需要 root 权限的管理命令（SSH 用户非 root 时自动加 sudo -n 前缀）
 PRIVILEGED_CMDS = (
-    "groupadd", "usermod", "useradd", "chpasswd", "gpasswd", "chage",
-    "mv", "chown", "rm", "rmdir", "userdel",
+    "groupadd",
+    "usermod",
+    "useradd",
+    "chpasswd",
+    "gpasswd",
+    "chage",
+    "mv",
+    "chown",
+    "rm",
+    "rmdir",
+    "userdel",
 )
 
 
@@ -153,8 +162,16 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
             return False, "", f"设置强制改密失败：{err}"
 
     # 写入资源限制（ulimit），防止单个用户耗尽服务器资源
-    if any([server.nproc_limit, server.nofile_limit, server.as_limit,
-            server.core_limit, server.fsize_limit, server.maxlogins_limit]):
+    if any(
+        [
+            server.nproc_limit,
+            server.nofile_limit,
+            server.as_limit,
+            server.core_limit,
+            server.fsize_limit,
+            server.maxlogins_limit,
+        ]
+    ):
         ok, err = apply_resource_limits(server, username)
         if not ok:
             return False, "", f"设置资源限制失败：{err}"

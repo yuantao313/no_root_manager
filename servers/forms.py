@@ -8,7 +8,12 @@ from .models import Server
 class ServerForm(forms.ModelForm):
     # 高级设置字段：模板中放入折叠面板，默认收起
     advanced_fields = (
-        "nproc_limit", "nofile_limit", "as_limit", "core_limit", "fsize_limit", "maxlogins_limit",
+        "nproc_limit",
+        "nofile_limit",
+        "as_limit",
+        "core_limit",
+        "fsize_limit",
+        "maxlogins_limit",
     )
 
     credential = forms.ModelChoiceField(
@@ -22,8 +27,18 @@ class ServerForm(forms.ModelForm):
     class Meta:
         model = Server
         fields = [
-            "name", "host", "port", "credential", "default_group", "extra_groups",
-            "nproc_limit", "nofile_limit", "as_limit", "core_limit", "fsize_limit", "maxlogins_limit",
+            "name",
+            "host",
+            "port",
+            "credential",
+            "default_group",
+            "extra_groups",
+            "nproc_limit",
+            "nofile_limit",
+            "as_limit",
+            "core_limit",
+            "fsize_limit",
+            "maxlogins_limit",
         ]
         widgets = {
             "port": forms.NumberInput(attrs={"min": 1, "max": 65535}),

@@ -55,7 +55,9 @@ def _provision_on_approve(application, request):
         # 申请了目录迁移：将用户已有目录迁移到 /home/username
         if application.migrate_from_dir:
             mok, mmsg = migrate_home_dir(server, application.migrate_from_dir, application.username)
-            application.provision_note = (application.provision_note + "\n" + mmsg) if application.provision_note else mmsg
+            application.provision_note = (
+                (application.provision_note + "\n" + mmsg) if application.provision_note else mmsg
+            )
             application.save(update_fields=["provision_note"])
             if mok:
                 messages.success(request, f"目录迁移成功：{mmsg}")
@@ -99,9 +101,7 @@ def application_list(request):
     if request.user.is_superuser:
         applications = Application.objects.all()
     else:
-        applications = Application.objects.filter(
-            target_server__in=Server.visible_to(request.user)
-        )
+        applications = Application.objects.filter(target_server__in=Server.visible_to(request.user))
     return render(request, "applications/list.html", {"applications": applications})
 
 

@@ -19,6 +19,7 @@ dependencies = [
 dev = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.7",
+    "pre-commit",
     "pytest>=9.1.1",
     "pytest-django>=4.13.0",
     "ruff>=0.16.2",

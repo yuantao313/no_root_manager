@@ -49,21 +49,24 @@ class TestProfileEdit:
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         # 无验证码 -> 拒绝
-        client.post(reverse("accounts:profile"),
-                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": ""})
+        client.post(
+            reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": ""}
+        )
         user.refresh_from_db()
         assert user.email == "old@x.com"
         # 错误验证码 -> 拒绝
-        client.post(reverse("accounts:profile"),
-                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": "000000"})
+        client.post(
+            reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": "000000"}
+        )
         user.refresh_from_db()
         assert user.email == "old@x.com"
         # 正确验证码 -> 通过
         with patch("accounts.email_verify.send_email", return_value=True):
             send_user_email_code("new@x.com", user)
         rec = EmailVerification.objects.get(email="new@x.com", purpose="user_email", user=user)
-        client.post(reverse("accounts:profile"),
-                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": rec.code})
+        client.post(
+            reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": rec.code}
+        )
         user.refresh_from_db()
         assert user.email == "new@x.com"
         assert user.first_name == "张三"
@@ -74,8 +77,7 @@ class TestProfileEdit:
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         with patch("accounts.views.send_user_email_code", return_value=True) as mock:
-            resp = client.post(reverse("accounts:profile"),
-                               {"send_email_code": "1", "email": "new@x.com"})
+            resp = client.post(reverse("accounts:profile"), {"send_email_code": "1", "email": "new@x.com"})
         assert resp.status_code == 302
         assert mock.call_count == 1
         assert mock.call_args.args[0] == "new@x.com"

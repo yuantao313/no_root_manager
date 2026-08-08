@@ -30,9 +30,9 @@ def send_user_email_code(email, user) -> bool:
     返回是否发送成功；发送前会使同邮箱+同用途的旧验证码全部作废。
     """
     code = generate_code()
-    EmailVerification.objects.filter(
-        email=email, purpose=EmailVerification.PURPOSE_USER_EMAIL, user=user
-    ).update(used=True)
+    EmailVerification.objects.filter(email=email, purpose=EmailVerification.PURPOSE_USER_EMAIL, user=user).update(
+        used=True
+    )
     EmailVerification.objects.create(
         email=email,
         code=code,
@@ -66,8 +66,7 @@ def send_smtp_code(email, send_fn) -> bool:
     )
     return send_fn(
         "NRM SMTP 配置验证",
-        f"您的验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效）。"
-        "收到本邮件说明当前 SMTP 配置可以正常发信。",
+        f"您的验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效）。收到本邮件说明当前 SMTP 配置可以正常发信。",
         [email],
     )
 
@@ -79,9 +78,7 @@ def verify_code(email, code, purpose, user=None) -> tuple[bool, str]:
     返回 (是否通过, 错误信息)。
     """
     code = (code or "").strip()
-    records = EmailVerification.objects.filter(
-        email=email, purpose=purpose, user=user
-    ).order_by("-created_at")
+    records = EmailVerification.objects.filter(email=email, purpose=purpose, user=user).order_by("-created_at")
     if not records.exists():
         return False, "请先获取验证码。"
     rec = records.first()

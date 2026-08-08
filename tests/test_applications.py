@@ -103,10 +103,8 @@ class TestPermission:
         assert client.get(reverse("applications:list")).status_code == 200
 
     def test_my_applications_only_own(self, client, normal, staff):
-        Application.objects.create(applicant=normal, applicant_name="甲", username="a",
-                                   email="a@x.com", title="我的")
-        Application.objects.create(applicant=staff, applicant_name="乙", username="b",
-                                   email="b@x.com", title="别人的")
+        Application.objects.create(applicant=normal, applicant_name="甲", username="a", email="a@x.com", title="我的")
+        Application.objects.create(applicant=staff, applicant_name="乙", username="b", email="b@x.com", title="别人的")
         client.force_login(normal)
         resp = client.get(reverse("applications:my"))
         html = resp.content.decode()
@@ -117,14 +115,16 @@ class TestPermission:
 class TestReviewProvision:
     def test_approve_provisions(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="张三", username="zhangsan", email="zs@x.com",
-            employee_id="E1", title="开通", target_server=server,
+            applicant_name="张三",
+            username="zhangsan",
+            email="zs@x.com",
+            employee_id="E1",
+            title="开通",
+            target_server=server,
         )
         client.force_login(staff)
         with patch("applications.views.provision_user", return_value=(True, "Pass123", "用户已开通")):
-            resp = client.post(
-                reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"}
-            )
+            resp = client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         assert resp.status_code == 302
         app.refresh_from_db()
         assert app.status == Application.Status.APPROVED
@@ -132,8 +132,12 @@ class TestReviewProvision:
 
     def test_reject_does_not_provision(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="李四", username="lisi", email="ls@x.com",
-            employee_id="E2", title="驳回", target_server=server,
+            applicant_name="李四",
+            username="lisi",
+            email="ls@x.com",
+            employee_id="E2",
+            title="驳回",
+            target_server=server,
         )
         client.force_login(staff)
         with patch("applications.views.provision_user") as mock:
@@ -144,8 +148,13 @@ class TestReviewProvision:
 
     def test_cannot_review_twice(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="王五", username="wang", email="w@x.com",
-            employee_id="E3", title="重复", target_server=server, status=Application.Status.APPROVED,
+            applicant_name="王五",
+            username="wang",
+            email="w@x.com",
+            employee_id="E3",
+            title="重复",
+            target_server=server,
+            status=Application.Status.APPROVED,
         )
         client.force_login(staff)
         resp = client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "x"})
@@ -155,12 +164,19 @@ class TestReviewProvision:
 
     def test_sudo_grant_records_audit(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="赵六", username="zhao", email="z@x.com",
-            employee_id="E4", title="sudo", target_server=server, needs_sudo=True,
+            applicant_name="赵六",
+            username="zhao",
+            email="z@x.com",
+            employee_id="E4",
+            title="sudo",
+            target_server=server,
+            needs_sudo=True,
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")), \
-             patch("applications.views.grant_sudo", return_value=(True, "sudo", "已加入 sudo 组")):
+        with (
+            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")),
+            patch("applications.views.grant_sudo", return_value=(True, "sudo", "已加入 sudo 组")),
+        ):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         grant = SudoGrant.objects.filter(application=app).first()
         assert grant is not None
@@ -173,24 +189,38 @@ class TestReviewProvision:
 
     def test_sudo_grant_failure_marked_expired(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="钱七", username="qian", email="q@x.com",
-            employee_id="E5", title="sudo失败", target_server=server, needs_sudo=True,
+            applicant_name="钱七",
+            username="qian",
+            email="q@x.com",
+            employee_id="E5",
+            title="sudo失败",
+            target_server=server,
+            needs_sudo=True,
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")), \
-             patch("applications.views.grant_sudo", return_value=(False, "", "无 sudo 组")):
+        with (
+            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")),
+            patch("applications.views.grant_sudo", return_value=(False, "", "无 sudo 组")),
+        ):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         grant = SudoGrant.objects.filter(application=app).first()
         assert grant.status == SudoGrant.Status.EXPIRED
 
     def test_migrate_dir_passed_without_home(self, client, staff, server):
         app = Application.objects.create(
-            applicant_name="孙八", username="sun", email="s@x.com",
-            employee_id="E6", title="迁移", target_server=server, migrate_from_dir="/home/old/sun",
+            applicant_name="孙八",
+            username="sun",
+            email="s@x.com",
+            employee_id="E6",
+            title="迁移",
+            target_server=server,
+            migrate_from_dir="/home/old/sun",
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")) as mock, \
-             patch("applications.views.migrate_home_dir", return_value=(True, "已迁移")):
+        with (
+            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")) as mock,
+            patch("applications.views.migrate_home_dir", return_value=(True, "已迁移")),
+        ):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         # 申请了迁移时不预建 home
         assert mock.call_args.kwargs["with_home"] is False
@@ -227,9 +257,13 @@ class TestStringGroups:
 
         form = ApplicationForm(
             {
-                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
-                "employee_id": "E1", "apply_type": "account",
-                "target_server": str(group_server.pk), "title": "t",
+                "applicant_name": "张三",
+                "username": "zs",
+                "email": "z@x.com",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": str(group_server.pk),
+                "title": "t",
                 "applied_groups": ["qa"],
             }
         )
@@ -242,9 +276,13 @@ class TestStringGroups:
 
         form = ApplicationForm(
             {
-                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
-                "employee_id": "E1", "apply_type": "account",
-                "target_server": str(group_server.pk), "title": "t",
+                "applicant_name": "张三",
+                "username": "zs",
+                "email": "z@x.com",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": str(group_server.pk),
+                "title": "t",
                 "applied_groups": ["hacker"],
             }
         )
@@ -256,9 +294,13 @@ class TestStringGroups:
 
         form = ApplicationForm(
             {
-                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
-                "employee_id": "E1", "apply_type": "account",
-                "target_server": "", "title": "t",
+                "applicant_name": "张三",
+                "username": "zs",
+                "email": "z@x.com",
+                "employee_id": "E1",
+                "apply_type": "account",
+                "target_server": "",
+                "title": "t",
                 "applied_groups": ["qa"],
             }
         )
@@ -267,8 +309,12 @@ class TestStringGroups:
 
     def test_provision_uses_default_plus_applied(self, client, staff, group_server):
         app = Application.objects.create(
-            applicant_name="张三", username="zs", email="z@x.com",
-            employee_id="E1", title="分组", target_server=group_server,
+            applicant_name="张三",
+            username="zs",
+            email="z@x.com",
+            employee_id="E1",
+            title="分组",
+            target_server=group_server,
             applied_groups="qa",
         )
         client.force_login(staff)

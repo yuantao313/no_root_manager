@@ -34,3 +34,6 @@ jobs:
 
       - name: Lint with ruff
         run: uv run ruff check .
+
+      - name: Pre-commit hooks
+        run: uv run pre-commit run --all-files

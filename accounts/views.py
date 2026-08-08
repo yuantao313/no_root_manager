@@ -28,8 +28,9 @@ class ProfileForm(forms.Form):
 
     name = forms.CharField(label="姓名", max_length=100, required=False)
     email = forms.EmailField(label="邮箱", required=False)
-    code = forms.CharField(label="邮箱验证码", max_length=6, required=False,
-                           help_text="修改邮箱时需先点击“发送验证码”并填写")
+    code = forms.CharField(
+        label="邮箱验证码", max_length=6, required=False, help_text="修改邮箱时需先点击“发送验证码”并填写"
+    )
 
     def __init__(self, *args, **kwargs):
         instance = kwargs.pop("instance", None)
@@ -51,8 +52,9 @@ class ProfileForm(forms.Form):
 class NRMPasswordResetForm(BasePasswordResetForm):
     """密码找回表单：通过系统 SMTP 配置（EmailConfig）发送重置邮件。"""
 
-    def send_mail(self, subject_template_name, email_template_name, context,
-                  from_email, to_email, html_email_template_name=None):
+    def send_mail(
+        self, subject_template_name, email_template_name, context, from_email, to_email, html_email_template_name=None
+    ):
         subject = render_to_string(subject_template_name, context).strip()
         body = render_to_string(email_template_name, context)
         send_email(subject, body, [to_email])
@@ -134,8 +136,10 @@ def profile(request):
                 if new_email != request.user.email:
                     # 邮箱变更：必须通过验证码校验
                     ok, err = verify_code(
-                        new_email, form.cleaned_data["code"],
-                        EmailVerification.PURPOSE_USER_EMAIL, user=request.user,
+                        new_email,
+                        form.cleaned_data["code"],
+                        EmailVerification.PURPOSE_USER_EMAIL,
+                        user=request.user,
                     )
                     if not ok:
                         messages.error(request, f"邮箱验证失败：{err}")
@@ -201,6 +205,7 @@ def settings(request):
                     app.secret = new_secret
                 app.save()
                 from django.contrib.sites.models import Site
+
                 app.sites.add(Site.objects.get_current())
             messages.success(request, "GitCode 配置已保存。")
         elif "save_email" in request.POST:
@@ -223,18 +228,31 @@ def settings(request):
             else:
                 # 暂存待验证配置到 session（密码仅存于会话，验证通过后入库）
                 request.session["pending_smtp"] = {
-                    "host": host, "port": port, "username": username,
-                    "password": new_pw, "from_email": from_email,
-                    "use_tls": use_tls, "enabled": enabled,
+                    "host": host,
+                    "port": port,
+                    "username": username,
+                    "password": new_pw,
+                    "from_email": from_email,
+                    "use_tls": use_tls,
+                    "enabled": enabled,
                     "verify_email": target,
                 }
                 request.session["smtp_verified"] = False  # 重新发码使已验证失效
+
                 # 用"待验证配置"发验证码邮件（写库前即可确认 SMTP 可用）
                 def _send_with_pending(subject, body, to_list):
                     return send_email_with_config(
-                        host, port, username, new_pw, from_email, use_tls,
-                        subject, body, to_list,
+                        host,
+                        port,
+                        username,
+                        new_pw,
+                        from_email,
+                        use_tls,
+                        subject,
+                        body,
+                        to_list,
                     )
+
                 ok = send_smtp_code(target, _send_with_pending)
                 if ok:
                     # 存时间戳（秒），session JSON 序列化不支持 datetime
@@ -251,8 +269,9 @@ def settings(request):
                 messages.error(request, "请先发送验证码。")
                 return redirect("accounts:settings")
             target = pending.get("verify_email", "")
-            ok, err = verify_code(target, request.POST.get("code", ""),
-                                  EmailVerification.PURPOSE_SMTP_CONFIG, user=None)
+            ok, err = verify_code(
+                target, request.POST.get("code", ""), EmailVerification.PURPOSE_SMTP_CONFIG, user=None
+            )
             if ok:
                 request.session["smtp_verified"] = True
                 messages.success(request, "验证通过，配置已解锁，请点击“保存配置”。")
@@ -300,7 +319,8 @@ def settings(request):
             url = request.POST.get("url", "").strip()
             if name and url:
                 WebhookConfig.objects.create(
-                    name=name, url=url,
+                    name=name,
+                    url=url,
                     secret=request.POST.get("secret", "").strip(),
                     enabled="enabled" in request.POST,
                     owner=None,
@@ -326,16 +346,20 @@ def settings(request):
                 messages.success(request, "绑定关系已解除。")
         return redirect("accounts:settings")
 
-    return render(request, "accounts/settings.html", {
-        "syscfg": syscfg,
-        "email_cfg": email_cfg,
-        "hooks": hooks,
-        "bindings": bindings,
-        "staff_users": staff_users,
-        "servers": servers,
-        "cooldown_remaining": cooldown_remaining,
-        "smtp_verified": smtp_verified,
-    })
+    return render(
+        request,
+        "accounts/settings.html",
+        {
+            "syscfg": syscfg,
+            "email_cfg": email_cfg,
+            "hooks": hooks,
+            "bindings": bindings,
+            "staff_users": staff_users,
+            "servers": servers,
+            "cooldown_remaining": cooldown_remaining,
+            "smtp_verified": smtp_verified,
+        },
+    )
 
 
 @login_required
