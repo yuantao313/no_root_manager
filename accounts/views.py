@@ -3,7 +3,6 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
-from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
@@ -13,20 +12,27 @@ from notifications.models import WebhookConfig
 from .username_gen import generate_username_groups
 
 
-class ProfileForm(forms.ModelForm):
-    """个人资料编辑：允许修改姓名与邮箱（用户名不可改）。"""
+class ProfileForm(forms.Form):
+    """个人资料编辑：姓名（一体化，映射 first_name）+ 邮箱。"""
 
-    class Meta:
-        model = User
-        fields = ["first_name", "last_name", "email"]
-        labels = {
-            "first_name": "名",
-            "last_name": "姓",
-            "email": "邮箱",
-        }
-        widgets = {
-            "email": forms.EmailInput(attrs={"placeholder": "用于接收开通密码与审批结果"}),
-        }
+    name = forms.CharField(label="姓名", max_length=100, required=False)
+    email = forms.EmailField(label="邮箱", required=False)
+
+    def __init__(self, *args, **kwargs):
+        instance = kwargs.pop("instance", None)
+        super().__init__(*args, **kwargs)
+        self.instance = instance
+        if instance:
+            self.fields["name"].initial = instance.first_name
+            self.fields["email"].initial = instance.email
+
+    def save(self, commit=True):
+        user = self.instance
+        user.first_name = self.cleaned_data["name"].strip()
+        user.email = self.cleaned_data["email"].strip()
+        if commit:
+            user.save()
+        return user
 
 
 def username_suggestions(request):
@@ -52,8 +58,9 @@ def register(request):
 
 @login_required
 def profile(request):
-    """个人中心：资料直接编辑 + 内嵌我的 Webhook 管理（仅管理员）。"""
+    """个人中心：资料正文展示 + 右侧编辑链接；内嵌我的 Webhook 管理（仅管理员）。"""
     hooks = WebhookConfig.objects.filter(owner=request.user)
+    editing = request.GET.get("edit") == "1"
     form = ProfileForm(instance=request.user)
     webhook_form = WebhookForm()
 
@@ -82,5 +89,6 @@ def profile(request):
             "form": form,
             "webhook_form": webhook_form,
             "hooks": hooks,
+            "editing": editing,
         },
     )

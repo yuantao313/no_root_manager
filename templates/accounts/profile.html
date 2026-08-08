@@ -5,9 +5,26 @@
 <div class="row">
     <div class="col-md-6">
         <div class="panel panel-default">
-            <div class="panel-heading"><h3 class="panel-title">个人资料</h3></div>
+            <div class="panel-heading">
+                <h3 class="panel-title">个人资料</h3>
+                {% if not editing %}
+                <span class="pull-right"><a href="{% url 'accounts:profile' %}?edit=1">编辑</a></span>
+                {% endif %}
+            </div>
             <div class="panel-body">
+                {% if editing %}
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form|crispy }}
+                    <button type="submit" name="save_profile" class="btn btn-primary">保存</button>
+                    <a href="{% url 'accounts:profile' %}" class="btn btn-default">取消</a>
+                </form>
+                {% else %}
                 <dl>
+                    <dt>姓名</dt>
+                    <dd>{{ user.first_name|default:"—" }}</dd>
+                    <dt>邮箱</dt>
+                    <dd>{{ user.email|default:"—" }}</dd>
                     <dt>用户名</dt>
                     <dd>{{ user.username }}</dd>
                     <dt>角色</dt>
@@ -15,11 +32,7 @@
                     <dt>注册时间</dt>
                     <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
                 </dl>
-                <form method="post">
-                    {% csrf_token %}
-                    {{ form|crispy }}
-                    <button type="submit" name="save_profile" class="btn btn-primary">保存个人资料</button>
-                </form>
+                {% endif %}
             </div>
         </div>
     </div>

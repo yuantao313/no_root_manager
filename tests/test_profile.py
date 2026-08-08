@@ -12,38 +12,47 @@ User = get_user_model()
 
 
 class TestProfileEdit:
-    def test_profile_shows_editable_form(self, client):
+    def test_default_shows_readonly_and_edit_link(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
-        # 直接可编辑：显示表单字段与保存按钮
+        # 正文样式展示（dl），右侧"编辑"链接，无资料输入框
+        assert "?edit=1" in html
+        assert "name=\"save_profile\"" not in html
+
+    def test_edit_mode_shows_inputs(self, client):
+        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
+        client.force_login(user)
+        resp = client.get(reverse("accounts:profile") + "?edit=1")
+        html = resp.content.decode()
+        assert resp.status_code == 200
+        assert 'id="id_name"' in html  # 姓名输入框（一体化）
         assert 'id="id_email"' in html
         assert "save_profile" in html
 
-    def test_update_email_and_name(self, client):
+    def test_update_name_and_email(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.post(
             reverse("accounts:profile"),
-            {"save_profile": "1", "first_name": "张", "last_name": "三", "email": "new@x.com"},
+            {"save_profile": "1", "name": "张三", "email": "new@x.com"},
         )
         assert resp.status_code == 302
         user.refresh_from_db()
         assert user.email == "new@x.com"
-        assert user.first_name == "张"
-        assert user.last_name == "三"
+        # 姓名一体化：写入 first_name
+        assert user.first_name == "张三"
+        assert user.last_name == ""
 
-    def test_clear_email_allowed(self, client):
+    def test_clear_all_allowed(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
-        client.post(
-            reverse("accounts:profile"),
-            {"save_profile": "1", "first_name": "", "last_name": "", "email": ""},
-        )
+        client.post(reverse("accounts:profile"), {"save_profile": "1", "name": "", "email": ""})
         user.refresh_from_db()
         assert user.email == ""
+        assert user.first_name == ""
 
 
 class TestMyWebhooks:
