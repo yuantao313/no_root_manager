@@ -1,4 +1,4 @@
-"""个人中心测试：资料编辑、个人 Webhook 管理（仅本人）。"""
+"""个人中心测试：资料直接编辑、内嵌 Webhook 管理（仅本人）。"""
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -12,31 +12,22 @@ User = get_user_model()
 
 
 class TestProfileEdit:
-    def test_default_readonly_shows_edit_button(self, client):
+    def test_profile_shows_editable_form(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
-        # 默认只读：显示信息与编辑按钮，不显示表单
-        assert "编辑个人信息" in html
-        assert 'id="id_email"' not in html
-
-    def test_edit_mode_shows_form(self, client):
-        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
-        client.force_login(user)
-        resp = client.get(reverse("accounts:profile") + "?edit=1")
-        html = resp.content.decode()
-        assert resp.status_code == 200
+        # 直接可编辑：显示表单字段与保存按钮
         assert 'id="id_email"' in html
-        assert "保存" in html and "取消" in html
+        assert "save_profile" in html
 
     def test_update_email_and_name(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.post(
             reverse("accounts:profile"),
-            {"first_name": "张", "last_name": "三", "email": "new@x.com"},
+            {"save_profile": "1", "first_name": "张", "last_name": "三", "email": "new@x.com"},
         )
         assert resp.status_code == 302
         user.refresh_from_db()
@@ -47,12 +38,17 @@ class TestProfileEdit:
     def test_clear_email_allowed(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
-        client.post(reverse("accounts:profile"), {"first_name": "", "last_name": "", "email": ""})
+        client.post(
+            reverse("accounts:profile"),
+            {"save_profile": "1", "first_name": "", "last_name": "", "email": ""},
+        )
         user.refresh_from_db()
         assert user.email == ""
 
 
 class TestMyWebhooks:
+    """Webhook 管理内嵌于个人中心页。"""
+
     @pytest.fixture
     def staff(self):
         return User.objects.create_user(username="admin", password="x12345!", is_staff=True, is_superuser=True)
@@ -65,21 +61,28 @@ class TestMyWebhooks:
         WebhookConfig.objects.create(name="mine", url="http://example.com/mine", owner=staff)
         WebhookConfig.objects.create(name="theirs", url="http://example.com/theirs", owner=other)
         client.force_login(staff)
-        resp = client.get(reverse("notifications:my"))
+        resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
+        assert "我的 Webhook" in html
         assert "mine" in html
         assert "theirs" not in html
 
     def test_create_sets_owner(self, client, staff):
         client.force_login(staff)
         resp = client.post(
-            reverse("notifications:my"),
-            {"name": "hook1", "url": "http://example.com/hook", "enabled": "on"},
+            reverse("accounts:profile"),
+            {"add_webhook": "1", "name": "hook1", "url": "http://example.com/hook", "enabled": "on"},
         )
         assert resp.status_code == 302
         hook = WebhookConfig.objects.get(name="hook1")
         assert hook.owner == staff
+
+    def test_normal_user_has_no_webhook_section(self, client):
+        user = User.objects.create_user(username="normal", password="x12345!")
+        client.force_login(user)
+        html = client.get(reverse("accounts:profile")).content.decode()
+        assert "我的 Webhook" not in html
 
     def test_delete_own(self, client, staff):
         hook = WebhookConfig.objects.create(name="hook1", url="http://example.com/hook", owner=staff)

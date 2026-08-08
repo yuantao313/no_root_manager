@@ -1,28 +1,13 @@
-"""个人 Webhook 管理：每个管理员可配置自己的通知 Webhook（仅本人可见可管）。"""
+"""Webhook 删除接口：个人中心内嵌的 Webhook 列表使用。
+
+新增/列表内嵌在个人中心页（accounts:profile），此处仅提供删除动作。
+"""
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect
 
-from .forms import WebhookForm
 from .models import WebhookConfig
-
-
-@login_required
-def my_webhooks(request):
-    """我的 Webhook：列出并新增（仅本人）。"""
-    hooks = WebhookConfig.objects.filter(owner=request.user)
-    if request.method == "POST":
-        form = WebhookForm(request.POST)
-        if form.is_valid():
-            hook = form.save(commit=False)
-            hook.owner = request.user
-            hook.save()
-            messages.success(request, f"Webhook「{hook.name}」已添加。")
-            return redirect("notifications:my")
-    else:
-        form = WebhookForm()
-    return render(request, "notifications/webhooks.html", {"hooks": hooks, "form": form})
 
 
 @login_required
@@ -31,4 +16,4 @@ def webhook_delete(request, pk):
     hook = get_object_or_404(WebhookConfig, pk=pk, owner=request.user)
     hook.delete()
     messages.success(request, f"Webhook「{hook.name}」已删除。")
-    return redirect("notifications:my")
+    return redirect("accounts:profile")

@@ -2,41 +2,66 @@
 {% load crispy_forms_tags %}
 {% block title %}个人中心 - NRM{% endblock %}
 {% block content %}
-<div class="panel panel-default" style="max-width:640px;">
-    <div class="panel-heading">
-        <h3 class="panel-title">个人中心</h3>
+<div class="row">
+    <div class="col-md-6">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">个人资料</h3></div>
+            <div class="panel-body">
+                <dl>
+                    <dt>用户名</dt>
+                    <dd>{{ user.username }}</dd>
+                    <dt>角色</dt>
+                    <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
+                    <dt>注册时间</dt>
+                    <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
+                </dl>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form|crispy }}
+                    <button type="submit" name="save_profile" class="btn btn-primary">保存个人资料</button>
+                </form>
+            </div>
+        </div>
     </div>
-    <div class="panel-body">
-        <dl>
-            <dt>用户名</dt>
-            <dd>{{ user.username }}</dd>
-            <dt>姓名</dt>
-            <dd>{{ user.first_name }}{{ user.last_name|default:"" }}</dd>
-            <dt>邮箱</dt>
-            <dd>{{ user.email|default:"—" }}</dd>
-            <dt>角色</dt>
-            <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
-            <dt>注册时间</dt>
-            <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
-        </dl>
 
-        {% if editing %}
-        <hr>
-        <form method="post">
-            {% csrf_token %}
-            {{ form|crispy }}
-            <button type="submit" class="btn btn-primary">保存</button>
-            <a href="{% url 'accounts:profile' %}" class="btn btn-default">取消</a>
-        </form>
-        {% else %}
-        <hr>
-        <p>
-            <a href="{% url 'accounts:profile' %}?edit=1" class="btn btn-primary">编辑个人信息</a>
-            {% if user.is_staff %}
-            <a href="{% url 'notifications:my' %}" class="btn btn-default">管理我的 Webhook</a>
+    {% if user.is_staff %}
+    <div class="col-md-6">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">我的 Webhook</h3></div>
+            {% if hooks %}
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>名称</th><th>URL</th><th>状态</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    {% for hook in hooks %}
+                    <tr>
+                        <td>{{ hook.name }}</td>
+                        <td style="word-break:break-all;">{{ hook.url }}</td>
+                        <td>{% if hook.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
+                        <td>
+                            <form method="post" action="{% url 'notifications:delete' hook.pk %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-danger btn-xs">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="panel-body"><p class="text-muted">暂无个人 Webhook。</p></div>
             {% endif %}
-        </p>
-        {% endif %}
+            <div class="panel-body" style="border-top:1px solid #ddd;">
+                <p class="text-muted" style="font-size:13px;">申请创建/审批事件会推送 JSON 到该地址，仅本人可见可管。</p>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ webhook_form|crispy }}
+                    <button type="submit" name="add_webhook" class="btn btn-primary">添加 Webhook</button>
+                </form>
+            </div>
+        </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}

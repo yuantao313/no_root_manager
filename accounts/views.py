@@ -7,6 +7,9 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
+from notifications.forms import WebhookForm
+from notifications.models import WebhookConfig
+
 from .username_gen import generate_username_groups
 
 
@@ -49,20 +52,35 @@ def register(request):
 
 @login_required
 def profile(request):
-    """个人中心：默认只读展示，点击"编辑"按钮后进入编辑模式。"""
-    # POST：保存编辑结果
-    if request.method == "POST":
-        form = ProfileForm(request.POST, instance=request.user)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "个人信息已更新。")
-            return redirect("accounts:profile")
-    else:
-        form = ProfileForm(instance=request.user)
+    """个人中心：资料直接编辑 + 内嵌我的 Webhook 管理（仅管理员）。"""
+    hooks = WebhookConfig.objects.filter(owner=request.user)
+    form = ProfileForm(instance=request.user)
+    webhook_form = WebhookForm()
 
-    editing = request.GET.get("edit") == "1"
+    if request.method == "POST":
+        # 区分提交来源：保存个人资料 / 添加 Webhook
+        if "save_profile" in request.POST:
+            form = ProfileForm(request.POST, instance=request.user)
+            if form.is_valid():
+                form.save()
+                messages.success(request, "个人信息已更新。")
+                return redirect("accounts:profile")
+        elif "add_webhook" in request.POST and request.user.is_staff:
+            webhook_form = WebhookForm(request.POST)
+            if webhook_form.is_valid():
+                hook = webhook_form.save(commit=False)
+                hook.owner = request.user
+                hook.save()
+                messages.success(request, f"Webhook「{hook.name}」已添加。")
+                return redirect("accounts:profile")
+
     return render(
         request,
         "accounts/profile.html",
-        {"user": request.user, "form": form, "editing": editing},
+        {
+            "user": request.user,
+            "form": form,
+            "webhook_form": webhook_form,
+            "hooks": hooks,
+        },
     )
