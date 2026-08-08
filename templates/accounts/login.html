@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
+{% load socialaccount %}
 {% block title %}登录 - NRM{% endblock %}
 {% block content %}
 <style>
@@ -29,7 +30,11 @@
                     <button type="submit" class="btn btn-primary btn-block">登录</button>
                 </form>
                 <hr>
-                <a href="{% url 'accounts:gitcode_login' %}" class="btn btn-gitcode btn-block">使用 GitCode 登录</a>
+                {% if gitcode_enabled %}
+                <a href="{% provider_login_url 'gitcode' %}" class="btn btn-gitcode btn-block">使用 GitCode 登录</a>
+                {% else %}
+                <span class="btn btn-gitcode btn-block disabled">使用 GitCode 登录（未配置）</span>
+                {% endif %}
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">还没有账号？<a href="{% url 'accounts:register' %}">去注册</a> · <a href="{% url 'accounts:password_reset' %}">忘记密码？</a></p>
             </div>
         </div>

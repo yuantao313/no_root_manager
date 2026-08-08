@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from accounts.models import GitCodeBinding
+from allauth.socialaccount.models import SocialAccount
 from credentials.models import Credential
 from notifications.models import EmailConfig
 from servers.models import Server, ServerAdminBinding
@@ -58,7 +58,7 @@ class TestUnbindRequiresPassword:
         user = AuthUser.objects.create_user(username="gc1", password="x")
         user.set_unusable_password()
         user.save()
-        GitCodeBinding.objects.create(user=user, gitcode_id="abc123", gitcode_username="a")
+        SocialAccount.objects.create(user=user, provider="gitcode", uid="abc123")
         return user
 
     def test_unbind_blocked_without_local_password(self, client):
@@ -67,7 +67,7 @@ class TestUnbindRequiresPassword:
         resp = client.post(reverse("accounts:gitcode_unbind"))
         assert resp.status_code == 302
         # 绑定未被删除
-        assert GitCodeBinding.objects.filter(user=user).exists()
+        assert SocialAccount.objects.filter(user=user, provider="gitcode").exists()
 
     def test_profile_shows_set_password_entry(self, client):
         user = self._gc_user()
@@ -87,7 +87,7 @@ class TestUnbindRequiresPassword:
         assert user.has_usable_password()
         assert user.check_password("LocalPass123!")
         client.post(reverse("accounts:gitcode_unbind"))
-        assert not GitCodeBinding.objects.filter(user=user).exists()
+        assert not SocialAccount.objects.filter(user=user, provider="gitcode").exists()
 
 
 class TestLoginThrottle:

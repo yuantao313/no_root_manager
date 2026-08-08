@@ -1,5 +1,3 @@
-import secrets
-
 from django import forms
 from django.contrib import messages
 from django.contrib.auth import login, update_session_auth_hash
@@ -7,12 +5,13 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
 from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
-from django.contrib.auth.views import PasswordResetView
+from django.contrib.auth.views import LoginView, PasswordResetView
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse_lazy
 
+from allauth.socialaccount.models import SocialApp
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
@@ -20,13 +19,7 @@ from notifications.services import send_email, send_email_with_config
 from servers.models import Server, ServerAdminBinding
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
-from .gitcode import (
-    GitCodeOAuthError,
-    build_authorize_url,
-    exchange_token,
-    get_user,
-)
-from .models import EmailVerification, GitCodeBinding, SystemConfig
+from .models import EmailVerification, SystemConfig
 from .username_gen import generate_username_groups
 
 
@@ -95,6 +88,22 @@ def register(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
+def _gitcode_enabled():
+    """GitCode OAuth 是否已配置（存在 SocialApp 记录）。"""
+    return SocialApp.objects.filter(provider="gitcode").exists()
+
+
+class GitCodeLoginView(LoginView):
+    """登录页：传递 GitCode OAuth 是否已配置（控制入口显示，未配置不崩溃）。"""
+
+    template_name = "accounts/login.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["gitcode_enabled"] = _gitcode_enabled()
+        return context
+
+
 @login_required
 def profile(request):
     """个人中心：资料行内编辑 + 邮箱验证码确认 + 内嵌 Webhook（仅管理员）。"""
@@ -148,85 +157,12 @@ def profile(request):
         "accounts/profile.html",
         {
             "user": request.user,
+            "gitcode_enabled": _gitcode_enabled(),
             "form": form,
             "webhook_form": webhook_form,
             "hooks": hooks,
         },
     )
-
-
-def gitcode_login(request):
-    """GitCode OAuth 登录：跳转到授权页（state 防 CSRF）。"""
-    cfg = SystemConfig.gitcode_config()
-    if not cfg["client_id"]:
-        messages.error(request, "GitCode 登录未配置（请在系统设置中填写 GitCode Client ID）。")
-        return redirect("accounts:login")
-    state = secrets.token_urlsafe(16)
-    request.session["gitcode_oauth_state"] = state
-    redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
-    url = build_authorize_url(cfg["client_id"], redirect_uri, state, scope=cfg["scope"])
-    return redirect(url)
-
-
-@login_required
-def gitcode_bind(request):
-    """已注册用户绑定 GitCode：跳转授权页（与登录共用同一回调地址，
-    通过 session state 键区分绑定模式，避免 GitCode 需要注册多个回调）。"""
-    cfg = SystemConfig.gitcode_config()
-    if not cfg["client_id"]:
-        messages.error(request, "GitCode 登录未配置（请在系统设置中填写 GitCode Client ID）。")
-        return redirect("accounts:profile")
-    if hasattr(request.user, "gitcode_binding"):
-        messages.info(request, "您已绑定 GitCode 账号，无需重复绑定。")
-        return redirect("accounts:profile")
-    state = secrets.token_urlsafe(16)
-    request.session["gitcode_bind_state"] = state
-    redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
-    url = build_authorize_url(cfg["client_id"], redirect_uri, state, scope=cfg["scope"])
-    return redirect(url)
-
-
-def _gitcode_bind_done(request, code):
-    """绑定模式的收尾：校验 code、换 token、取用户信息并建立绑定。"""
-    if not request.user.is_authenticated:
-        messages.error(request, "绑定 GitCode 需要先登录。")
-        return redirect("accounts:login")
-    if not code:
-        messages.error(request, "GitCode 未返回授权码。")
-        return redirect("accounts:profile")
-
-    cfg = SystemConfig.gitcode_config()
-    try:
-        token_data = exchange_token(
-            cfg["client_id"],
-            cfg["client_secret"],
-            code,
-        )
-        access_token = token_data.get("access_token", "")
-        if not access_token:
-            raise GitCodeOAuthError("未获取到 access_token")
-        user_data = get_user(access_token)
-    except GitCodeOAuthError as e:
-        messages.error(request, f"GitCode 绑定失败：{e}")
-        return redirect("accounts:profile")
-
-    user_id = user_data.get("id")
-    if not user_id:
-        messages.error(request, "GitCode 未返回用户 id。")
-        return redirect("accounts:profile")
-
-    # 该 GitCode 账号已被其他用户绑定则拒绝
-    if GitCodeBinding.objects.filter(gitcode_id=user_id).exists():
-        messages.error(request, "该 GitCode 账号已绑定其他用户，无法重复绑定。")
-        return redirect("accounts:profile")
-
-    GitCodeBinding.objects.create(
-        user=request.user,
-        gitcode_id=user_id,
-        gitcode_username=(user_data.get("login") or "")[:100],
-    )
-    messages.success(request, "GitCode 账号绑定成功。")
-    return redirect("accounts:profile")
 
 
 @superuser_required
@@ -257,6 +193,16 @@ def settings(request):
                 syscfg.gitcode_client_secret = new_secret
             syscfg.gitcode_scope = request.POST.get("gitcode_scope", "all_user").strip() or "all_user"
             syscfg.save()
+            # 同步到 allauth SocialApp（OAuth 登录实际读取该配置）
+            if syscfg.gitcode_client_id:
+                app, _ = SocialApp.objects.get_or_create(provider="gitcode")
+                app.name = "GitCode"
+                app.client_id = syscfg.gitcode_client_id
+                if new_secret:
+                    app.secret = new_secret
+                app.save()
+                from django.contrib.sites.models import Site
+                app.sites.add(Site.objects.get_current())
             messages.success(request, "GitCode 配置已保存。")
         elif "save_email" in request.POST:
             # 第一步：发送验证码（60 秒冷却），用表单配置（未入库）发信
@@ -397,13 +343,13 @@ def settings(request):
 def gitcode_unbind(request):
     """解绑 GitCode：无密码用户（仅靠 GitCode 登录）须先设置本地密码，
     否则解绑后将无法登录系统。"""
-    binding = getattr(request.user, "gitcode_binding", None)
-    if binding is None:
+    account = request.user.socialaccount_set.filter(provider="gitcode").first()
+    if account is None:
         messages.info(request, "您尚未绑定 GitCode 账号。")
     elif not request.user.has_usable_password():
         messages.error(request, "请先设置本地密码，再解绑 GitCode（否则将无法登录）。")
     else:
-        binding.delete()
+        account.delete()
         messages.success(request, "GitCode 账号已解绑。")
     return redirect("accounts:profile")
 
@@ -422,80 +368,3 @@ def set_password(request):
     else:
         form = SetPasswordForm(request.user)
     return render(request, "accounts/set_password.html", {"form": form})
-
-
-def gitcode_callback(request):
-    """GitCode OAuth 回调（登录与绑定共用）。
-
-    通过 state 匹配 session 中不同的键来区分模式：
-    - gitcode_bind_state：绑定（当前用户已登录）
-    - gitcode_oauth_state：登录
-    """
-    state = request.GET.get("state", "")
-    code = request.GET.get("code", "")
-
-    # 先判定模式：绑定优先（其 state 只存于已登录会话）
-    if state and state == request.session.pop("gitcode_bind_state", ""):
-        return _gitcode_bind_done(request, code)
-    if state != request.session.pop("gitcode_oauth_state", ""):
-        messages.error(request, "GitCode 登录校验失败（state 不匹配），请重试。")
-        return redirect("accounts:login")
-
-    if not code:
-        messages.error(request, "GitCode 未返回授权码。")
-        return redirect("accounts:login")
-
-    try:
-        cfg = SystemConfig.gitcode_config()
-        token_data = exchange_token(
-            cfg["client_id"],
-            cfg["client_secret"],
-            code,
-        )
-        access_token = token_data.get("access_token", "")
-        if not access_token:
-            raise GitCodeOAuthError("未获取到 access_token")
-        user_data = get_user(access_token)
-    except GitCodeOAuthError as e:
-        messages.error(request, f"GitCode 登录失败：{e}")
-        return redirect("accounts:login")
-
-    # 用户 id 映射：优先用绑定表查找（已注册用户绑定的 GitCode 账号），
-    # 未绑定则创建 gc<id> 用户并记录绑定；不使用 login（可改，防映射失效）
-    user_id = user_data.get("id")
-    if not user_id:
-        messages.error(request, "GitCode 未返回用户 id。")
-        return redirect("accounts:login")
-
-    binding = GitCodeBinding.objects.filter(gitcode_id=user_id).first()
-    if binding:
-        # 已绑定：直接登录绑定用户（已注册用户绑定的账号，或历史 gc<id> 用户）
-        user = binding.user
-        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-        messages.success(request, f"欢迎回来，{user.first_name or user.username}。")
-        return redirect("applications:my")
-
-    # 未绑定：创建 gc<id> 用户并记录绑定映射
-    username = f"gc{user_id}"
-    user, created = User.objects.get_or_create(
-        username=username,
-        defaults={
-            "email": (user_data.get("email") or "")[:100],
-        },
-    )
-    if created:
-        # 无密码：只能通过 GitCode OAuth 登录
-        user.set_unusable_password()
-        user.save()
-        GitCodeBinding.objects.create(
-            user=user,
-            gitcode_id=user_id,
-            gitcode_username=(user_data.get("login") or "")[:100],
-        )
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    if created:
-        # 首次登录：引导设置个人姓名（申请与通知依赖，未设置前不能提交申请）
-        messages.success(request, "GitCode 登录成功。请先设置个人姓名，再提交申请。")
-        return redirect("accounts:profile")
-    messages.success(request, f"欢迎回来，{user.first_name or user.username}。")
-    return redirect("applications:my")

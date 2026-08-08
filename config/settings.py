@@ -45,15 +45,22 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
     'crispy_forms',
     'crispy_bootstrap3',
     'axes',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'accounts.providers.gitcode',
     'accounts',
     'applications',
     'servers',
     'credentials',
     'notifications',
 ]
+
+SITE_ID = 1
 
 # 表单渲染：crispy-forms（Bootstrap 3 模板包）
 CRISPY_ALLOWED_TEMPLATE_PACKS = 'bootstrap3'
@@ -68,7 +75,16 @@ AXES_RESET_ON_SUCCESS = True
 AUTHENTICATION_BACKENDS = [
     'axes.backends.AxesStandaloneBackend',
     'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
 ]
+
+# django-allauth：仅启用第三方 OAuth 登录能力（账号注册/密码等沿用自研机制）
+ACCOUNT_LOGIN_METHODS = {'username'}
+ACCOUNT_SIGNUP_FIELDS = []  # 注册走自研表单，不用 allauth 注册页
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'
+SOCIALACCOUNT_QUERY_EMAIL = False
+SOCIALACCOUNT_LOGIN_ON_GET = False
 
 # GitCode OAuth 第三方登录（https://gitcode.com 应用管理页注册）
 GITCODE_CLIENT_ID = os.environ.get('GITCODE_CLIENT_ID', '')
@@ -83,6 +99,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'axes.middleware.AxesMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'

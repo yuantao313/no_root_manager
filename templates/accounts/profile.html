@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
+{% load socialaccount %}
 {% block title %}个人中心 - NRM{% endblock %}
 {% block content %}
 <div class="row">
@@ -41,8 +42,9 @@
                     <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
                     <dt>GitCode</dt>
                     <dd>
-                        {% if user.gitcode_binding %}
-                        <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
+                        {% with gc_account=user.socialaccount_set.all|first %}
+                        {% if gc_account %}
+                        <span class="label label-success">已绑定</span> gitcode#{{ gc_account.uid }}
                         {% if not user.has_usable_password %}
                         <span class="label label-warning">无本地密码</span>
                         <a href="{% url 'accounts:set_password' %}" class="btn btn-primary btn-xs">先设置本地密码</a>
@@ -54,8 +56,13 @@
                         {% endif %}
                         {% else %}
                         <span class="text-muted">未绑定</span>
-                        <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
+                        {% if gitcode_enabled %}
+                        <a href="{% provider_login_url 'gitcode' process='connect' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
+                        {% else %}
+                        <span class="text-muted">（GitCode 登录未配置）</span>
                         {% endif %}
+                        {% endif %}
+                        {% endwith %}
                     </dd>
                 </dl>
             </div>

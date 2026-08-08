@@ -117,7 +117,7 @@ def application_create(request):
     """提交新的申请（需登录，身份信息从账号获取）。"""
     # GitCode 绑定用户必须先完善个人信息（设置姓名）才能提交申请，
     # 避免以 gc<id> 占位身份进入系统
-    if hasattr(request.user, "gitcode_binding") and not request.user.first_name:
+    if request.user.socialaccount_set.filter(provider="gitcode").exists() and not request.user.first_name:
         messages.warning(request, "请先在个人中心设置姓名，再提交申请。")
         return redirect("accounts:profile")
     if request.method == "POST":
