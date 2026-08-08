@@ -22,3 +22,6 @@ site/
 
 # OS
 .DS_Store
+
+# AtomCode agent 本地状态（不入库）
+.atomcode/
