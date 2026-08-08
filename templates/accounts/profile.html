@@ -32,6 +32,10 @@
                         <dd>
                             {% if user.gitcode_binding %}
                             <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
+                            <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-warning btn-xs">解绑</button>
+                            </form>
                             {% else %}
                             <span class="text-muted">未绑定</span>
                             <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>

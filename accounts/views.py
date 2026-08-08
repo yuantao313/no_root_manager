@@ -175,6 +175,18 @@ def _gitcode_bind_done(request, code):
     return redirect("accounts:profile")
 
 
+@login_required
+def gitcode_unbind(request):
+    """解绑 GitCode：删除当前用户的绑定关系（仅本人）。"""
+    binding = getattr(request.user, "gitcode_binding", None)
+    if binding is None:
+        messages.info(request, "您尚未绑定 GitCode 账号。")
+    else:
+        binding.delete()
+        messages.success(request, "GitCode 账号已解绑。")
+    return redirect("accounts:profile")
+
+
 def gitcode_callback(request):
     """GitCode OAuth 回调（登录与绑定共用）。
 
