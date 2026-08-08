@@ -34,11 +34,11 @@ def server():
 
 class TestRequireLogin:
     def test_anonymous_redirected_to_login(self, client):
-        assert client.get(reverse("applications:create")).status_code == 302
+        assert client.get(reverse("applications:my")).status_code == 302
 
     def test_anonymous_cannot_submit(self, client):
         resp = client.post(
-            reverse("applications:create"),
+            reverse("applications:my"),
             {
                 "applicant_name": "张三",
                 "username": "zhangsan",
@@ -56,7 +56,7 @@ class TestRequireLogin:
     def test_login_user_can_submit(self, client, normal):
         client.force_login(normal)
         resp = client.post(
-            reverse("applications:create"),
+            reverse("applications:my"),
             {
                 "applicant_name": "张三",
                 "username": "zhangsan",

@@ -107,20 +107,18 @@ def application_list(request):
 
 @login_required
 def my_applications(request):
-    """我的申请（任何登录用户）：查看自己提交的申请及审批状态。"""
+    """我的申请 + 新建申请（合并页）：左侧提交表单，右侧申请列表。
+
+    任何登录用户可用；GitCode 绑定用户须先设置姓名才能提交。
+    """
     applications = Application.objects.filter(applicant=request.user)
-    return render(request, "applications/my_list.html", {"applications": applications})
 
-
-@login_required
-def application_create(request):
-    """提交新的申请（需登录，身份信息从账号获取）。"""
     # GitCode 绑定用户必须先完善个人信息（设置姓名）才能提交申请，
     # 避免以 gc<id> 占位身份进入系统
-    if request.user.socialaccount_set.filter(provider="gitcode").exists() and not request.user.first_name:
-        messages.warning(request, "请先在个人中心设置姓名，再提交申请。")
-        return redirect("accounts:profile")
-    if request.method == "POST":
+    needs_name = request.user.socialaccount_set.filter(provider="gitcode").exists() and not request.user.first_name
+
+    form = ApplicationForm()
+    if request.method == "POST" and not needs_name:
         form = ApplicationForm(request.POST)
         if form.is_valid():
             application = form.save(commit=False)
@@ -133,9 +131,16 @@ def application_create(request):
             notify_new_application(application)
             webhook_new_application(application)
             return redirect("applications:my")
-    else:
-        form = ApplicationForm()
-    return render(request, "applications/form.html", {"form": form})
+
+    return render(
+        request,
+        "applications/my_list.html",
+        {
+            "applications": applications,
+            "form": form,
+            "needs_name": needs_name,
+        },
+    )
 
 
 @staff_required

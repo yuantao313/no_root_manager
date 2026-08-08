@@ -43,13 +43,12 @@
                     <span class="icon-bar"></span>
                     <span class="icon-bar"></span>
                 </button>
-                <a class="navbar-brand" href="{% url 'applications:create' %}">N<span class="no-root">R</span>M · No <span class="no-root">Root</span> Manager</a>
+                <a class="navbar-brand" href="{% url 'applications:my' %}">N<span class="no-root">R</span>M · No <span class="no-root">Root</span> Manager</a>
             </div>
             <div class="collapse navbar-collapse" id="main-nav">
                 <ul class="nav navbar-nav">
                     {% if user.is_authenticated %}
                     <li><a href="{% url 'applications:my' %}">我的申请</a></li>
-                    <li><a href="{% url 'applications:create' %}">新建申请</a></li>
                     {% if user.is_staff %}
                     <li><a href="{% url 'applications:list' %}">申请列表</a></li>
                     {% if user.is_superuser %}

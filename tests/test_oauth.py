@@ -78,7 +78,7 @@ class TestProfileGate:
         user = self._gc_user()
         client.force_login(user)
         resp = client.post(
-            reverse("applications:create"),
+            reverse("applications:my"),
             {
                 "username": "m1",
                 "employee_id": "E1",
@@ -88,9 +88,9 @@ class TestProfileGate:
                 "applied_groups": [],
             },
         )
-        # 未设姓名被拦截，跳个人中心
-        assert resp.status_code == 302
-        assert resp.url.endswith("/accounts/profile/")
+        # 未设姓名被拦截：页面渲染"请先设置姓名"提示且不创建申请
+        assert resp.status_code == 200
+        assert "请先设置姓名" in resp.content.decode()
         assert not Application.objects.exists()
 
     def test_can_apply_after_setting_name(self, client):
@@ -100,7 +100,7 @@ class TestProfileGate:
         user.refresh_from_db()
         assert user.first_name == "张三"
         resp = client.post(
-            reverse("applications:create"),
+            reverse("applications:my"),
             {
                 "username": "m1",
                 "employee_id": "E1",
@@ -118,7 +118,7 @@ class TestProfileGate:
         user = User.objects.create_user(username="normal", password="x12345!", first_name="李四")
         client.force_login(user)
         resp = client.post(
-            reverse("applications:create"),
+            reverse("applications:my"),
             {
                 "username": "m1",
                 "employee_id": "E1",
