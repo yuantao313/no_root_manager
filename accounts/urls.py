@@ -8,14 +8,9 @@ app_name = "accounts"
 urlpatterns = [
     path("register/", views.register, name="register"),
     path("profile/", views.profile, name="profile"),
+    path("gitcode/login/", views.gitcode_login, name="gitcode_login"),
+    path("gitcode/callback/", views.gitcode_callback, name="gitcode_callback"),
     path("api/username-suggestions/", views.username_suggestions, name="username-suggestions"),
-    path(
-        "login/",
-        auth_views.LoginView.as_view(
-            template_name="accounts/login.html",
-            redirect_authenticated_user=True,
-        ),
-        name="login",
-    ),
+    path("login/", views.GitCodeLoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
 ]

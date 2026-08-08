@@ -12,25 +12,18 @@ User = get_user_model()
 
 
 class TestProfileEdit:
-    def test_default_shows_readonly_and_edit_link(self, client):
-        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
+    def test_profile_inline_edit_controls(self, client):
+        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com", first_name="张三")
         client.force_login(user)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
-        # 正文样式展示（dl），右侧"编辑"链接，无资料输入框
-        assert "?edit=1" in html
-        assert "name=\"save_profile\"" not in html
-
-    def test_edit_mode_shows_inputs(self, client):
-        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
-        client.force_login(user)
-        resp = client.get(reverse("accounts:profile") + "?edit=1")
-        html = resp.content.decode()
-        assert resp.status_code == 200
-        assert 'id="id_name"' in html  # 姓名输入框（一体化）
-        assert 'id="id_email"' in html
-        assert "save_profile" in html
+        # 正文展示 + 每个字段右侧"编辑"链接 + 就地输入框（隐藏）+ 行内 JS
+        assert "张三" in html
+        assert "field-edit" in html
+        assert 'id="field-name"' in html
+        assert 'id="field-email"' in html
+        assert "editField" in html
 
     def test_update_name_and_email(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")

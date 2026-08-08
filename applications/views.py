@@ -108,12 +108,15 @@ def my_applications(request):
 
 @login_required
 def application_create(request):
-    """提交新的申请（需登录，用户与管理员地位平等）。"""
+    """提交新的申请（需登录，身份信息从账号获取）。"""
     if request.method == "POST":
         form = ApplicationForm(request.POST)
         if form.is_valid():
             application = form.save(commit=False)
             application.applicant = request.user
+            # 身份信息来自账号（个人中心维护），不再由申请表单填写
+            application.applicant_name = request.user.first_name or request.user.username
+            application.email = request.user.email
             application.save()
             messages.success(request, "申请已提交，等待管理员审批。")
             notify_new_application(application)

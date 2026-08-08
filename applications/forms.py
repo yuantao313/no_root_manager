@@ -28,9 +28,7 @@ class ApplicationForm(forms.ModelForm):
     class Meta:
         model = Application
         fields = [
-            "applicant_name",
             "username",
-            "email",
             "employee_id",
             "apply_type",
             "target_server",
@@ -49,9 +47,7 @@ class ApplicationForm(forms.ModelForm):
             ),
         }
         labels = {
-            "applicant_name": "姓名",
             "username": "用户名",
-            "email": "邮箱",
             "employee_id": "工号",
             "apply_type": "申请类型",
             "target_server": "目标服务器",

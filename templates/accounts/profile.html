@@ -5,34 +5,35 @@
 <div class="row">
     <div class="col-md-6">
         <div class="panel panel-default">
-            <div class="panel-heading">
-                <h3 class="panel-title">个人资料</h3>
-                {% if not editing %}
-                <span class="pull-right"><a href="{% url 'accounts:profile' %}?edit=1">编辑</a></span>
-                {% endif %}
-            </div>
+            <div class="panel-heading"><h3 class="panel-title">个人资料</h3></div>
             <div class="panel-body">
-                {% if editing %}
-                <form method="post">
+                <form method="post" id="profile-form">
                     {% csrf_token %}
-                    {{ form|crispy }}
-                    <button type="submit" name="save_profile" class="btn btn-primary">保存</button>
-                    <a href="{% url 'accounts:profile' %}" class="btn btn-default">取消</a>
+                    <dl>
+                        <dt>姓名</dt>
+                        <dd>
+                            <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
+                            <a href="javascript:void(0)" class="field-edit" data-field="name">编辑</a>
+                            <input type="text" id="field-name" name="name" class="form-control field-input" style="display:none;width:60%;" value="{{ user.first_name }}">
+                        </dd>
+                        <dt>邮箱</dt>
+                        <dd>
+                            <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
+                            <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
+                            <input type="email" id="field-email" name="email" class="form-control field-input" style="display:none;width:60%;" value="{{ user.email }}">
+                        </dd>
+                        <dt>用户名</dt>
+                        <dd>{{ user.username }}</dd>
+                        <dt>角色</dt>
+                        <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
+                        <dt>注册时间</dt>
+                        <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
+                    </dl>
+                    <p id="field-actions" style="display:none;">
+                        <button type="submit" name="save_profile" class="btn btn-primary btn-sm">保存</button>
+                        <a href="javascript:void(0)" class="btn btn-default btn-sm" onclick="cancelEdit()">取消</a>
+                    </p>
                 </form>
-                {% else %}
-                <dl>
-                    <dt>姓名</dt>
-                    <dd>{{ user.first_name|default:"—" }}</dd>
-                    <dt>邮箱</dt>
-                    <dd>{{ user.email|default:"—" }}</dd>
-                    <dt>用户名</dt>
-                    <dd>{{ user.username }}</dd>
-                    <dt>角色</dt>
-                    <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
-                    <dt>注册时间</dt>
-                    <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
-                </dl>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -77,4 +78,29 @@
     </div>
     {% endif %}
 </div>
+<script>
+// 行内编辑：点击"编辑"后该字段就地变为输入框，其他字段保持文本
+function editField(field) {
+    document.querySelectorAll('.field-input').forEach(function (i) { i.style.display = 'none'; });
+    document.querySelectorAll('.field-text').forEach(function (s) { s.style.display = 'inline'; });
+    document.querySelectorAll('.field-edit').forEach(function (a) { a.style.display = 'inline'; });
+    var input = document.getElementById('field-' + field);
+    var text = document.querySelector('.field-text[data-field="' + field + '"]');
+    var edit = document.querySelector('.field-edit[data-field="' + field + '"]');
+    input.style.display = 'inline-block';
+    text.style.display = 'none';
+    edit.style.display = 'none';
+    document.getElementById('field-actions').style.display = 'block';
+    input.focus();
+}
+function cancelEdit() {
+    document.querySelectorAll('.field-input').forEach(function (i) { i.style.display = 'none'; });
+    document.querySelectorAll('.field-text').forEach(function (s) { s.style.display = 'inline'; });
+    document.querySelectorAll('.field-edit').forEach(function (a) { a.style.display = 'inline'; });
+    document.getElementById('field-actions').style.display = 'none';
+}
+document.querySelectorAll('.field-edit').forEach(function (a) {
+    a.addEventListener('click', function () { editField(this.dataset.field); });
+});
+</script>
 {% endblock %}

@@ -1,14 +1,26 @@
+import secrets
+
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+from django.contrib.auth.views import LoginView
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 
 from notifications.forms import WebhookForm
 from notifications.models import WebhookConfig
 
+from .gitcode import (
+    GitCodeOAuthError,
+    build_authorize_url,
+    exchange_token,
+    get_user,
+)
 from .username_gen import generate_username_groups
 
 
@@ -56,11 +68,21 @@ def register(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
+class GitCodeLoginView(LoginView):
+    """登录页：额外传递 GitCode OAuth 是否已配置（控制入口显示）。"""
+
+    template_name = "accounts/login.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["gitcode_enabled"] = bool(settings.GITCODE_CLIENT_ID)
+        return context
+
+
 @login_required
 def profile(request):
-    """个人中心：资料正文展示 + 右侧编辑链接；内嵌我的 Webhook 管理（仅管理员）。"""
+    """个人中心：资料行内编辑（每个字段右侧编辑按钮）+ 内嵌 Webhook（仅管理员）。"""
     hooks = WebhookConfig.objects.filter(owner=request.user)
-    editing = request.GET.get("edit") == "1"
     form = ProfileForm(instance=request.user)
     webhook_form = WebhookForm()
 
@@ -89,6 +111,69 @@ def profile(request):
             "form": form,
             "webhook_form": webhook_form,
             "hooks": hooks,
-            "editing": editing,
         },
     )
+
+
+def gitcode_login(request):
+    """GitCode OAuth 登录：跳转到授权页（state 防 CSRF）。"""
+    if not settings.GITCODE_CLIENT_ID:
+        messages.error(request, "GitCode 登录未配置（缺少 GITCODE_CLIENT_ID）。")
+        return redirect("accounts:login")
+    state = secrets.token_urlsafe(16)
+    request.session["gitcode_oauth_state"] = state
+    redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
+    url = build_authorize_url(settings.GITCODE_CLIENT_ID, redirect_uri, state)
+    return redirect(url)
+
+
+def gitcode_callback(request):
+    """GitCode OAuth 回调：校验 state、换 token、取用户信息、自动建号并登录。"""
+    state = request.GET.get("state", "")
+    if state != request.session.pop("gitcode_oauth_state", ""):
+        messages.error(request, "GitCode 登录校验失败（state 不匹配），请重试。")
+        return redirect("accounts:login")
+
+    code = request.GET.get("code", "")
+    if not code:
+        messages.error(request, "GitCode 未返回授权码。")
+        return redirect("accounts:login")
+
+    try:
+        token_data = exchange_token(
+            settings.GITCODE_CLIENT_ID,
+            settings.GITCODE_CLIENT_SECRET,
+            code,
+        )
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            raise GitCodeOAuthError("未获取到 access_token")
+        user_data = get_user(access_token)
+    except GitCodeOAuthError as e:
+        messages.error(request, f"GitCode 登录失败：{e}")
+        return redirect("accounts:login")
+
+    # 用户 id 映射：系统用户名固定为 gc<id>，不使用 GitCode 的 login
+    # （login 可被修改，id 不可变，防止映射失效与匿名）
+    user_id = user_data.get("id")
+    if not user_id:
+        messages.error(request, "GitCode 未返回用户 id。")
+        return redirect("accounts:login")
+    username = f"gc{user_id}"
+    user, created = User.objects.get_or_create(
+        username=username,
+        defaults={
+            "email": (user_data.get("email") or "")[:100],
+        },
+    )
+    if created:
+        # 无密码：只能通过 GitCode OAuth 登录
+        user.set_unusable_password()
+        user.save()
+    login(request, user)
+    if created:
+        # 首次登录：引导设置个人姓名（申请与通知依赖）
+        messages.success(request, "GitCode 登录成功。请先设置个人姓名，再提交申请。")
+        return redirect("accounts:profile")
+    messages.success(request, f"欢迎回来，{user.first_name or user.username}。")
+    return redirect("applications:my")

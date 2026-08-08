@@ -58,6 +58,10 @@ INSTALLED_APPS = [
 CRISPY_ALLOWED_TEMPLATE_PACKS = 'bootstrap3'
 CRISPY_TEMPLATE_PACK = 'bootstrap3'
 
+# GitCode OAuth 第三方登录（https://gitcode.com 应用管理页注册）
+GITCODE_CLIENT_ID = os.environ.get('GITCODE_CLIENT_ID', '')
+GITCODE_CLIENT_SECRET = os.environ.get('GITCODE_CLIENT_SECRET', '')
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
