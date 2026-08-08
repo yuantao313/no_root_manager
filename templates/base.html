@@ -1,0 +1,96 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-hans">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}NRM · No Root Manager{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'vendor/bootstrap/css/bootstrap.min.css' %}">
+    <style>
+        body { padding-top: 70px; background: #f5f5f5; }
+        /* Django form.as_p 输出适配 Bootstrap 表单控件 */
+        form p { margin-bottom: 15px; }
+        form p label { display: block; font-weight: 700; margin-bottom: 5px; }
+        form p input[type=text], form p input[type=password], form p input[type=email],
+        form p input[type=number], form p select, form p textarea {
+            display: block; width: 100%; height: 34px; padding: 6px 12px; font-size: 14px;
+            line-height: 1.42857; color: #555; background-color: #fff; border: 1px solid #ccc;
+            border-radius: 4px; box-shadow: inset 0 1px 1px rgba(0,0,0,.075);
+            transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out;
+        }
+        form p textarea { height: auto; }
+        form p select { height: 34px; }
+        form p .helptext { display: block; margin-top: 5px; color: #999; font-size: 13px; }
+        ul.errorlist { list-style: none; padding: 0; margin: 5px 0 0; color: #a94442; font-size: 13px; }
+        /* 页面标题区 */
+        .page-header-row { margin-bottom: 16px; }
+        .page-header-row h2 { margin: 0; font-size: 22px; }
+        dl { font-size: 14px; }
+        dl dt { font-weight: 700; margin-top: 10px; color: #555; }
+        dl dd { margin: 4px 0 0; }
+        .review-box { margin-top: 16px; padding: 12px; background: #f9f9f9; border: 1px solid #eee; border-radius: 4px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-inverse navbar-fixed-top">
+        <div class="container">
+            <div class="navbar-header">
+                <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#main-nav">
+                    <span class="sr-only">切换导航</span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                </button>
+                <a class="navbar-brand" href="{% url 'applications:create' %}">NRM · No Root Manager</a>
+            </div>
+            <div class="collapse navbar-collapse" id="main-nav">
+                <ul class="nav navbar-nav">
+                    {% if user.is_authenticated %}
+                    {% if user.is_staff %}
+                    <li><a href="{% url 'applications:list' %}">申请列表</a></li>
+                    {% endif %}
+                    <li><a href="{% url 'applications:my' %}">我的申请</a></li>
+                    <li><a href="{% url 'applications:create' %}">新建申请</a></li>
+                    {% if user.is_staff %}
+                    <li><a href="{% url 'servers:list' %}">服务器</a></li>
+                    <li><a href="{% url 'credentials:list' %}">凭据</a></li>
+                    <li><a href="{% url 'accounts:register' %}">注册管理员</a></li>
+                    <li><a href="{% url 'admin:index' %}">后台管理</a></li>
+                    {% endif %}
+                    {% else %}
+                    <li class="active"><a href="{% url 'applications:create' %}">提交申请</a></li>
+                    {% endif %}
+                </ul>
+                <ul class="nav navbar-nav navbar-right">
+                    {% if user.is_authenticated %}
+                    <li><p class="navbar-text">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</p></li>
+                    <li>
+                        <form method="post" action="{% url 'accounts:logout' %}" class="navbar-form">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-default btn-xs">退出</button>
+                        </form>
+                    </li>
+                    {% else %}
+                    <li><a href="{% url 'accounts:login' %}">管理员登录</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert"><span>&times;</span></button>
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="{% static 'vendor/bootstrap/js/jquery-1.11.3.min.js' %}"></script>
+    <script src="{% static 'vendor/bootstrap/js/bootstrap.min.js' %}"></script>
+</body>
+</html>

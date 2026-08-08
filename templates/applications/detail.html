@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ application.title }} - NRM{% endblock %}
+{% block content %}
+<div class="panel panel-default" style="max-width:640px;">
+    <div class="panel-heading">
+        <div class="row">
+            <div class="col-xs-8">
+                <h3 class="panel-title">{{ application.title }}</h3>
+            </div>
+            <div class="col-xs-4 text-right">
+                {% if application.status == 'approved' %}<span class="label label-success">{{ application.get_status_display }}</span>
+                {% elif application.status == 'rejected' %}<span class="label label-danger">{{ application.get_status_display }}</span>
+                {% else %}<span class="label label-warning">{{ application.get_status_display }}</span>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="panel-body">
+        <dl>
+            <dt>申请人</dt>
+            <dd>{{ application.applicant_name }}{% if application.applicant %}（账号：{{ application.applicant.username }}）{% endif %}</dd>
+            <dt>用户名</dt>
+            <dd>{{ application.username|default:"—" }}</dd>
+            <dt>邮箱</dt>
+            <dd>{{ application.email|default:"—" }}</dd>
+            <dt>工号</dt>
+            <dd>{{ application.employee_id|default:"—" }}</dd>
+            <dt>申请类型</dt>
+            <dd>{{ application.get_apply_type_display }}</dd>
+            {% if application.target_server %}
+            <dt>目标服务器</dt>
+            <dd><a href="{% url 'servers:detail' application.target_server.pk %}">{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）</a></dd>
+            {% endif %}
+            <dt>申请内容</dt>
+            <dd>{{ application.description|linebreaks }}</dd>
+            {% if application.valid_until %}
+            <dt>使用截止时间</dt>
+            <dd>{{ application.valid_until|date:"Y-m-d H:i" }}（到期后账号自动停用）</dd>
+            {% endif %}
+            <dt>提交时间</dt>
+            <dd>{{ application.created_at|date:"Y-m-d H:i" }}</dd>
+        </dl>
+
+        {% if application.reviewer %}
+        <div class="review-box">
+            <strong>审批结果：</strong>{{ application.get_status_display }}
+            （审批人：{{ application.reviewer.username }}，{{ application.reviewed_at|date:"Y-m-d H:i" }}）
+            {% if application.review_comment %}<br>审批意见：{{ application.review_comment }}{% endif %}
+        </div>
+        {% endif %}
+
+        {% if application.sudo_grants.all %}
+        <div class="review-box">
+            <strong>sudo 权限记录（审计）</strong>
+            <table class="table table-striped" style="margin-top:8px;font-size:13px;">
+                <thead>
+                    <tr><th>服务器</th><th>授予人</th><th>授予时间</th><th>失效时间</th><th>状态</th></tr>
+                </thead>
+                <tbody>
+                    {% for g in application.sudo_grants.all %}
+                    <tr>
+                        <td>{{ g.server.name }}</td>
+                        <td>{{ g.granted_by.username|default:"系统" }}</td>
+                        <td>{{ g.granted_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ g.expires_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            {% if g.status == 'active' %}<span class="label label-success">{{ g.get_status_display }}</span>
+                            {% else %}<span class="label label-default">{{ g.get_status_display }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if user.is_staff and application.status == "pending" %}
+        <div class="review-box">
+            <strong>审批操作</strong>
+            <form method="post" action="{% url 'applications:review' application.pk 'approve' %}" style="margin-top:8px;">
+                {% csrf_token %}
+                <label for="comment">审批意见（可选）</label>
+                <textarea name="comment" id="comment" rows="3" class="form-control" placeholder="填写审批意见"></textarea>
+                <button type="submit" class="btn btn-success" style="margin-top:8px;">通过</button>
+            </form>
+            <form method="post" action="{% url 'applications:review' application.pk 'reject' %}" style="margin-top:8px;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">驳回</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <div style="margin-top:16px;">
+            <a href="{% url 'applications:list' %}" class="btn btn-default">返回列表</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

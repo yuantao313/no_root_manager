@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}服务器详情 - NRM{% endblock %}
+{% block content %}
+<div class="page-header-row">
+    <div class="row">
+        <div class="col-xs-6"><h2>服务器详情</h2></div>
+        <div class="col-xs-6 text-right">
+            <a href="{% url 'servers:edit' server.pk %}" class="btn btn-primary">编辑</a>
+            <a href="{% url 'servers:test' server.pk %}" class="btn btn-success">测试连接</a>
+            <a href="{% url 'servers:list' %}" class="btn btn-default">返回列表</a>
+        </div>
+    </div>
+</div>
+<div class="panel panel-default" style="max-width:640px;">
+    <div class="panel-body">
+        <dl>
+            <dt>名称</dt>
+            <dd>{{ server.name }}</dd>
+            <dt>服务器地址</dt>
+            <dd>{{ server.host }}</dd>
+            <dt>端口</dt>
+            <dd>{{ server.port }}</dd>
+            <dt>管理凭据</dt>
+            <dd>
+                {% if server.credential %}
+                    <a href="{% url 'credentials:detail' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>
+                {% else %}
+                    <span class="text-muted">未关联</span>
+                {% endif %}
+            </dd>
+            <dt>创建时间</dt>
+            <dd>{{ server.created_at|date:"Y-m-d H:i" }}</dd>
+            <dt>更新时间</dt>
+            <dd>{{ server.updated_at|date:"Y-m-d H:i" }}</dd>
+        </dl>
+    </div>
+</div>
+
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <div class="row">
+            <div class="col-xs-6"><h3 class="panel-title">受管用户（nrm_managed 组）</h3></div>
+            <div class="col-xs-6 text-right">
+                <a href="{% url 'servers:sync_users' server.pk %}" class="btn btn-default btn-xs">同步</a>
+            </div>
+        </div>
+    </div>
+    <div class="panel-body">
+        <form method="post" action="{% url 'servers:takeover' server.pk %}" class="form-inline" style="margin-bottom:12px;">
+            {% csrf_token %}
+            <div class="form-group">
+                <input type="text" name="username" class="form-control" placeholder="输入要接管的用户名" style="width:220px;">
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">接管用户</button>
+        </form>
+        {% if server.managed_users.all %}
+        <table class="table table-striped">
+            <thead>
+                <tr><th>用户名</th><th>机器分组</th><th>最近同步</th></tr>
+            </thead>
+            <tbody>
+                {% for mu in server.managed_users.all %}
+                <tr>
+                    <td>{{ mu.username }}</td>
+                    <td>{{ mu.groups|default:"—" }}</td>
+                    <td>{{ mu.synced_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">暂无受管用户，可先同步或手动接管。</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

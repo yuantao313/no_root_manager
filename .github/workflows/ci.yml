@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Django system check
+        run: uv run python manage.py check
+
+      - name: Check migrations are up to date
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Run pytest
+        run: uv run pytest
+
+      - name: Lint with pyflakes (project code only)
+        run: uv run pyflakes . | grep -v '^./.venv/' || true

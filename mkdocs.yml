@@ -1,0 +1,22 @@
+site_name: NRM · No Root Manager
+site_description: 目标机器用户申请与接管管理系统
+repo_url: https://github.com/yuantao313/no_root_manager
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.sections
+    - navigation.top
+  palette:
+    scheme: default
+    primary: indigo
+
+nav:
+  - 首页: index.md
+  - 快速开始: quickstart.md
+  - 使用指南:
+      - 用户申请: usage/applications.md
+      - 服务器与凭据: usage/servers.md
+      - 通知配置: usage/notifications.md
+  - 架构设计: architecture.md
+  - 运维手册: operations.md

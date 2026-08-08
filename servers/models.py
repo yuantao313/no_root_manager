@@ -1,0 +1,110 @@
+from django.db import models
+
+from credentials.models import Credential
+
+
+class UserGroup(models.Model):
+    """目标机器上的用户分组（对应 Linux 用户组）。"""
+
+    server = models.ForeignKey(
+        "Server",
+        on_delete=models.CASCADE,
+        related_name="user_groups",
+        verbose_name="所属服务器",
+    )
+    name = models.CharField("组名", max_length=100)
+    description = models.TextField("说明", blank=True)
+
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        unique_together = ("server", "name")
+        verbose_name = "用户分组"
+        verbose_name_plural = "用户分组"
+
+    def __str__(self):
+        return f"{self.server.name} / {self.name}"
+
+
+class ManagedUser(models.Model):
+    """受管用户：目标机器上被 NRM 接管（加入 nrm_managed 组）的用户。"""
+
+    server = models.ForeignKey(
+        "Server",
+        on_delete=models.CASCADE,
+        related_name="managed_users",
+        verbose_name="所属服务器",
+    )
+    username = models.CharField("用户名", max_length=100)
+    synced_at = models.DateTimeField("最近同步时间", auto_now=True)
+    # 用户在目标机器上的附加分组（逗号分隔，同步时读取）
+    groups = models.CharField("机器分组", max_length=500, blank=True)
+
+    class Meta:
+        ordering = ["username"]
+        unique_together = ("server", "username")
+        verbose_name = "受管用户"
+        verbose_name_plural = "受管用户"
+
+    def __str__(self):
+        return f"{self.server.name} / {self.username}"
+
+
+class Server(models.Model):
+    """服务器：记录目标服务器的连接信息（地址、端口），管理凭据通过外键关联。"""
+
+    name = models.CharField("服务器名称", max_length=100)
+    host = models.CharField("服务器地址", max_length=255, help_text="IP 地址或域名")
+    port = models.PositiveIntegerField("端口", default=22)
+    # 管理凭据（用户名/密码/密钥统一存放在凭据表，这里直接选择）
+    # null=True 仅为迁移方便（DB 层可空），表单层强制必选
+    credential = models.ForeignKey(
+        Credential,
+        on_delete=models.PROTECT,
+        related_name="servers",
+        verbose_name="管理凭据",
+        help_text="选择已有的管理凭据（用户名/密码/密钥）",
+        null=True,
+        blank=True,
+    )
+    # 用户分组配置：默认申请的分组 + 可附加申请的分组
+    default_group = models.ForeignKey(
+        UserGroup,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="默认申请的用户分组",
+        help_text="用户申请账号时默认加入的分组",
+    )
+    extra_groups = models.ManyToManyField(
+        UserGroup,
+        blank=True,
+        related_name="+",
+        verbose_name="可附加申请的用户分组",
+        help_text="用户申请时可附加选择加入的分组",
+    )
+    # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制）
+    nproc_limit = models.PositiveIntegerField(
+        "进程数限制 nproc",
+        default=128,
+        help_text="该服务器上每个用户的最大进程数，0 表示不限制",
+    )
+    nofile_limit = models.PositiveIntegerField(
+        "文件数限制 nofile",
+        default=2048,
+        help_text="该服务器上每个用户的最大打开文件数，0 表示不限制",
+    )
+
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "服务器"
+        verbose_name_plural = "服务器"
+
+    def __str__(self):
+        return f"{self.name} ({self.host}:{self.port})"

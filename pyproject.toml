@@ -1,0 +1,26 @@
+[project]
+name = "no-root-manager"
+version = "0.1.0"
+description = "NRM (No Root Manager)：目标机器用户申请与接管管理系统"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=50.0.0",
+    "django>=6.1",
+    "paramiko>=5.0.0",
+    "pypinyin>=0.55.0",
+]
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.7",
+    "pyflakes>=3.4.0",
+    "pytest>=9.1.1",
+    "pytest-django>=4.13.0",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "-q"

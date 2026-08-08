@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}服务器列表 - NRM{% endblock %}
+{% block content %}
+<div class="page-header-row">
+    <div class="row">
+        <div class="col-xs-6"><h2>服务器列表</h2></div>
+        <div class="col-xs-6 text-right"><a href="{% url 'servers:create' %}" class="btn btn-primary">+ 新增服务器</a></div>
+    </div>
+</div>
+<div class="panel panel-default">
+    {% if servers %}
+    <table class="table table-striped table-hover">
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>地址</th>
+                <th>端口</th>
+                <th>凭据</th>
+                <th>更新时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for server in servers %}
+            <tr>
+                <td>{{ server.name }}</td>
+                <td>{{ server.host }}</td>
+                <td>{{ server.port }}</td>
+                <td>{% if server.credential %}<a href="{% url 'credentials:detail' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{{ server.updated_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    <a href="{% url 'servers:detail' server.pk %}" class="btn btn-default btn-xs">查看</a>
+                    <a href="{% url 'servers:edit' server.pk %}" class="btn btn-primary btn-xs">编辑</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="panel-body"><p class="text-muted">暂无服务器，点击右上角新增。</p></div>
+    {% endif %}
+</div>
+{% endblock %}
