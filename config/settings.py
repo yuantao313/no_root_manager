@@ -173,4 +173,4 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+# 前端资源已全部走 CDN，无本地 static 目录
