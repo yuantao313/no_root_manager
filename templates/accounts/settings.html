@@ -47,6 +47,15 @@
                     <p><label><input type="checkbox" name="enabled" {% if email_cfg.enabled %}checked{% endif %}> 启用邮件通知</label></p>
                     <button type="submit" name="save_email" class="btn btn-primary">保存</button>
                 </form>
+                <hr>
+                <p class="text-muted" style="font-size:13px;">填写一个目标邮箱，验证 SMTP 配置能否成功发信（使用已保存的配置发送测试邮件）。</p>
+                <form method="post" class="form-inline">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <input type="email" name="test_email" class="form-control" placeholder="测试收件邮箱" required style="width:260px;">
+                    </div>
+                    <button type="submit" name="send_test_email" class="btn btn-success">发送测试邮件</button>
+                </form>
             </div>
         </div>
     </div>
