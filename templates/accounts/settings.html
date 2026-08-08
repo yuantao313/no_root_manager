@@ -36,7 +36,7 @@
         <div class="panel panel-default" style="max-width:640px;">
             <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
             <div class="panel-body">
-                <p class="text-muted" style="font-size:13px;">保存前会先使用当前填写的配置发送一封验证码邮件；验证码校验通过后配置才会写入数据库。</p>
+                <p class="text-muted" style="font-size:13px;">先发送验证码，验证通过后"保存配置"按钮才可用，配置才会写入数据库。</p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
@@ -51,18 +51,24 @@
                         <div class="input-group">
                             <input type="email" name="verify_email" class="form-control" placeholder="验证码将发送到此邮箱" required>
                             <span class="input-group-btn">
-                                <button type="submit" name="save_email" class="btn btn-primary">发送验证码</button>
+                                <button type="submit" name="save_email" class="btn btn-primary" {% if cooldown_remaining %}disabled{% endif %}>
+                                    {% if cooldown_remaining %}已发送（{{ cooldown_remaining }} 秒后重试）{% else %}发送验证码{% endif %}
+                                </button>
                             </span>
                         </div>
                     </p>
                     <p>
-                        <label>验证码</label>
+                        <label>验证码（不填写验证码也可发送验证码，先发码再填）</label>
                         <div class="input-group">
-                            <input type="text" name="code" class="form-control" placeholder="收到的验证码" required>
+                            <input type="text" name="code" class="form-control" placeholder="收到的验证码">
                             <span class="input-group-btn">
-                                <button type="submit" name="confirm_email" class="btn btn-success">确认保存</button>
+                                <button type="submit" name="verify_smtp_code" class="btn btn-success">验证</button>
                             </span>
                         </div>
+                    </p>
+                    <p>
+                        <button type="submit" name="save_email_final" class="btn btn-primary" {% if not smtp_verified %}disabled{% endif %}>保存配置</button>
+                        {% if smtp_verified %}<span class="text-success">✓ 验证通过，可保存</span>{% else %}<span class="text-muted" style="font-size:13px;">验证通过后此处才可点击</span>{% endif %}
                     </p>
                 </form>
             </div>

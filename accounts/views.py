@@ -285,12 +285,21 @@ def _gitcode_bind_done(request, code):
 @superuser_required
 def settings(request):
     """系统设置（仅超级管理员）：GitCode 配置/邮件/全局 Webhook/管理员-服务器绑定。"""
+    from django.utils import timezone
+
     syscfg = SystemConfig.get_singleton()
     email_cfg = EmailConfig.objects.first()
     hooks = WebhookConfig.objects.filter(owner__isnull=True)
     bindings = ServerAdminBinding.objects.select_related("server", "admin").all()
     staff_users = User.objects.filter(is_staff=True, is_superuser=False).order_by("username")
     servers = Server.objects.all().order_by("name")
+
+    # 发码冷却：距上次发送 <60 秒则剩余秒数 >0（模板禁用按钮）
+    sent_at = request.session.get("smtp_code_sent_at")
+    cooldown_remaining = 0
+    if sent_at:
+        cooldown_remaining = max(0, 60 - int(timezone.now().timestamp() - sent_at))
+    smtp_verified = bool(request.session.get("smtp_verified", False))
 
     if request.method == "POST":
         if "save_gitcode" in request.POST:
@@ -303,8 +312,10 @@ def settings(request):
             syscfg.save()
             messages.success(request, "GitCode 配置已保存。")
         elif "save_email" in request.POST:
-            # 第一步：用表单配置（未入库）向目标邮箱发送验证码，
-            # 验证码通过后才允许配置写入数据库
+            # 第一步：发送验证码（60 秒冷却），用表单配置（未入库）发信
+            if cooldown_remaining > 0:
+                messages.error(request, f"发送过于频繁，请 {cooldown_remaining} 秒后再试。")
+                return redirect("accounts:settings")
             host = request.POST.get("host", "").strip()
             port = int(request.POST.get("port") or 465)
             username = request.POST.get("username", "").strip()
@@ -325,6 +336,7 @@ def settings(request):
                     "use_tls": use_tls, "enabled": enabled,
                     "verify_email": target,
                 }
+                request.session["smtp_verified"] = False  # 重新发码使已验证失效
                 # 用"待验证配置"发验证码邮件（写库前即可确认 SMTP 可用）
                 def _send_with_pending(subject, body, to_list):
                     return send_email_with_config(
@@ -333,22 +345,36 @@ def settings(request):
                     )
                 ok = send_smtp_code(target, _send_with_pending)
                 if ok:
-                    messages.success(request, f"验证码已发送至 {target}，请填写后确认保存（配置暂未写入数据库）。")
+                    # 存时间戳（秒），session JSON 序列化不支持 datetime
+                    request.session["smtp_code_sent_at"] = int(timezone.now().timestamp())
+                    messages.success(request, f"验证码已发送至 {target}，请查收并点击“验证”。")
                 else:
                     messages.error(request, "验证码发送失败：当前 SMTP 配置不可用（请检查服务器/端口/认证），未保存。")
                     request.session.pop("pending_smtp", None)
             return redirect("accounts:settings")
-        elif "confirm_email" in request.POST:
-            # 第二步：校验验证码通过后，将暂存的 SMTP 配置写入数据库
+        elif "verify_smtp_code" in request.POST:
+            # 第二步：校验验证码，通过后允许保存（模板据此启用保存按钮）
             pending = request.session.get("pending_smtp")
             if not pending:
-                messages.error(request, "请先填写 SMTP 配置并发送验证码。")
+                messages.error(request, "请先发送验证码。")
                 return redirect("accounts:settings")
             target = pending.get("verify_email", "")
             ok, err = verify_code(target, request.POST.get("code", ""),
                                   EmailVerification.PURPOSE_SMTP_CONFIG, user=None)
-            if not ok:
-                messages.error(request, f"SMTP 配置验证失败：{err}")
+            if ok:
+                request.session["smtp_verified"] = True
+                messages.success(request, "验证通过，配置已解锁，请点击“保存配置”。")
+            else:
+                messages.error(request, f"验证失败：{err}")
+            return redirect("accounts:settings")
+        elif "save_email_final" in request.POST:
+            # 第三步：已验证通过才允许写入数据库
+            pending = request.session.get("pending_smtp")
+            if not pending:
+                messages.error(request, "请先发送验证码并验证。")
+                return redirect("accounts:settings")
+            if not request.session.get("smtp_verified"):
+                messages.error(request, "请先验证验证码，验证通过后才能保存。")
                 return redirect("accounts:settings")
             email_cfg = EmailConfig.objects.first() or EmailConfig()
             email_cfg.host = pending["host"]
@@ -361,6 +387,7 @@ def settings(request):
             email_cfg.enabled = pending.get("enabled", False)
             email_cfg.save()
             request.session.pop("pending_smtp", None)
+            request.session.pop("smtp_verified", None)
             messages.success(request, "SMTP 配置已通过验证并保存。")
         elif "send_test_email" in request.POST:
             target = request.POST.get("test_email", "").strip()
@@ -414,6 +441,8 @@ def settings(request):
         "bindings": bindings,
         "staff_users": staff_users,
         "servers": servers,
+        "cooldown_remaining": cooldown_remaining,
+        "smtp_verified": smtp_verified,
     })
 
 
