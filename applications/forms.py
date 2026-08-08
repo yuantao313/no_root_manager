@@ -5,7 +5,26 @@ from servers.models import Server
 from .models import Application
 
 
+class DynamicMultipleChoiceField(forms.MultipleChoiceField):
+    """选项由前端动态加载的多选框：choices 为空时不校验可用性，
+    合法性由业务层（clean_applied_groups）按所选服务器校验。
+    """
+
+    def valid_value(self, value):
+        if not self.choices:
+            return True  # 选项由前端动态加载，跳过 Django 可用性校验
+        return super().valid_value(value)
+
+
 class ApplicationForm(forms.ModelForm):
+    # 附加分组多选框：选项由前端根据所选服务器动态填充（servers:groups_api）
+    applied_groups = DynamicMultipleChoiceField(
+        required=False,
+        label="附加分组",
+        help_text="可附加加入的用户分组（来自所选服务器配置）",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
     class Meta:
         model = Application
         fields = [
@@ -20,6 +39,7 @@ class ApplicationForm(forms.ModelForm):
             "valid_until",
             "needs_sudo",
             "migrate_from_dir",
+            "applied_groups",
         ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 5}),
@@ -40,6 +60,7 @@ class ApplicationForm(forms.ModelForm):
             "valid_until": "使用截止时间",
             "needs_sudo": "同时申请 root/sudo 权限",
             "migrate_from_dir": "迁移已有目录",
+            "applied_groups": "附加分组",
         }
 
     def __init__(self, *args, **kwargs):
@@ -48,3 +69,21 @@ class ApplicationForm(forms.ModelForm):
         self.fields["target_server"].queryset = Server.objects.all()
         self.fields["target_server"].required = False
         self.fields["target_server"].empty_label = "（可选）"
+        # 编辑回显：已有分组值作为初始选中项（前端 JS 会重建选项）
+        if self.instance and self.instance.applied_groups:
+            initial = [g.strip() for g in self.instance.applied_groups.split(",") if g.strip()]
+            self.fields["applied_groups"].initial = initial
+
+    def clean_applied_groups(self):
+        """校验勾选的分组必须属于所选服务器的可附加分组。"""
+        groups = self.cleaned_data.get("applied_groups") or []
+        server = self.cleaned_data.get("target_server")
+        if not groups:
+            return ",".join([])
+        if server is None:
+            raise forms.ValidationError("请先选择目标服务器再选择附加分组。")
+        allowed = server.extra_groups_list()
+        invalid = [g for g in groups if g not in allowed]
+        if invalid:
+            raise forms.ValidationError(f"分组 {', '.join(invalid)} 不属于所选服务器。")
+        return ",".join(groups)

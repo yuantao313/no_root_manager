@@ -1,23 +1,16 @@
 from django.contrib import admin
 
-from .models import ManagedUser, Server, UserGroup
+from .models import ManagedUser, Server
 
 
 @admin.register(Server)
 class ServerAdmin(admin.ModelAdmin):
-    list_display = ("name", "host", "port", "credential", "default_group", "nproc_limit", "nofile_limit", "updated_at")
+    list_display = ("name", "host", "port", "credential", "default_group", "extra_groups", "nproc_limit", "nofile_limit", "updated_at")
     list_filter = ("port",)
     search_fields = ("name", "host", "credential__name", "credential__username")
     readonly_fields = ("created_at", "updated_at")
     fields = ("name", "host", "port", "credential", "default_group", "extra_groups",
               "nproc_limit", "nofile_limit", "created_at", "updated_at")
-
-
-@admin.register(UserGroup)
-class UserGroupAdmin(admin.ModelAdmin):
-    list_display = ("name", "server", "updated_at")
-    search_fields = ("name", "server__name")
-    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(ManagedUser)

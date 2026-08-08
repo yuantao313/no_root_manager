@@ -22,10 +22,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# 生产环境务必通过环境变量 NRM_SECRET_KEY 提供
+# 生产环境务必通过环境变量 NRM_SECRET_KEY 提供。
+# 注意：SECRET_KEY 也是凭据等敏感字段的 Fernet 加密密钥来源，
+# 变更后历史密文将无法解密（需数据迁移），开发默认值保持不变。
 SECRET_KEY = os.environ.get(
     'NRM_SECRET_KEY',
-    'django-insecure-dev-only-change-me-9k0na5u*y-71#f$a3=nd*1+2od&-3b1-sb@x',
+    'django-insecure-er9k0na5u*y-71#f$a3=nd*1+2od&-3b1-sb@x$xce5mq3y22f',
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!

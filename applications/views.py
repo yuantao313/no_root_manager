@@ -27,13 +27,12 @@ def _provision_on_approve(application, request):
         return
 
     server = application.target_server
-    # 分组：服务器默认组 + 附加组
-    groups = []
-    if server.default_group:
-        groups.append(server.default_group.name)
-    for g in server.extra_groups.all():
-        if g.name not in groups:
-            groups.append(g.name)
+    # 分组：服务器默认组 + 用户申请时勾选的附加组（均为字符串逗号分隔）
+    groups = list(server.default_groups_list())
+    applied = [g.strip() for g in (application.applied_groups or "").split(",") if g.strip()]
+    for g in applied:
+        if g not in groups:
+            groups.append(g)
 
     # 使用截止时间：到期后机器账号自动失效（usermod -e）
     expire_date = application.valid_until.date() if application.valid_until else None

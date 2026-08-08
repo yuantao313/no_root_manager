@@ -193,3 +193,86 @@ class TestReviewProvision:
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         # 申请了迁移时不预建 home
         assert mock.call_args.kwargs["with_home"] is False
+
+
+class TestStringGroups:
+    """服务器分组使用逗号分隔字符串，申请时按服务器读取并校验。"""
+
+    @pytest.fixture
+    def group_server(self, server):
+        server.default_group = "dev,ops"
+        server.extra_groups = "qa,test"
+        server.save()
+        return server
+
+    def test_group_list_parsing(self, group_server):
+        assert group_server.default_groups_list() == ["dev", "ops"]
+        assert group_server.extra_groups_list() == ["qa", "test"]
+
+    def test_empty_groups(self, server):
+        assert server.default_groups_list() == []
+        assert server.extra_groups_list() == []
+
+    def test_groups_api(self, client, staff, group_server):
+        client.force_login(staff)
+        resp = client.get(reverse("servers:groups_api", args=[group_server.pk]))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["default_groups"] == ["dev", "ops"]
+        assert data["extra_groups"] == ["qa", "test"]
+
+    def test_valid_group_accepted(self, client, group_server):
+        from applications.forms import ApplicationForm
+
+        form = ApplicationForm(
+            {
+                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
+                "employee_id": "E1", "apply_type": "account",
+                "target_server": str(group_server.pk), "title": "t",
+                "applied_groups": ["qa"],
+            }
+        )
+        assert form.is_valid(), form.errors
+        app = form.save()
+        assert app.applied_groups == "qa"
+
+    def test_invalid_group_rejected(self, group_server):
+        from applications.forms import ApplicationForm
+
+        form = ApplicationForm(
+            {
+                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
+                "employee_id": "E1", "apply_type": "account",
+                "target_server": str(group_server.pk), "title": "t",
+                "applied_groups": ["hacker"],
+            }
+        )
+        assert form.is_valid() is False
+        assert "不属于所选服务器" in form.errors["applied_groups"][0]
+
+    def test_group_without_server_rejected(self):
+        from applications.forms import ApplicationForm
+
+        form = ApplicationForm(
+            {
+                "applicant_name": "张三", "username": "zs", "email": "z@x.com",
+                "employee_id": "E1", "apply_type": "account",
+                "target_server": "", "title": "t",
+                "applied_groups": ["qa"],
+            }
+        )
+        assert form.is_valid() is False
+        assert "请先选择目标服务器" in form.errors["applied_groups"][0]
+
+    def test_provision_uses_default_plus_applied(self, client, staff, group_server):
+        app = Application.objects.create(
+            applicant_name="张三", username="zs", email="z@x.com",
+            employee_id="E1", title="分组", target_server=group_server,
+            applied_groups="qa",
+        )
+        client.force_login(staff)
+        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")) as mock:
+            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
+        groups = mock.call_args.kwargs["groups"]
+        # 默认组 + 勾选组，不含未勾选的 test
+        assert groups == ["dev", "ops", "qa"]

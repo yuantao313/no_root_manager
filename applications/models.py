@@ -61,6 +61,14 @@ class Application(models.Model):
         verbose_name="目标服务器",
         help_text="从服务器列表中选择",
     )
+    # 用户勾选的附加分组（来自服务器 extra_groups，逗号分隔）
+    applied_groups = models.CharField(
+        "附加分组",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="用户申请时勾选的可附加分组，逗号分隔",
+    )
 
     status = models.CharField(
         "状态",

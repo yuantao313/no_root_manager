@@ -3,31 +3,6 @@ from django.db import models
 from credentials.models import Credential
 
 
-class UserGroup(models.Model):
-    """目标机器上的用户分组（对应 Linux 用户组）。"""
-
-    server = models.ForeignKey(
-        "Server",
-        on_delete=models.CASCADE,
-        related_name="user_groups",
-        verbose_name="所属服务器",
-    )
-    name = models.CharField("组名", max_length=100)
-    description = models.TextField("说明", blank=True)
-
-    created_at = models.DateTimeField("创建时间", auto_now_add=True)
-    updated_at = models.DateTimeField("更新时间", auto_now=True)
-
-    class Meta:
-        ordering = ["name"]
-        unique_together = ("server", "name")
-        verbose_name = "用户分组"
-        verbose_name_plural = "用户分组"
-
-    def __str__(self):
-        return f"{self.server.name} / {self.name}"
-
-
 class ManagedUser(models.Model):
     """受管用户：目标机器上被 NRM 接管（加入 nrm_managed 组）的用户。"""
 
@@ -69,22 +44,20 @@ class Server(models.Model):
         null=True,
         blank=True,
     )
-    # 用户分组配置：默认申请的分组 + 可附加申请的分组
-    default_group = models.ForeignKey(
-        UserGroup,
-        on_delete=models.SET_NULL,
-        null=True,
+    # 用户分组配置：默认申请的分组 + 可附加申请的分组（均为逗号分隔字符串）
+    default_group = models.CharField(
+        "默认申请的用户分组",
+        max_length=100,
         blank=True,
-        related_name="+",
-        verbose_name="默认申请的用户分组",
-        help_text="用户申请账号时默认加入的分组",
+        default="",
+        help_text="用户申请账号时默认加入的分组，多个用英文逗号分隔",
     )
-    extra_groups = models.ManyToManyField(
-        UserGroup,
+    extra_groups = models.CharField(
+        "可附加申请的用户分组",
+        max_length=500,
         blank=True,
-        related_name="+",
-        verbose_name="可附加申请的用户分组",
-        help_text="用户申请时可附加选择加入的分组",
+        default="",
+        help_text="用户申请时可附加选择加入的分组，多个用英文逗号分隔",
     )
     # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制）
     nproc_limit = models.PositiveIntegerField(
@@ -108,3 +81,11 @@ class Server(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.host}:{self.port})"
+
+    def extra_groups_list(self):
+        """解析可附加分组为列表。"""
+        return [g.strip() for g in self.extra_groups.split(",") if g.strip()]
+
+    def default_groups_list(self):
+        """解析默认分组为列表。"""
+        return [g.strip() for g in self.default_group.split(",") if g.strip()]

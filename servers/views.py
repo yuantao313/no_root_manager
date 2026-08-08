@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import ServerForm
@@ -10,6 +11,19 @@ from .ssh import test_server_connection
 
 def is_staff(user):
     return user.is_staff
+
+
+def server_groups_api(request, pk):
+    """返回服务器的分组配置（默认分组 + 可附加分组），供申请表单前端联动。"""
+    server = get_object_or_404(Server, pk=pk)
+    return JsonResponse(
+        {
+            "id": server.pk,
+            "default_groups": server.default_groups_list(),
+            "extra_groups": server.extra_groups_list(),
+        },
+        json_dumps_params={"ensure_ascii": False},
+    )
 
 
 @login_required
