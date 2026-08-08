@@ -16,10 +16,11 @@ class GitCodeBinding(models.Model):
         related_name="gitcode_binding",
         verbose_name="用户",
     )
-    gitcode_id = models.PositiveBigIntegerField(
+    gitcode_id = models.CharField(
         "GitCode 用户 id",
+        max_length=100,
         unique=True,
-        help_text="GitCode 用户唯一 id，作为映射依据（login 可变，id 不变）",
+        help_text="GitCode 用户唯一 id（24 位十六进制字符串，非数字），作为映射依据（login 可变，id 不变）",
     )
     gitcode_username = models.CharField(
         "GitCode 用户名", max_length=100, blank=True, help_text="仅展示用"

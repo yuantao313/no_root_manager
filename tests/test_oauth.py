@@ -103,6 +103,23 @@ class TestGitCodeCallback:
         assert resp.status_code == 302
         assert resp.url.endswith("/accounts/login/")
 
+    def test_hex_string_user_id(self, client):
+        """GitCode 用户 id 是 24 位十六进制字符串（非数字），须正常建号。"""
+        from accounts.models import GitCodeBinding
+
+        hex_id = "66dd3f876949b24baf6e093e"
+        _set_state(client, "good")
+        with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
+            with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
+                 patch("accounts.views.get_user", return_value={"id": hex_id, "email": "u@x.com"}):
+                resp = client.get(reverse("accounts:gitcode_callback") + "?code=abc&state=good")
+        assert resp.status_code == 302
+        user = User.objects.get(username=f"gc{hex_id}")
+        binding = GitCodeBinding.objects.filter(gitcode_id=hex_id).first()
+        assert binding is not None
+        assert binding.user == user
+        assert resp.url.endswith("/accounts/profile/")
+
 
 class TestProfileGate:
     """GitCode 用户未设姓名不能提交申请（防止 gc<id> 占位身份）。"""
