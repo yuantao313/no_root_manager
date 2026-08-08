@@ -6,6 +6,9 @@ from .models import Server
 
 
 class ServerForm(forms.ModelForm):
+    # 高级设置字段：模板中放入折叠面板，默认收起
+    advanced_fields = ("nproc_limit", "nofile_limit")
+
     credential = forms.ModelChoiceField(
         queryset=Credential.objects.all(),
         required=True,
@@ -25,4 +28,6 @@ class ServerForm(forms.ModelForm):
         help_texts = {
             "default_group": "多个分组用英文逗号分隔，如：dev,ops",
             "extra_groups": "多个分组用英文逗号分隔，如：dev,ops；申请时作为可勾选分组展示",
+            "nproc_limit": "该服务器上每个用户的最大进程数，0 表示不限制",
+            "nofile_limit": "该服务器上每个用户的最大打开文件数，0 表示不限制",
         }

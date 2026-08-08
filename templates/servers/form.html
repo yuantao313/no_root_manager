@@ -8,7 +8,39 @@
     <div class="panel-body">
         <form method="post">
             {% csrf_token %}
-            {{ form.as_p }}
+            {% for field in form %}
+                {% if field.name not in form.advanced_fields %}
+                <p>
+                    {{ field.label_tag }} {{ field }}
+                    {% if field.help_text %}<span class="help-block" style="font-size:13px;">{{ field.help_text }}</span>{% endif %}
+                    {{ field.errors }}
+                </p>
+                {% endif %}
+            {% endfor %}
+
+            <!-- 高级设置：资源限制（默认收起） -->
+            <div class="panel panel-default">
+                <div class="panel-heading" role="tab">
+                    <a data-toggle="collapse" href="#advanced-body" aria-expanded="false" aria-controls="advanced-body" style="display:block;">
+                        高级设置：资源限制 <span class="caret"></span>
+                    </a>
+                </div>
+                <div id="advanced-body" class="panel-collapse collapse{% if editing and form.instance.nproc_limit != 128 or editing and form.instance.nofile_limit != 2048 %} in{% endif %}" role="tabpanel">
+                    <div class="panel-body">
+                        {% for field in form %}
+                            {% if field.name in form.advanced_fields %}
+                            <p>
+                                {{ field.label_tag }} {{ field }}
+                                {% if field.help_text %}<span class="help-block" style="font-size:13px;">{{ field.help_text }}</span>{% endif %}
+                                {{ field.errors }}
+                            </p>
+                            {% endif %}
+                        {% endfor %}
+                        <p class="text-muted" style="font-size:13px;">用于防止单个用户耗尽服务器资源（nproc=进程数、nofile=打开文件数），0 表示不限制。</p>
+                    </div>
+                </div>
+            </div>
+
             <p class="text-muted"><a href="{% url 'credentials:create' %}">还没有凭据？去新建一个管理凭据</a></p>
             <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
             {% if editing %}
