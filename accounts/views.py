@@ -7,7 +7,6 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
-from django.contrib.auth.views import LoginView
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -66,17 +65,6 @@ def register(request):
     else:
         form = UserCreationForm()
     return render(request, "accounts/register.html", {"form": form})
-
-
-class GitCodeLoginView(LoginView):
-    """登录页：额外传递 GitCode OAuth 是否已配置（控制入口显示）。"""
-
-    template_name = "accounts/login.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["gitcode_enabled"] = bool(settings.GITCODE_CLIENT_ID)
-        return context
 
 
 @login_required

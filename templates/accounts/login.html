@@ -14,10 +14,8 @@
                     {{ form|crispy }}
                     <button type="submit" class="btn btn-primary btn-block">登录</button>
                 </form>
-                {% if gitcode_enabled %}
                 <hr>
                 <a href="{% url 'accounts:gitcode_login' %}" class="btn btn-success btn-block">使用 GitCode 登录</a>
-                {% endif %}
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">还没有账号？<a href="{% url 'accounts:register' %}">去注册</a></p>
             </div>
         </div>

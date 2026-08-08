@@ -23,9 +23,11 @@ def _set_state(client, state):
 
 
 class TestLoginPage:
-    def test_button_hidden_when_not_configured(self, client):
+    def test_button_always_shown(self, client):
+        # 入口始终显示（未配置时点击由 gitcode_login 给出提示）
         resp = client.get(reverse("accounts:login"))
-        assert "使用 GitCode 登录" not in resp.content.decode()
+        assert "使用 GitCode 登录" in resp.content.decode()
+        assert reverse("accounts:gitcode_login") in resp.content.decode()
 
     def test_button_shown_when_configured(self, client):
         with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
