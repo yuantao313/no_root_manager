@@ -2,6 +2,20 @@
 {% load crispy_forms_tags %}
 {% block title %}登录 - NRM{% endblock %}
 {% block content %}
+<style>
+/* GitCode 品牌色按钮（官网主色 #3572A5） */
+.btn-gitcode {
+    color: #fff;
+    background-color: #3572A5;
+    border-color: #3572A5;
+}
+.btn-gitcode:hover,
+.btn-gitcode:focus {
+    color: #fff;
+    background-color: #2C5C87;
+    border-color: #2C5C87;
+}
+</style>
 <div class="row">
     <div class="col-sm-6 col-sm-offset-3 col-md-4 col-md-offset-4">
         <div class="panel panel-default">
@@ -15,7 +29,7 @@
                     <button type="submit" class="btn btn-primary btn-block">登录</button>
                 </form>
                 <hr>
-                <a href="{% url 'accounts:gitcode_login' %}" class="btn btn-success btn-block">使用 GitCode 登录</a>
+                <a href="{% url 'accounts:gitcode_login' %}" class="btn btn-gitcode btn-block">使用 GitCode 登录</a>
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">还没有账号？<a href="{% url 'accounts:register' %}">去注册</a></p>
             </div>
         </div>
