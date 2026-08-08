@@ -2,17 +2,24 @@ import secrets
 
 from django import forms
 from django.contrib import messages
-from django.contrib.auth import login
+from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
+from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
+from django.contrib.auth.views import (
+    LoginView,
+    PasswordResetView,
+)
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
-from django.urls import reverse
+from django.template.loader import render_to_string
+from django.urls import reverse, reverse_lazy
 
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
+from notifications.services import send_email
 from servers.models import Server, ServerAdminBinding
 
 from .gitcode import (
@@ -21,8 +28,59 @@ from .gitcode import (
     exchange_token,
     get_user,
 )
-from .models import GitCodeBinding, SystemConfig
+from .models import GitCodeBinding, LoginLog, SystemConfig
 from .username_gen import generate_username_groups
+
+# 登录限流：15 分钟内同一用户名+IP 失败达到阈值即锁定 15 分钟
+LOGIN_FAIL_LIMIT = 5
+LOGIN_LOCK_MINUTES = 15
+
+
+class NRMLoginView(LoginView):
+    """登录视图：记录登录日志，并对连续失败实施限流锁定。"""
+
+    template_name = "accounts/login.html"
+
+    def _client_ip(self):
+        return self.request.META.get("REMOTE_ADDR") or ""
+
+    def _is_locked(self, username):
+        """最近窗口内同一用户名+IP 失败达到阈值则锁定。"""
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        since = timezone.now() - timedelta(minutes=LOGIN_LOCK_MINUTES)
+        fails = LoginLog.objects.filter(
+            username=username, ip=self._client_ip(), success=False, created_at__gte=since
+        ).count()
+        return fails >= LOGIN_FAIL_LIMIT
+
+    def _lock_error(self, form):
+        form.add_error(
+            None,
+            f"登录失败次数过多，账号已临时锁定 {LOGIN_LOCK_MINUTES} 分钟，请稍后再试。",
+        )
+
+    def form_invalid(self, form):
+        username = form.data.get("username", "").strip()
+        LoginLog.objects.create(username=username, ip=self._client_ip(), success=False)
+        if self._is_locked(username):
+            self._lock_error(form)
+        return super().form_invalid(form)
+
+    def form_valid(self, form):
+        # 锁定期内拒绝一切登录尝试（含正确密码），防止爆破撞对
+        username = form.cleaned_data.get("username", "")
+        if self._is_locked(username):
+            LoginLog.objects.create(username=username, ip=self._client_ip(), success=False)
+            self._lock_error(form)
+            return self.form_invalid(form)
+        user = form.get_user()
+        LoginLog.objects.create(
+            username=user.username, user=user, ip=self._client_ip(), success=True
+        )
+        return super().form_valid(form)
 
 
 class ProfileForm(forms.Form):
@@ -46,6 +104,24 @@ class ProfileForm(forms.Form):
         if commit:
             user.save()
         return user
+
+
+class NRMPasswordResetForm(BasePasswordResetForm):
+    """密码找回表单：通过系统 SMTP 配置（EmailConfig）发送重置邮件。"""
+
+    def send_mail(self, subject_template_name, email_template_name, context,
+                  from_email, to_email, html_email_template_name=None):
+        subject = render_to_string(subject_template_name, context).strip()
+        body = render_to_string(email_template_name, context)
+        send_email(subject, body, [to_email])
+
+
+class NRMPasswordResetView(PasswordResetView):
+    template_name = "accounts/password_reset_form.html"
+    form_class = NRMPasswordResetForm
+    email_template_name = "accounts/password_reset_email.html"
+    subject_template_name = "accounts/password_reset_subject.txt"
+    success_url = reverse_lazy("accounts:password_reset_done")
 
 
 def username_suggestions(request):
@@ -255,14 +331,33 @@ def settings(request):
 
 @login_required
 def gitcode_unbind(request):
-    """解绑 GitCode：删除当前用户的绑定关系（仅本人）。"""
+    """解绑 GitCode：无密码用户（仅靠 GitCode 登录）须先设置本地密码，
+    否则解绑后将无法登录系统。"""
     binding = getattr(request.user, "gitcode_binding", None)
     if binding is None:
         messages.info(request, "您尚未绑定 GitCode 账号。")
+    elif not request.user.has_usable_password():
+        messages.error(request, "请先设置本地密码，再解绑 GitCode（否则将无法登录）。")
     else:
         binding.delete()
         messages.success(request, "GitCode 账号已解绑。")
     return redirect("accounts:profile")
+
+
+@login_required
+def set_password(request):
+    """为当前用户设置本地密码（GitCode 无密码用户解绑前置条件）。"""
+    if request.method == "POST":
+        form = SetPasswordForm(request.user, request.POST)
+        if form.is_valid():
+            form.save()
+            # 设置后更新会话认证（防止密码变更导致会话失效）
+            update_session_auth_hash(request, form.user)
+            messages.success(request, "本地密码已设置。")
+            return redirect("accounts:profile")
+    else:
+        form = SetPasswordForm(request.user)
+    return render(request, "accounts/set_password.html", {"form": form})
 
 
 def gitcode_callback(request):

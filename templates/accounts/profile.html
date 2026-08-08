@@ -39,10 +39,15 @@
                     <dd>
                         {% if user.gitcode_binding %}
                         <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
+                        {% if not user.has_usable_password %}
+                        <span class="label label-warning">无本地密码</span>
+                        <a href="{% url 'accounts:set_password' %}" class="btn btn-primary btn-xs">先设置本地密码</a>
+                        {% else %}
                         <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-warning btn-xs">解绑</button>
                         </form>
+                        {% endif %}
                         {% else %}
                         <span class="text-muted">未绑定</span>
                         <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>

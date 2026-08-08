@@ -48,6 +48,31 @@ class SystemConfig(models.Model):
         }
 
 
+class LoginLog(models.Model):
+    """登录日志：记录每次登录尝试（成功/失败、IP、时间），供审计与限流。"""
+
+    username = models.CharField("尝试的用户名", max_length=150)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="login_logs",
+        verbose_name="用户",
+    )
+    ip = models.GenericIPAddressField("IP 地址", null=True, blank=True)
+    success = models.BooleanField("是否成功", default=False)
+    created_at = models.DateTimeField("时间", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "登录日志"
+        verbose_name_plural = "登录日志"
+
+    def __str__(self):
+        return f"{self.username} {'成功' if self.success else '失败'} @ {self.created_at:%m-%d %H:%M}"
+
+
 class GitCodeBinding(models.Model):
     """用户与 GitCode 账号的绑定关系（用户 id 映射，不修改 auth 用户模型）。
 
