@@ -22,31 +22,33 @@
                             <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
                             <input type="email" id="field-email" name="email" class="form-control field-input" style="display:none;width:60%;" value="{{ user.email }}">
                         </dd>
-                        <dt>用户名</dt>
-                        <dd>{{ user.username }}</dd>
-                        <dt>角色</dt>
-                        <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
-                        <dt>注册时间</dt>
-                        <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
-                        <dt>GitCode</dt>
-                        <dd>
-                            {% if user.gitcode_binding %}
-                            <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
-                            <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-warning btn-xs">解绑</button>
-                            </form>
-                            {% else %}
-                            <span class="text-muted">未绑定</span>
-                            <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
-                            {% endif %}
-                        </dd>
                     </dl>
                     <p id="field-actions" style="display:none;">
                         <button type="submit" name="save_profile" class="btn btn-primary btn-sm">保存</button>
                         <a href="javascript:void(0)" class="btn btn-default btn-sm" onclick="cancelEdit()">取消</a>
                     </p>
                 </form>
+                <dl>
+                    <dt>用户名</dt>
+                    <dd>{{ user.username }}</dd>
+                    <dt>角色</dt>
+                    <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
+                    <dt>注册时间</dt>
+                    <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
+                    <dt>GitCode</dt>
+                    <dd>
+                        {% if user.gitcode_binding %}
+                        <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
+                        <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-warning btn-xs">解绑</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted">未绑定</span>
+                        <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
+                        {% endif %}
+                    </dd>
+                </dl>
             </div>
         </div>
     </div>
