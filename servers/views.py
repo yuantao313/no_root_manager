@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
-from config.decorators import staff_required, superuser_required
+from config.decorators import superuser_required
 
 from .forms import ServerForm
 from .management import ensure_nrm_group, sync_managed_users, take_over_user
@@ -23,10 +23,10 @@ def server_groups_api(request, pk):
     )
 
 
-@staff_required
+@superuser_required
 def server_list(request):
-    """服务器列表（管理员）：超级管理员全部，普通管理员仅绑定的。"""
-    servers = Server.visible_to(request.user)
+    """服务器列表（仅超级管理员）。"""
+    servers = Server.objects.all()
     return render(request, "servers/list.html", {"servers": servers})
 
 
@@ -53,10 +53,10 @@ def server_create(request):
     return render(request, "servers/form.html", {"form": form, "editing": False})
 
 
-@staff_required
+@superuser_required
 def server_edit(request, pk):
-    """编辑服务器（管理员，需有该服务器权限）：可修改基本信息与分组配置。"""
-    server = get_object_or_404(Server.visible_to(request.user), pk=pk)
+    """编辑服务器（仅超级管理员）：可修改基本信息与分组配置。"""
+    server = get_object_or_404(Server, pk=pk)
     if request.method == "POST":
         form = ServerForm(request.POST, instance=server)
         action = request.POST.get("action", "save")
@@ -77,10 +77,10 @@ def server_edit(request, pk):
     return render(request, "servers/form.html", {"form": form, "editing": True})
 
 
-@staff_required
+@superuser_required
 def server_test(request, pk):
-    """对已保存的服务器执行连接测试（管理员，需有该服务器权限）。"""
-    server = get_object_or_404(Server.visible_to(request.user), pk=pk)
+    """对已保存的服务器执行连接测试（仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法测试。")
         return redirect("servers:detail", pk=pk)
@@ -92,17 +92,17 @@ def server_test(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
-@staff_required
+@superuser_required
 def server_detail(request, pk):
-    """服务器详情（管理员，需有该服务器权限），含受管用户列表。"""
-    server = get_object_or_404(Server.visible_to(request.user), pk=pk)
+    """服务器详情（仅超级管理员），含受管用户列表。"""
+    server = get_object_or_404(Server, pk=pk)
     return render(request, "servers/detail.html", {"server": server})
 
 
-@staff_required
+@superuser_required
 def server_sync_users(request, pk):
-    """同步目标机器 nrm_managed 组成员到数据库（管理员，需有该服务器权限）。"""
-    server = get_object_or_404(Server.visible_to(request.user), pk=pk)
+    """同步目标机器 nrm_managed 组成员到数据库（仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法同步。")
         return redirect("servers:detail", pk=pk)
@@ -118,10 +118,10 @@ def server_sync_users(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
-@staff_required
+@superuser_required
 def server_takeover_user(request, pk):
-    """将指定用户加入目标机器 nrm_managed 组（接管，管理员需有该服务器权限）。"""
-    server = get_object_or_404(Server.visible_to(request.user), pk=pk)
+    """将指定用户加入目标机器 nrm_managed 组（接管，仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     if request.method != "POST" or not username:
         messages.error(request, "请填写要接管的用户名。")

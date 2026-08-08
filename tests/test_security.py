@@ -120,13 +120,12 @@ class TestCredentialVisibility:
         ServerAdminBinding.objects.create(server=s1, admin=st)
         return {"c1": c1, "c2": c2, "su": su, "st": st}
 
-    def test_normal_admin_only_sees_bound(self, client, setup):
+    def test_normal_admin_cannot_see(self, client, setup):
+        # 凭据为敏感全局资源：普通管理员完全不可访问（列表/详情均拒绝）
         client.force_login(setup["st"])
-        html = client.get(reverse("credentials:list")).content.decode()
-        assert "c1" in html
-        assert "c2" not in html
-        assert client.get(reverse("credentials:detail", args=[setup["c1"].pk])).status_code == 200
-        assert client.get(reverse("credentials:detail", args=[setup["c2"].pk])).status_code == 404
+        assert client.get(reverse("credentials:list")).status_code == 302
+        assert client.get(reverse("credentials:detail", args=[setup["c1"].pk])).status_code == 302
+        assert client.get(reverse("credentials:detail", args=[setup["c2"].pk])).status_code == 302
 
     def test_normal_admin_cannot_create(self, client, setup):
         client.force_login(setup["st"])
