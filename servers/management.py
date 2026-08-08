@@ -153,7 +153,8 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
             return False, "", f"设置强制改密失败：{err}"
 
     # 写入资源限制（ulimit），防止单个用户耗尽服务器资源
-    if server.nproc_limit or server.nofile_limit:
+    if any([server.nproc_limit, server.nofile_limit, server.as_limit,
+            server.core_limit, server.fsize_limit, server.maxlogins_limit]):
         ok, err = apply_resource_limits(server, username)
         if not ok:
             return False, "", f"设置资源限制失败：{err}"
@@ -161,11 +162,22 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
     return True, password, f"用户 {username} 已开通（分组：{group_args}）"
 
 
+# 资源限制项：字段名 -> limits.conf 的 item 名（hard 限制）
+RESOURCE_LIMIT_ITEMS = (
+    ("nproc_limit", "nproc"),
+    ("nofile_limit", "nofile"),
+    ("as_limit", "as"),
+    ("core_limit", "core"),
+    ("fsize_limit", "fsize"),
+    ("maxlogins_limit", "maxlogins"),
+)
+
+
 def apply_resource_limits(server, username):
     """为用户在目标机器写入资源限制（/etc/security/limits.d/nrm-<user>.conf）。
 
     使用 limits.d 独立文件而非直接改 limits.conf，便于删除用户时一并清理。
-    服务器上 nproc_limit / nofile_limit 为 0 时对应项不写入。
+    服务器上各限制字段为 0 时对应项不写入。
     返回 (ok, msg)。
     """
     username = (username or "").strip()
@@ -173,10 +185,10 @@ def apply_resource_limits(server, username):
         return False, "用户名为空"
 
     lines = []
-    if server.nproc_limit:
-        lines.append(f"{username} hard nproc {server.nproc_limit}")
-    if server.nofile_limit:
-        lines.append(f"{username} hard nofile {server.nofile_limit}")
+    for field, item in RESOURCE_LIMIT_ITEMS:
+        value = getattr(server, field, 0)
+        if value:
+            lines.append(f"{username} hard {item} {value}")
     if not lines:
         return True, "未配置资源限制"
 

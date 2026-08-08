@@ -25,7 +25,7 @@
                         高级设置：资源限制 <span class="caret"></span>
                     </a>
                 </div>
-                <div id="advanced-body" class="panel-collapse collapse{% if editing and form.instance.nproc_limit != 128 or editing and form.instance.nofile_limit != 2048 %} in{% endif %}" role="tabpanel">
+                <div id="advanced-body" class="panel-collapse collapse{% if editing %}{% if form.instance.nproc_limit != 128 or form.instance.nofile_limit != 2048 or form.instance.as_limit or form.instance.core_limit or form.instance.fsize_limit or form.instance.maxlogins_limit %} in{% endif %}{% endif %}" role="tabpanel">
                     <div class="panel-body">
                         {% for field in form %}
                             {% if field.name in form.advanced_fields %}
@@ -36,7 +36,7 @@
                             </p>
                             {% endif %}
                         {% endfor %}
-                        <p class="text-muted" style="font-size:13px;">用于防止单个用户耗尽服务器资源（nproc=进程数、nofile=打开文件数），0 表示不限制。</p>
+                        <p class="text-muted" style="font-size:13px;">防止单个用户耗尽服务器资源（nproc=进程数、nofile=打开文件数、as=虚拟内存、core=核心转储、fsize=文件大小、maxlogins=最大登录数），0 表示不限制。</p>
                     </div>
                 </div>
             </div>

@@ -241,3 +241,37 @@ class TestApplyResourceLimits:
             ok, pwd, msg = provision_user(ubuntu_server, "gina")
         assert ok is True
         assert any("limits.d/nrm-gina.conf" in c for c in commands)
+
+    def test_writes_all_limit_items(self, ubuntu_server):
+        ubuntu_server.nproc_limit = 128
+        ubuntu_server.nofile_limit = 2048
+        ubuntu_server.as_limit = 1048576
+        ubuntu_server.core_limit = 0
+        ubuntu_server.fsize_limit = 0
+        ubuntu_server.maxlogins_limit = 3
+        ubuntu_server.save()
+        with patch("servers.management._exec", return_value=(True, "", "")) as mock:
+            ok, msg = apply_resource_limits(ubuntu_server, "alice")
+        assert ok is True
+        cmd = mock.call_args.args[1]
+        assert "alice hard nproc 128" in cmd
+        assert "alice hard nofile 2048" in cmd
+        assert "alice hard as 1048576" in cmd
+        assert "alice hard maxlogins 3" in cmd
+        # 0 值项不写入
+        assert "hard core" not in cmd
+        assert "hard fsize" not in cmd
+
+    def test_zero_only_server_no_limits(self, ubuntu_server):
+        ubuntu_server.nproc_limit = 0
+        ubuntu_server.nofile_limit = 0
+        ubuntu_server.as_limit = 0
+        ubuntu_server.core_limit = 0
+        ubuntu_server.fsize_limit = 0
+        ubuntu_server.maxlogins_limit = 0
+        ubuntu_server.save()
+        with patch("servers.management._exec") as mock:
+            ok, msg = apply_resource_limits(ubuntu_server, "alice")
+        assert ok is True
+        assert "未配置" in msg
+        mock.assert_not_called()

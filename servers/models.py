@@ -59,16 +59,36 @@ class Server(models.Model):
         default="",
         help_text="用户申请时可附加选择加入的分组，多个用英文逗号分隔",
     )
-    # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制）
+    # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制；写入 limits.d）
     nproc_limit = models.PositiveIntegerField(
         "进程数限制 nproc",
         default=128,
-        help_text="该服务器上每个用户的最大进程数，0 表示不限制",
+        help_text="每个用户最大进程数，0 表示不限制",
     )
     nofile_limit = models.PositiveIntegerField(
         "文件数限制 nofile",
         default=2048,
-        help_text="该服务器上每个用户的最大打开文件数，0 表示不限制",
+        help_text="每个用户最大打开文件数，0 表示不限制",
+    )
+    as_limit = models.PositiveIntegerField(
+        "虚拟内存限制 as(KB)",
+        default=0,
+        help_text="每个用户最大虚拟内存（KB），0 表示不限制",
+    )
+    core_limit = models.PositiveIntegerField(
+        "核心转储限制 core(KB)",
+        default=0,
+        help_text="核心转储文件大小（KB），建议 0 防占磁盘，0 表示不限制",
+    )
+    fsize_limit = models.PositiveIntegerField(
+        "文件大小限制 fsize(KB)",
+        default=0,
+        help_text="每个用户最大单文件大小（KB），0 表示不限制",
+    )
+    maxlogins_limit = models.PositiveIntegerField(
+        "最大登录数 maxlogins",
+        default=0,
+        help_text="每个用户最大同时登录会话数，0 表示不限制",
     )
 
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
