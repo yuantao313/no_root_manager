@@ -9,13 +9,21 @@
         <dl>
             <dt>用户名</dt>
             <dd>{{ user.username }}</dd>
-            <dt>邮箱</dt>
-            <dd>{{ user.email|default:"—" }}</dd>
             <dt>角色</dt>
             <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
             <dt>注册时间</dt>
             <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
         </dl>
+        <hr>
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit" class="btn btn-primary">保存个人信息</button>
+        </form>
+        {% if user.is_staff %}
+        <hr>
+        <p><a href="{% url 'notifications:my' %}" class="btn btn-default">管理我的 Webhook</a></p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

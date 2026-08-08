@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 from servers.fields import EncryptedTextField
@@ -32,12 +33,25 @@ class EmailConfig(models.Model):
 
 
 class WebhookConfig(models.Model):
-    """Webhook 通知配置：申请事件推送 JSON 到指定 URL。"""
+    """Webhook 通知配置：申请事件推送 JSON 到指定 URL。
+
+    owner 为空表示全局 Webhook（所有事件推送），
+    非空表示管理员个人的 Webhook（仅本人可管理）。
+    """
 
     name = models.CharField("名称", max_length=100)
     url = models.URLField("Webhook URL", help_text="收到事件时推送 JSON 的地址")
     secret = EncryptedTextField("密钥", blank=True, help_text="可选，用于鉴权（存储时加密）")
     enabled = models.BooleanField("启用", default=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="webhooks",
+        verbose_name="所属管理员",
+        help_text="留空为全局 Webhook",
+    )
 
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
@@ -47,4 +61,5 @@ class WebhookConfig(models.Model):
         verbose_name_plural = "Webhook 配置"
 
     def __str__(self):
-        return f"{self.name}（{'启用' if self.enabled else '停用'}）"
+        scope = "全局" if self.owner is None else f"{self.owner.username}"
+        return f"{self.name}（{scope}，{'启用' if self.enabled else '停用'}）"

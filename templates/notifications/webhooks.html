@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}我的 Webhook - NRM{% endblock %}
+{% block content %}
+<div class="page-header-row">
+    <div class="row">
+        <div class="col-xs-6"><h2>我的 Webhook</h2></div>
+        <div class="col-xs-6 text-right"><a href="{% url 'accounts:profile' %}" class="btn btn-default">返回个人中心</a></div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">已有 Webhook</h3></div>
+            {% if hooks %}
+            <table class="table table-striped">
+                <thead>
+                    <tr><th>名称</th><th>URL</th><th>状态</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    {% for hook in hooks %}
+                    <tr>
+                        <td>{{ hook.name }}</td>
+                        <td style="word-break:break-all;">{{ hook.url }}</td>
+                        <td>{% if hook.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
+                        <td>
+                            <form method="post" action="{% url 'notifications:delete' hook.pk %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-danger btn-xs">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="panel-body"><p class="text-muted">暂无个人 Webhook，可在右侧添加。</p></div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">添加 Webhook</h3></div>
+            <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;">申请创建/审批事件会推送 JSON 到该地址，仅本人可见可管。</p>
+                <form method="post">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
