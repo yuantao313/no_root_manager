@@ -25,27 +25,60 @@ class TestProfileEdit:
         assert 'id="field-email"' in html
         assert "editField" in html
 
-    def test_update_name_and_email(self, client):
+    def test_update_name_without_email_change(self, client):
+        # 仅改姓名（邮箱不变）无需验证码
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
         resp = client.post(
             reverse("accounts:profile"),
-            {"save_profile": "1", "name": "张三", "email": "new@x.com"},
+            {"save_profile": "1", "name": "张三", "email": "old@x.com", "code": ""},
         )
         assert resp.status_code == 302
         user.refresh_from_db()
-        assert user.email == "new@x.com"
-        # 姓名一体化：写入 first_name
+        assert user.email == "old@x.com"
         assert user.first_name == "张三"
         assert user.last_name == ""
 
-    def test_clear_all_allowed(self, client):
+    def test_update_email_requires_code(self, client):
+        # 修改邮箱必须填写验证码，错误/缺失验证码拒绝，正确验证码通过
+        from unittest.mock import patch
+
+        from accounts.email_verify import send_user_email_code
+        from accounts.models import EmailVerification
+
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
         client.force_login(user)
-        client.post(reverse("accounts:profile"), {"save_profile": "1", "name": "", "email": ""})
+        # 无验证码 -> 拒绝
+        client.post(reverse("accounts:profile"),
+                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": ""})
         user.refresh_from_db()
-        assert user.email == ""
-        assert user.first_name == ""
+        assert user.email == "old@x.com"
+        # 错误验证码 -> 拒绝
+        client.post(reverse("accounts:profile"),
+                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": "000000"})
+        user.refresh_from_db()
+        assert user.email == "old@x.com"
+        # 正确验证码 -> 通过
+        with patch("accounts.email_verify.send_email", return_value=True):
+            send_user_email_code("new@x.com", user)
+        rec = EmailVerification.objects.get(email="new@x.com", purpose="user_email", user=user)
+        client.post(reverse("accounts:profile"),
+                    {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": rec.code})
+        user.refresh_from_db()
+        assert user.email == "new@x.com"
+        assert user.first_name == "张三"
+
+    def test_send_email_code_branch(self, client):
+        from unittest.mock import patch
+
+        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
+        client.force_login(user)
+        with patch("accounts.views.send_user_email_code", return_value=True) as mock:
+            resp = client.post(reverse("accounts:profile"),
+                               {"send_email_code": "1", "email": "new@x.com"})
+        assert resp.status_code == 302
+        assert mock.call_count == 1
+        assert mock.call_args.args[0] == "new@x.com"
 
 
 class TestMyWebhooks:

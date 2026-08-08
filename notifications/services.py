@@ -12,22 +12,19 @@ from .models import EmailConfig, WebhookConfig
 logger = logging.getLogger(__name__)
 
 
-def send_email(subject: str, body: str, to_list: list[str]) -> bool:
-    """使用 EmailConfig 配置发送邮件。未启用或未配置时返回 False。"""
-    cfg = EmailConfig.objects.first()
-    if not cfg or not cfg.enabled or not cfg.host or not to_list:
-        logger.info("邮件未发送（未启用/未配置）：%s -> %s", subject, to_list)
-        return False
+def send_email_with_config(host, port, username, password, from_email, use_tls,
+                           subject: str, body: str, to_list: list[str]) -> bool:
+    """使用指定 SMTP 配置发送邮件（不依赖数据库 EmailConfig）。
 
-    from_email = cfg.from_email or cfg.username
-    # 使用配置的 SMTP 服务器而非 Django 默认（localhost）
-    # 注意：不能走 get_connection(backend=...)，MAILERS 已接管该入口
+    用于 SMTP 配置在写入数据库前验证可用性（发验证码邮件）。
+    """
+    from_email = from_email or username
     connection = EmailBackend(
-        host=cfg.host,
-        port=cfg.port,
-        username=cfg.username,
-        password=cfg.password,
-        use_tls=cfg.use_tls,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        use_tls=use_tls,
         fail_silently=False,
     )
     message = EmailMessage(
@@ -39,11 +36,23 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
     )
     try:
         message.send()
-        logger.info("邮件已发送：%s -> %s", subject, to_list)
+        logger.info("邮件已发送（指定配置）：%s -> %s", subject, to_list)
         return True
     except Exception:  # noqa: BLE001 —— 邮件失败不应影响主流程
-        logger.exception("邮件发送失败：%s -> %s", subject, to_list)
+        logger.exception("邮件发送失败（指定配置）：%s -> %s", subject, to_list)
         return False
+
+
+def send_email(subject: str, body: str, to_list: list[str]) -> bool:
+    """使用 EmailConfig 配置发送邮件。未启用或未配置时返回 False。"""
+    cfg = EmailConfig.objects.first()
+    if not cfg or not cfg.enabled or not cfg.host or not to_list:
+        logger.info("邮件未发送（未启用/未配置）：%s -> %s", subject, to_list)
+        return False
+    return send_email_with_config(
+        cfg.host, cfg.port, cfg.username, cfg.password,
+        cfg.from_email, cfg.use_tls, subject, body, to_list,
+    )
 
 
 def admin_emails() -> list[str]:

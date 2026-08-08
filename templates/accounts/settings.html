@@ -36,6 +36,7 @@
         <div class="panel panel-default" style="max-width:640px;">
             <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
             <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;">保存前会先使用当前填写的配置发送一封验证码邮件；验证码校验通过后配置才会写入数据库。</p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
@@ -45,16 +46,20 @@
                     <p><label>发件人地址</label><input type="text" name="from_email" class="form-control" value="{{ email_cfg.from_email|default:'' }}"></p>
                     <p><label><input type="checkbox" name="use_tls" {% if email_cfg.use_tls %}checked{% endif %}> 使用 SSL/TLS</label></p>
                     <p><label><input type="checkbox" name="enabled" {% if email_cfg.enabled %}checked{% endif %}> 启用邮件通知</label></p>
-                    <button type="submit" name="save_email" class="btn btn-primary">保存</button>
+                    <p><label>验证收件邮箱</label><input type="email" name="verify_email" class="form-control" placeholder="验证码将发送到此邮箱" required></p>
+                    <button type="submit" name="save_email" class="btn btn-primary">发送验证码</button>
                 </form>
                 <hr>
-                <p class="text-muted" style="font-size:13px;">填写一个目标邮箱，验证 SMTP 配置能否成功发信（使用已保存的配置发送测试邮件）。</p>
+                <p class="text-muted" style="font-size:13px;">收到验证码后，填写并确认保存（此时才会写入数据库）。</p>
                 <form method="post" class="form-inline">
                     {% csrf_token %}
                     <div class="form-group">
-                        <input type="email" name="test_email" class="form-control" placeholder="测试收件邮箱" required style="width:260px;">
+                        <input type="email" name="verify_email" class="form-control" placeholder="验证收件邮箱" required style="width:200px;">
                     </div>
-                    <button type="submit" name="send_test_email" class="btn btn-success">发送测试邮件</button>
+                    <div class="form-group">
+                        <input type="text" name="code" class="form-control" placeholder="验证码" required style="width:120px;">
+                    </div>
+                    <button type="submit" name="confirm_email" class="btn btn-success">确认保存</button>
                 </form>
             </div>
         </div>
