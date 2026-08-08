@@ -10,6 +10,8 @@ urlpatterns = [
     path("profile/", views.profile, name="profile"),
     path("gitcode/login/", views.gitcode_login, name="gitcode_login"),
     path("gitcode/callback/", views.gitcode_callback, name="gitcode_callback"),
+    path("gitcode/bind/", views.gitcode_bind, name="gitcode_bind"),
+    path("gitcode/bind/callback/", views.gitcode_bind_callback, name="gitcode_bind_callback"),
     path("api/username-suggestions/", views.username_suggestions, name="username-suggestions"),
     path("login/", auth_views.LoginView.as_view(
         template_name="accounts/login.html",

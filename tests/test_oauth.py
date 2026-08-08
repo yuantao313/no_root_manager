@@ -102,3 +102,116 @@ class TestGitCodeCallback:
                 resp = client.get(reverse("accounts:gitcode_callback") + "?code=abc&state=good")
         assert resp.status_code == 302
         assert resp.url.endswith("/accounts/login/")
+
+
+class TestProfileGate:
+    """GitCode 用户未设姓名不能提交申请（防止 gc<id> 占位身份）。"""
+
+    def _gc_user(self):
+        from accounts.models import GitCodeBinding
+
+        user = User.objects.create_user(username="gc42", password="x")
+        user.set_unusable_password()
+        user.save()
+        GitCodeBinding.objects.create(user=user, gitcode_id=42, gitcode_username="alice")
+        return user
+
+    def test_cannot_apply_without_name(self, client):
+        user = self._gc_user()
+        client.force_login(user)
+        resp = client.post(
+            reverse("applications:create"),
+            {"username": "m1", "employee_id": "E1", "apply_type": "account",
+             "target_server": "", "title": "t", "applied_groups": []},
+        )
+        # 未设姓名被拦截，跳个人中心
+        assert resp.status_code == 302
+        assert resp.url.endswith("/accounts/profile/")
+        from applications.models import Application
+        assert not Application.objects.exists()
+
+    def test_can_apply_after_setting_name(self, client):
+        user = self._gc_user()
+        client.force_login(user)
+        client.post(reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": ""})
+        user.refresh_from_db()
+        assert user.first_name == "张三"
+        resp = client.post(
+            reverse("applications:create"),
+            {"username": "m1", "employee_id": "E1", "apply_type": "account",
+             "target_server": "", "title": "t", "applied_groups": []},
+        )
+        # 设置姓名后可提交
+        assert resp.status_code == 302
+        assert resp.url.endswith("/applications/my/")
+
+
+class TestGitCodeBind:
+    """已注册用户主动绑定 GitCode。"""
+
+    @pytest.fixture
+    def user(self):
+        return User.objects.create_user(username="reg", password="x12345!", first_name="张三")
+
+    def _bind_state(self, client, state="bs1"):
+        s = client.session
+        s["gitcode_bind_state"] = state
+        s.save()
+
+    def test_profile_shows_bind_entry(self, client, user):
+        client.force_login(user)
+        html = client.get(reverse("accounts:profile")).content.decode()
+        assert "绑定 GitCode" in html
+        assert "已绑定" not in html
+
+    def test_bind_redirects_to_authorize(self, client, user):
+        client.force_login(user)
+        with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
+            resp = client.get(reverse("accounts:gitcode_bind"))
+        assert resp.status_code == 302
+        assert "gitcode.com/oauth/authorize" in resp.url
+
+    def test_bind_callback_creates_binding(self, client, user):
+        from accounts.models import GitCodeBinding
+
+        client.force_login(user)
+        self._bind_state(client)
+        with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
+            with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
+                 patch("accounts.views.get_user", return_value={"id": 555, "login": "gc_alice"}):
+                resp = client.get(reverse("accounts:gitcode_bind_callback") + "?code=a&state=bs1")
+        binding = GitCodeBinding.objects.filter(gitcode_id=555).first()
+        assert binding is not None
+        assert binding.user == user
+        assert resp.url.endswith("/accounts/profile/")
+
+    def test_bind_callback_duplicate_rejected(self, client, user):
+        from accounts.models import GitCodeBinding
+
+        other = User.objects.create_user(username="other", password="x")
+        GitCodeBinding.objects.create(user=other, gitcode_id=555)
+        client.force_login(user)
+        self._bind_state(client)
+        with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
+            with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
+                 patch("accounts.views.get_user", return_value={"id": 555}):
+                resp = client.get(reverse("accounts:gitcode_bind_callback") + "?code=a&state=bs1")
+        # 已被他人绑定 -> 拒绝且不建立绑定
+        assert resp.url.endswith("/accounts/profile/")
+        assert GitCodeBinding.objects.filter(gitcode_id=555).count() == 1
+
+    def test_bound_user_login_via_oauth(self, client, user):
+        """已注册用户绑定 GitCode 后，OAuth 登录直接进入该用户。"""
+        from accounts.models import GitCodeBinding
+
+        GitCodeBinding.objects.create(user=user, gitcode_id=777, gitcode_username="reg_gc")
+        _set_state(client, "good")
+        with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
+            with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
+                 patch("accounts.views.get_user", return_value={"id": 777}):
+                resp = client.get(reverse("accounts:gitcode_callback") + "?code=abc&state=good")
+        assert resp.status_code == 302
+        assert resp.url.endswith("/applications/my/")
+        # 登录的是绑定的已注册用户（gc777 不存在）
+        assert int(client.session["_auth_user_id"]) == user.pk
+        assert not User.objects.filter(username="gc777").exists()

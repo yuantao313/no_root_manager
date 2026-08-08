@@ -28,6 +28,15 @@
                         <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
                         <dt>注册时间</dt>
                         <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
+                        <dt>GitCode</dt>
+                        <dd>
+                            {% if user.gitcode_binding %}
+                            <span class="label label-success">已绑定</span> gitcode#{{ user.gitcode_binding.gitcode_id }}
+                            {% else %}
+                            <span class="text-muted">未绑定</span>
+                            <a href="{% url 'accounts:gitcode_bind' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
+                            {% endif %}
+                        </dd>
                     </dl>
                     <p id="field-actions" style="display:none;">
                         <button type="submit" name="save_profile" class="btn btn-primary btn-sm">保存</button>
