@@ -118,7 +118,8 @@ def gitcode_login(request):
 
 @login_required
 def gitcode_bind(request):
-    """已注册用户绑定 GitCode：跳转授权页（绑定回调）。"""
+    """已注册用户绑定 GitCode：跳转授权页（与登录共用同一回调地址，
+    通过 session state 键区分绑定模式，避免 GitCode 需要注册多个回调）。"""
     if not settings.GITCODE_CLIENT_ID:
         messages.error(request, "GitCode 登录未配置（缺少 GITCODE_CLIENT_ID）。")
         return redirect("accounts:profile")
@@ -127,20 +128,16 @@ def gitcode_bind(request):
         return redirect("accounts:profile")
     state = secrets.token_urlsafe(16)
     request.session["gitcode_bind_state"] = state
-    redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_bind_callback"))
+    redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
     url = build_authorize_url(settings.GITCODE_CLIENT_ID, redirect_uri, state)
     return redirect(url)
 
 
-@login_required
-def gitcode_bind_callback(request):
-    """绑定回调：校验 state、换 token、取用户信息并建立绑定。"""
-    state = request.GET.get("state", "")
-    if state != request.session.pop("gitcode_bind_state", ""):
-        messages.error(request, "GitCode 绑定校验失败（state 不匹配），请重试。")
-        return redirect("accounts:profile")
-
-    code = request.GET.get("code", "")
+def _gitcode_bind_done(request, code):
+    """绑定模式的收尾：校验 code、换 token、取用户信息并建立绑定。"""
+    if not request.user.is_authenticated:
+        messages.error(request, "绑定 GitCode 需要先登录。")
+        return redirect("accounts:login")
     if not code:
         messages.error(request, "GitCode 未返回授权码。")
         return redirect("accounts:profile")
@@ -179,13 +176,22 @@ def gitcode_bind_callback(request):
 
 
 def gitcode_callback(request):
-    """GitCode OAuth 回调：校验 state、换 token、取用户信息、自动建号并登录。"""
+    """GitCode OAuth 回调（登录与绑定共用）。
+
+    通过 state 匹配 session 中不同的键来区分模式：
+    - gitcode_bind_state：绑定（当前用户已登录）
+    - gitcode_oauth_state：登录
+    """
     state = request.GET.get("state", "")
+    code = request.GET.get("code", "")
+
+    # 先判定模式：绑定优先（其 state 只存于已登录会话）
+    if state and state == request.session.pop("gitcode_bind_state", ""):
+        return _gitcode_bind_done(request, code)
     if state != request.session.pop("gitcode_oauth_state", ""):
         messages.error(request, "GitCode 登录校验失败（state 不匹配），请重试。")
         return redirect("accounts:login")
 
-    code = request.GET.get("code", "")
     if not code:
         messages.error(request, "GitCode 未返回授权码。")
         return redirect("accounts:login")

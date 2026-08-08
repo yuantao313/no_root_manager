@@ -179,7 +179,8 @@ class TestGitCodeBind:
         with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
             with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
                  patch("accounts.views.get_user", return_value={"id": 555, "login": "gc_alice"}):
-                resp = client.get(reverse("accounts:gitcode_bind_callback") + "?code=a&state=bs1")
+                # 绑定与登录共用统一回调，靠 bind_state 区分
+                resp = client.get(reverse("accounts:gitcode_callback") + "?code=a&state=bs1")
         binding = GitCodeBinding.objects.filter(gitcode_id=555).first()
         assert binding is not None
         assert binding.user == user
@@ -195,7 +196,7 @@ class TestGitCodeBind:
         with patch("django.conf.settings.GITCODE_CLIENT_ID", "cid"):
             with patch("accounts.views.exchange_token", return_value={"access_token": "tok"}), \
                  patch("accounts.views.get_user", return_value={"id": 555}):
-                resp = client.get(reverse("accounts:gitcode_bind_callback") + "?code=a&state=bs1")
+                resp = client.get(reverse("accounts:gitcode_callback") + "?code=a&state=bs1")
         # 已被他人绑定 -> 拒绝且不建立绑定
         assert resp.url.endswith("/accounts/profile/")
         assert GitCodeBinding.objects.filter(gitcode_id=555).count() == 1
