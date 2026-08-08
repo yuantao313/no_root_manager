@@ -1,6 +1,38 @@
+from django.conf import settings
 from django.db import models
 
 from credentials.models import Credential
+
+
+class ServerAdminBinding(models.Model):
+    """普通管理员与服务器的绑定关系（权限分配）。
+
+    - 超级管理员（is_superuser）拥有全部服务器，无需绑定
+    - 普通管理员（is_staff 且非 superuser）只能管理绑定表中的服务器
+    - 由超级管理员在系统设置中维护
+    """
+
+    server = models.ForeignKey(
+        "Server",
+        on_delete=models.CASCADE,
+        related_name="admin_bindings",
+        verbose_name="服务器",
+    )
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="server_bindings",
+        verbose_name="普通管理员",
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+
+    class Meta:
+        unique_together = ("server", "admin")
+        verbose_name = "服务器管理员绑定"
+        verbose_name_plural = "服务器管理员绑定"
+
+    def __str__(self):
+        return f"{self.admin.username} → {self.server.name}"
 
 
 class ManagedUser(models.Model):
@@ -109,3 +141,10 @@ class Server(models.Model):
     def default_groups_list(self):
         """解析默认分组为列表。"""
         return [g.strip() for g in self.default_group.split(",") if g.strip()]
+
+    @classmethod
+    def visible_to(cls, user):
+        """用户可管理的服务器：超级管理员全部，普通管理员仅绑定的。"""
+        if user.is_superuser:
+            return cls.objects.all()
+        return cls.objects.filter(admin_bindings__admin=user)

@@ -1,7 +1,6 @@
 import secrets
 
 from django import forms
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -11,8 +10,10 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
+from config.decorators import superuser_required
 from notifications.forms import WebhookForm
-from notifications.models import WebhookConfig
+from notifications.models import EmailConfig, WebhookConfig
+from servers.models import Server, ServerAdminBinding
 
 from .gitcode import (
     GitCodeOAuthError,
@@ -20,7 +21,7 @@ from .gitcode import (
     exchange_token,
     get_user,
 )
-from .models import GitCodeBinding
+from .models import GitCodeBinding, SystemConfig
 from .username_gen import generate_username_groups
 
 
@@ -106,13 +107,14 @@ def profile(request):
 
 def gitcode_login(request):
     """GitCode OAuth 登录：跳转到授权页（state 防 CSRF）。"""
-    if not settings.GITCODE_CLIENT_ID:
-        messages.error(request, "GitCode 登录未配置（缺少 GITCODE_CLIENT_ID）。")
+    cfg = SystemConfig.gitcode_config()
+    if not cfg["client_id"]:
+        messages.error(request, "GitCode 登录未配置（请在系统设置中填写 GitCode Client ID）。")
         return redirect("accounts:login")
     state = secrets.token_urlsafe(16)
     request.session["gitcode_oauth_state"] = state
     redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
-    url = build_authorize_url(settings.GITCODE_CLIENT_ID, redirect_uri, state)
+    url = build_authorize_url(cfg["client_id"], redirect_uri, state, scope=cfg["scope"])
     return redirect(url)
 
 
@@ -120,8 +122,9 @@ def gitcode_login(request):
 def gitcode_bind(request):
     """已注册用户绑定 GitCode：跳转授权页（与登录共用同一回调地址，
     通过 session state 键区分绑定模式，避免 GitCode 需要注册多个回调）。"""
-    if not settings.GITCODE_CLIENT_ID:
-        messages.error(request, "GitCode 登录未配置（缺少 GITCODE_CLIENT_ID）。")
+    cfg = SystemConfig.gitcode_config()
+    if not cfg["client_id"]:
+        messages.error(request, "GitCode 登录未配置（请在系统设置中填写 GitCode Client ID）。")
         return redirect("accounts:profile")
     if hasattr(request.user, "gitcode_binding"):
         messages.info(request, "您已绑定 GitCode 账号，无需重复绑定。")
@@ -129,7 +132,7 @@ def gitcode_bind(request):
     state = secrets.token_urlsafe(16)
     request.session["gitcode_bind_state"] = state
     redirect_uri = request.build_absolute_uri(reverse("accounts:gitcode_callback"))
-    url = build_authorize_url(settings.GITCODE_CLIENT_ID, redirect_uri, state)
+    url = build_authorize_url(cfg["client_id"], redirect_uri, state, scope=cfg["scope"])
     return redirect(url)
 
 
@@ -142,10 +145,11 @@ def _gitcode_bind_done(request, code):
         messages.error(request, "GitCode 未返回授权码。")
         return redirect("accounts:profile")
 
+    cfg = SystemConfig.gitcode_config()
     try:
         token_data = exchange_token(
-            settings.GITCODE_CLIENT_ID,
-            settings.GITCODE_CLIENT_SECRET,
+            cfg["client_id"],
+            cfg["client_secret"],
             code,
         )
         access_token = token_data.get("access_token", "")
@@ -173,6 +177,80 @@ def _gitcode_bind_done(request, code):
     )
     messages.success(request, "GitCode 账号绑定成功。")
     return redirect("accounts:profile")
+
+
+@superuser_required
+def settings(request):
+    """系统设置（仅超级管理员）：GitCode 配置/邮件/全局 Webhook/管理员-服务器绑定。"""
+    syscfg = SystemConfig.get_singleton()
+    email_cfg = EmailConfig.objects.first()
+    hooks = WebhookConfig.objects.filter(owner__isnull=True)
+    bindings = ServerAdminBinding.objects.select_related("server", "admin").all()
+    staff_users = User.objects.filter(is_staff=True, is_superuser=False).order_by("username")
+    servers = Server.objects.all().order_by("name")
+
+    if request.method == "POST":
+        if "save_gitcode" in request.POST:
+            syscfg.gitcode_client_id = request.POST.get("gitcode_client_id", "").strip()
+            # secret 留空表示不修改（密文不回显）
+            new_secret = request.POST.get("gitcode_client_secret", "").strip()
+            if new_secret:
+                syscfg.gitcode_client_secret = new_secret
+            syscfg.gitcode_scope = request.POST.get("gitcode_scope", "all_user").strip() or "all_user"
+            syscfg.save()
+            messages.success(request, "GitCode 配置已保存。")
+        elif "save_email" in request.POST:
+            email_cfg = email_cfg or EmailConfig()
+            email_cfg.host = request.POST.get("host", "").strip()
+            email_cfg.port = int(request.POST.get("port") or 465)
+            email_cfg.username = request.POST.get("username", "").strip()
+            new_pw = request.POST.get("password", "").strip()
+            if new_pw:
+                email_cfg.password = new_pw
+            email_cfg.from_email = request.POST.get("from_email", "").strip()
+            email_cfg.use_tls = "use_tls" in request.POST
+            email_cfg.enabled = "enabled" in request.POST
+            email_cfg.save()
+            messages.success(request, "邮件配置已保存。")
+        elif "add_webhook" in request.POST:
+            name = request.POST.get("name", "").strip()
+            url = request.POST.get("url", "").strip()
+            if name and url:
+                WebhookConfig.objects.create(
+                    name=name, url=url,
+                    secret=request.POST.get("secret", "").strip(),
+                    enabled="enabled" in request.POST,
+                    owner=None,
+                )
+                messages.success(request, "全局 Webhook 已添加。")
+            else:
+                messages.error(request, "Webhook 名称与 URL 必填。")
+        elif "del_webhook" in request.POST:
+            hook = WebhookConfig.objects.filter(pk=request.POST.get("webhook_id")).first()
+            if hook and hook.owner is None:
+                hook.delete()
+                messages.success(request, "Webhook 已删除。")
+        elif "add_binding" in request.POST:
+            server_id = request.POST.get("server_id")
+            admin_id = request.POST.get("admin_id")
+            if server_id and admin_id:
+                ServerAdminBinding.objects.get_or_create(server_id=server_id, admin_id=admin_id)
+                messages.success(request, "绑定关系已添加。")
+        elif "del_binding" in request.POST:
+            binding = ServerAdminBinding.objects.filter(pk=request.POST.get("binding_id")).first()
+            if binding:
+                binding.delete()
+                messages.success(request, "绑定关系已解除。")
+        return redirect("accounts:settings")
+
+    return render(request, "accounts/settings.html", {
+        "syscfg": syscfg,
+        "email_cfg": email_cfg,
+        "hooks": hooks,
+        "bindings": bindings,
+        "staff_users": staff_users,
+        "servers": servers,
+    })
 
 
 @login_required
@@ -209,9 +287,10 @@ def gitcode_callback(request):
         return redirect("accounts:login")
 
     try:
+        cfg = SystemConfig.gitcode_config()
         token_data = exchange_token(
-            settings.GITCODE_CLIENT_ID,
-            settings.GITCODE_CLIENT_SECRET,
+            cfg["client_id"],
+            cfg["client_secret"],
             code,
         )
         access_token = token_data.get("access_token", "")

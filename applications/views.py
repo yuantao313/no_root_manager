@@ -15,6 +15,7 @@ from notifications.services import (
     webhook_review_result,
 )
 from servers.management import grant_sudo, migrate_home_dir, provision_user
+from servers.models import Server
 
 
 def _provision_on_approve(application, request):
@@ -94,8 +95,13 @@ def _grant_sudo_for_application(application, request):
 
 @staff_required
 def application_list(request):
-    """申请列表（仅管理员）：查看全部申请。"""
-    applications = Application.objects.all()
+    """申请列表（管理员）：超级管理员看全部，普通管理员仅看绑定服务器的申请。"""
+    if request.user.is_superuser:
+        applications = Application.objects.all()
+    else:
+        applications = Application.objects.filter(
+            target_server__in=Server.visible_to(request.user)
+        )
     return render(request, "applications/list.html", {"applications": applications})
 
 
@@ -134,15 +140,24 @@ def application_create(request):
 
 @staff_required
 def application_detail(request, pk):
-    """申请详情（仅管理员可看）。"""
-    application = get_object_or_404(Application, pk=pk)
+    """申请详情（管理员，普通管理员仅限绑定服务器的申请）。"""
+    if request.user.is_superuser:
+        qs = Application.objects.all()
+    else:
+        qs = Application.objects.filter(target_server__in=Server.visible_to(request.user))
+    application = get_object_or_404(qs, pk=pk)
     return render(request, "applications/detail.html", {"application": application})
 
 
 @staff_required
 def application_review(request, pk, action):
-    """审批：action 为 approve（通过）或 reject（驳回），仅管理员可用。"""
-    application = get_object_or_404(Application, pk=pk)
+    """审批：action 为 approve（通过）或 reject（驳回），
+    普通管理员仅能审批绑定服务器的申请。"""
+    if request.user.is_superuser:
+        qs = Application.objects.all()
+    else:
+        qs = Application.objects.filter(target_server__in=Server.visible_to(request.user))
+    application = get_object_or_404(qs, pk=pk)
     if application.status != Application.Status.PENDING:
         messages.warning(request, "该申请已处理，不能重复审批。")
         return redirect("applications:detail", pk=pk)

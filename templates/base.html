@@ -52,6 +52,9 @@
                     <li><a href="{% url 'applications:list' %}">申请列表</a></li>
                     <li><a href="{% url 'servers:list' %}">服务器</a></li>
                     <li><a href="{% url 'credentials:list' %}">凭据</a></li>
+                    {% if user.is_superuser %}
+                    <li><a href="{% url 'accounts:settings' %}">系统设置</a></li>
+                    {% endif %}
                     <li><a href="{% url 'admin:index' %}">后台管理</a></li>
                     {% endif %}
                     {% else %}

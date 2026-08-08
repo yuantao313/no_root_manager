@@ -17,7 +17,8 @@ User = get_user_model()
 
 @pytest.fixture
 def staff():
-    return User.objects.create_user(username="admin", password="x12345!", is_staff=True)
+    # 超级管理员：可审批任意服务器的申请（普通管理员仅能审批绑定服务器，另测）
+    return User.objects.create_user(username="admin", password="x12345!", is_staff=True, is_superuser=True)
 
 
 @pytest.fixture

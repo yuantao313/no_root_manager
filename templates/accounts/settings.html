@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}系统设置 - NRM{% endblock %}
+{% block content %}
+<div class="page-header-row">
+    <div class="row">
+        <div class="col-xs-6"><h2>系统设置</h2></div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs" role="tablist">
+    <li role="presentation" class="active"><a href="#tab-gitcode" aria-controls="tab-gitcode" role="tab" data-toggle="tab">GitCode 登录</a></li>
+    <li role="presentation"><a href="#tab-email" aria-controls="tab-email" role="tab" data-toggle="tab">邮件通知</a></li>
+    <li role="presentation"><a href="#tab-webhook" aria-controls="tab-webhook" role="tab" data-toggle="tab">全局 Webhook</a></li>
+    <li role="presentation"><a href="#tab-binding" aria-controls="tab-binding" role="tab" data-toggle="tab">管理员与服务器</a></li>
+</ul>
+
+<div class="tab-content" style="padding-top:16px;">
+    <!-- GitCode 配置 -->
+    <div role="tabpanel" class="tab-pane active" id="tab-gitcode">
+        <div class="panel panel-default" style="max-width:640px;">
+            <div class="panel-heading"><h3 class="panel-title">GitCode OAuth 配置</h3></div>
+            <div class="panel-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <p><label>Client ID</label><input type="text" name="gitcode_client_id" class="form-control" value="{{ syscfg.gitcode_client_id }}"></p>
+                    <p><label>Client Secret（留空表示不修改）</label><input type="password" name="gitcode_client_secret" class="form-control" placeholder="已配置时留空保持原值"></p>
+                    <p><label>Scope</label><input type="text" name="gitcode_scope" class="form-control" value="{{ syscfg.gitcode_scope }}"></p>
+                    <button type="submit" name="save_gitcode" class="btn btn-primary">保存</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 邮件配置 -->
+    <div role="tabpanel" class="tab-pane" id="tab-email">
+        <div class="panel panel-default" style="max-width:640px;">
+            <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
+            <div class="panel-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
+                    <p><label>端口</label><input type="number" name="port" class="form-control" value="{{ email_cfg.port|default:465 }}"></p>
+                    <p><label>用户名</label><input type="text" name="username" class="form-control" value="{{ email_cfg.username|default:'' }}"></p>
+                    <p><label>密码/授权码（留空表示不修改）</label><input type="password" name="password" class="form-control"></p>
+                    <p><label>发件人地址</label><input type="text" name="from_email" class="form-control" value="{{ email_cfg.from_email|default:'' }}"></p>
+                    <p><label><input type="checkbox" name="use_tls" {% if email_cfg.use_tls %}checked{% endif %}> 使用 SSL/TLS</label></p>
+                    <p><label><input type="checkbox" name="enabled" {% if email_cfg.enabled %}checked{% endif %}> 启用邮件通知</label></p>
+                    <button type="submit" name="save_email" class="btn btn-primary">保存</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全局 Webhook -->
+    <div role="tabpanel" class="tab-pane" id="tab-webhook">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">全局 Webhook</h3></div>
+            {% if hooks %}
+            <table class="table table-striped">
+                <thead><tr><th>名称</th><th>URL</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                    {% for hook in hooks %}
+                    <tr>
+                        <td>{{ hook.name }}</td>
+                        <td style="word-break:break-all;">{{ hook.url }}</td>
+                        <td>{% if hook.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
+                        <td>
+                            <form method="post" style="display:inline;">
+                                {% csrf_token %}
+                                <input type="hidden" name="webhook_id" value="{{ hook.pk }}">
+                                <button type="submit" name="del_webhook" class="btn btn-danger btn-xs">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="panel-body"><p class="text-muted">暂无全局 Webhook。</p></div>
+            {% endif %}
+            <div class="panel-body" style="border-top:1px solid #ddd;">
+                <form method="post">
+                    {% csrf_token %}
+                    <p><label>名称</label><input type="text" name="name" class="form-control"></p>
+                    <p><label>URL</label><input type="text" name="url" class="form-control"></p>
+                    <p><label>密钥（可选）</label><input type="password" name="secret" class="form-control"></p>
+                    <p><label><input type="checkbox" name="enabled" checked> 启用</label></p>
+                    <button type="submit" name="add_webhook" class="btn btn-primary">添加</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 管理员与服务器绑定 -->
+    <div role="tabpanel" class="tab-pane" id="tab-binding">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">普通管理员与服务器绑定</h3></div>
+            <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;">超级管理员可管理全部服务器；普通管理员仅能管理此处绑定的服务器（含审批对应服务器的申请）。</p>
+                <form method="post" class="form-inline" style="margin-bottom:12px;">
+                    {% csrf_token %}
+                    <div class="form-group">
+                        <select name="admin_id" class="form-control">
+                            <option value="">选择普通管理员</option>
+                            {% for u in staff_users %}<option value="{{ u.pk }}">{{ u.username }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <select name="server_id" class="form-control">
+                            <option value="">选择服务器</option>
+                            {% for s in servers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" name="add_binding" class="btn btn-primary">添加绑定</button>
+                </form>
+            </div>
+            {% if bindings %}
+            <table class="table table-striped">
+                <thead><tr><th>普通管理员</th><th>服务器</th><th>操作</th></tr></thead>
+                <tbody>
+                    {% for b in bindings %}
+                    <tr>
+                        <td>{{ b.admin.username }}</td>
+                        <td>{{ b.server.name }}</td>
+                        <td>
+                            <form method="post" style="display:inline;">
+                                {% csrf_token %}
+                                <input type="hidden" name="binding_id" value="{{ b.pk }}">
+                                <button type="submit" name="del_binding" class="btn btn-danger btn-xs">解除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

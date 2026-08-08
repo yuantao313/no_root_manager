@@ -8,6 +8,7 @@ app_name = "accounts"
 urlpatterns = [
     path("register/", views.register, name="register"),
     path("profile/", views.profile, name="profile"),
+    path("settings/", views.settings, name="settings"),
     path("gitcode/login/", views.gitcode_login, name="gitcode_login"),
     path("gitcode/callback/", views.gitcode_callback, name="gitcode_callback"),
     path("gitcode/bind/", views.gitcode_bind, name="gitcode_bind"),
