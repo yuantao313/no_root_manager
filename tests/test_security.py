@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User as AuthUser
 from django.contrib.auth.tokens import default_token_generator
@@ -10,7 +11,6 @@ from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
-from allauth.socialaccount.models import SocialAccount
 from credentials.models import Credential
 from notifications.models import EmailConfig
 from servers.models import Server, ServerAdminBinding

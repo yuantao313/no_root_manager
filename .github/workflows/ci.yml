@@ -32,5 +32,5 @@ jobs:
       - name: Run pytest
         run: uv run pytest
 
-      - name: Lint with pyflakes (project code only)
-        run: uv run pyflakes . | grep -v '^./.venv/' || true
+      - name: Lint with ruff
+        run: uv run ruff check .

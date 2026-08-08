@@ -1,10 +1,10 @@
 """GitCode OAuth（django-allauth）测试：登录页入口、个人中心绑定展示、资料门禁。"""
 
 import pytest
+from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from allauth.socialaccount.models import SocialAccount
 from applications.models import Application
 
 pytestmark = pytest.mark.django_db
@@ -16,9 +16,8 @@ class TestLoginPage:
     @pytest.fixture(autouse=True)
     def gitcode_app(self):
         """创建 GitCode SocialApp（provider 配置后登录页显示可点入口）。"""
-        from django.contrib.sites.models import Site
-
         from allauth.socialaccount.models import SocialApp
+        from django.contrib.sites.models import Site
 
         app, _ = SocialApp.objects.get_or_create(
             provider="gitcode", defaults={"name": "GitCode", "client_id": "cid", "secret": "sec"}
@@ -42,9 +41,8 @@ class TestProfileBinding:
 
     @pytest.fixture
     def gitcode_app(self):
-        from django.contrib.sites.models import Site
-
         from allauth.socialaccount.models import SocialApp
+        from django.contrib.sites.models import Site
 
         app, _ = SocialApp.objects.get_or_create(
             provider="gitcode", defaults={"name": "GitCode", "client_id": "cid", "secret": "sec"}

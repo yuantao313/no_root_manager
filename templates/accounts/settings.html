@@ -24,7 +24,6 @@
                     {% csrf_token %}
                     <p><label>Client ID</label><input type="text" name="gitcode_client_id" class="form-control" value="{{ syscfg.gitcode_client_id }}"></p>
                     <p><label>Client Secret（留空表示不修改）</label><input type="password" name="gitcode_client_secret" class="form-control" placeholder="已配置时留空保持原值"></p>
-                    <p><label>Scope</label><input type="text" name="gitcode_scope" class="form-control" value="{{ syscfg.gitcode_scope }}"></p>
                     <button type="submit" name="save_gitcode" class="btn btn-primary">保存</button>
                 </form>
             </div>

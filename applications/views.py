@@ -4,9 +4,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from config.decorators import staff_required
-
-from .forms import ApplicationForm
-from .models import Application, SudoGrant
 from notifications.services import (
     notify_new_application,
     notify_review_result,
@@ -16,6 +13,9 @@ from notifications.services import (
 )
 from servers.management import grant_sudo, migrate_home_dir, provision_user
 from servers.models import Server
+
+from .forms import ApplicationForm
+from .models import Application, SudoGrant
 
 
 def _provision_on_approve(application, request):

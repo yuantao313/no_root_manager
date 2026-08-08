@@ -16,7 +16,6 @@ class SystemConfig(models.Model):
     gitcode_client_secret = EncryptedTextField(
         "GitCode Client Secret", blank=True, help_text="存储时加密，页面不展示明文"
     )
-    gitcode_scope = models.CharField("GitCode Scope", max_length=200, blank=True, default="all_user")
 
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 

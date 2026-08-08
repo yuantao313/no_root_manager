@@ -1,3 +1,4 @@
+from allauth.socialaccount.models import SocialApp
 from django import forms
 from django.contrib import messages
 from django.contrib.auth import login, update_session_auth_hash
@@ -11,7 +12,6 @@ from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse_lazy
 
-from allauth.socialaccount.models import SocialApp
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
@@ -191,7 +191,6 @@ def settings(request):
             new_secret = request.POST.get("gitcode_client_secret", "").strip()
             if new_secret:
                 syscfg.gitcode_client_secret = new_secret
-            syscfg.gitcode_scope = request.POST.get("gitcode_scope", "all_user").strip() or "all_user"
             syscfg.save()
             # 同步到 allauth SocialApp（OAuth 登录实际读取该配置）
             if syscfg.gitcode_client_id:
