@@ -10,6 +10,18 @@
         body { padding-top: 70px; background: #f5f5f5; }
         /* 品牌标题 "No Root" 的 Root 品牌红高亮（!important 防 navbar 样式覆盖） */
         .navbar-brand .no-root { color: #FC5531 !important; }
+        /* GitCode 品牌色按钮（从官网 favicon 提取主色 #FC5531） */
+        .btn-gitcode {
+            color: #fff;
+            background-color: #FC5531;
+            border-color: #FC5531;
+        }
+        .btn-gitcode:hover,
+        .btn-gitcode:focus {
+            color: #fff;
+            background-color: #E0441F;
+            border-color: #E0441F;
+        }
         /* Django form.as_p 输出适配 Bootstrap 表单控件 */
         form p { margin-bottom: 15px; }
         form p label { display: block; font-weight: 700; margin-bottom: 5px; }

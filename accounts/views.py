@@ -1,8 +1,10 @@
+from allauth.socialaccount.forms import SignupForm as SocialSignupForm
+from allauth.socialaccount.internal import flows as socialaccount_flows
 from allauth.socialaccount.models import SocialApp
 from django import forms
 from django.contrib import messages
-from django.contrib.auth import login, update_session_auth_hash
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate, login, update_session_auth_hash
+from django.contrib.auth.decorators import login_not_required, login_required
 from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
 from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
@@ -88,6 +90,46 @@ def register(request):
     else:
         form = UserCreationForm()
     return render(request, "accounts/register.html", {"form": form})
+
+
+@login_not_required
+def social_signup(request):
+    """GitCode 社交注册页：Tab 支持"创建新账号"或"绑定已有账号"。
+
+    - 创建模式（默认）：用 SignupForm 完成注册（含注册要素）
+    - 绑定模式（POST 带 bind_existing）：账号+密码验证通过后，
+      sociallogin.connect 绑定到已有用户并直接登录
+    """
+    sociallogin = socialaccount_flows.signup.get_pending_signup(request)
+    if not sociallogin:
+        return redirect("accounts:login")
+
+    if request.method == "POST":
+        if "bind_existing" in request.POST:
+            # 绑定已有账号：账号+密码验证
+            username = request.POST.get("bind_username", "").strip()
+            password = request.POST.get("bind_password", "")
+            user = authenticate(request, username=username, password=password)
+            if user is not None:
+                sociallogin.connect(request, user)
+                login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+                messages.success(request, f"GitCode 已绑定到账号 {user.username}，欢迎回来。")
+                return redirect("applications:my")
+            messages.error(request, "账号或密码错误，绑定失败。")
+            form = SocialSignupForm(sociallogin=sociallogin)
+        else:
+            # 创建新账号：默认注册流程（含注册要素）
+            form = SocialSignupForm(request.POST, sociallogin=sociallogin)
+            if form.is_valid():
+                return socialaccount_flows.signup.signup_by_form(request, sociallogin, form)
+    else:
+        form = SocialSignupForm(sociallogin=sociallogin)
+
+    return render(
+        request,
+        "socialaccount/signup.html",
+        {"form": form, "account": sociallogin.account},
+    )
 
 
 def _gitcode_enabled():

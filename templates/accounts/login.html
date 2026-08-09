@@ -1,22 +1,7 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
-{% load socialaccount %}
 {% block title %}登录 - NRM{% endblock %}
 {% block content %}
-<style>
-/* GitCode 品牌色按钮（从官网 favicon 提取主色 #FC5531） */
-.btn-gitcode {
-    color: #fff;
-    background-color: #FC5531;
-    border-color: #FC5531;
-}
-.btn-gitcode:hover,
-.btn-gitcode:focus {
-    color: #fff;
-    background-color: #E0441F;
-    border-color: #E0441F;
-}
-</style>
 <div class="row">
     <div class="col-sm-6 col-sm-offset-3 col-md-4 col-md-offset-4">
         <div class="panel panel-default">
@@ -30,11 +15,7 @@
                     <button type="submit" class="btn btn-primary btn-block">登录</button>
                 </form>
                 <hr>
-                {% if gitcode_enabled %}
-                <a href="{% provider_login_url 'gitcode' %}" class="btn btn-gitcode btn-block">使用 GitCode 登录</a>
-                {% else %}
-                <span class="btn btn-gitcode btn-block disabled">使用 GitCode 登录（未配置）</span>
-                {% endif %}
+                {% include "accounts/_gitcode_button.html" %}
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">还没有账号？<a href="{% url 'accounts:register' %}">去注册</a> · <a href="{% url 'accounts:password_reset' %}">忘记密码？</a></p>
             </div>
         </div>

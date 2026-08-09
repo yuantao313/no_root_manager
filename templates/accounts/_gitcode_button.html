@@ -1,0 +1,7 @@
+{% load socialaccount %}
+{# GitCode 第三方登录入口（登录页/注册页共用组件） #}
+{% if gitcode_enabled %}
+<a href="{% provider_login_url 'gitcode' %}" class="btn btn-gitcode btn-block">使用 GitCode 登录</a>
+{% else %}
+<span class="btn btn-gitcode btn-block disabled">使用 GitCode 登录（未配置）</span>
+{% endif %}

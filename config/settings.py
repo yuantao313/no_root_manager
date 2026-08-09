@@ -84,6 +84,8 @@ ACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_QUERY_EMAIL = False
 SOCIALACCOUNT_LOGIN_ON_GET = False
+# 首次 GitCode 登录走 signup 确认页（注册新账号/绑定已有账号），已绑定用户直接登录
+SOCIALACCOUNT_ADAPTER = "accounts.adapter.GitCodeSocialAccountAdapter"
 
 # GitCode OAuth 配置由 django-allauth 的 SocialApp 管理（系统设置页维护）
 
