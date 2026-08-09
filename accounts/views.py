@@ -90,9 +90,34 @@ def register(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
+def _sync_gitcode_socialapp():
+    """将 SystemConfig 的 GitCode 配置同步到 allauth SocialApp（配置真源是 SystemConfig）。
+
+    用户通过系统设置页维护 client_id/secret（SystemConfig），OAuth 实际读取
+    SocialApp；二者必须一致，缺失/过期时自动补建（幂等）。
+    """
+    from django.contrib.sites.models import Site
+
+    syscfg = SystemConfig.objects.first()
+    if not syscfg or not syscfg.gitcode_client_id:
+        return False
+    app, _ = SocialApp.objects.get_or_create(provider="gitcode")
+    app.name = "GitCode"
+    app.client_id = syscfg.gitcode_client_id
+    if syscfg.gitcode_client_secret:
+        app.secret = syscfg.gitcode_client_secret
+    app.save()
+    app.sites.add(Site.objects.get_current())
+    return True
+
+
 def _gitcode_enabled():
-    """GitCode OAuth 是否已配置（存在 SocialApp 记录）。"""
-    return SocialApp.objects.filter(provider="gitcode").exists()
+    """GitCode OAuth 是否已配置：以 SystemConfig 为准（并同步 SocialApp，保证可登录）。"""
+    syscfg = SystemConfig.objects.first()
+    if not syscfg or not syscfg.gitcode_client_id:
+        return False
+    _sync_gitcode_socialapp()
+    return True
 
 
 class GitCodeLoginView(LoginView):

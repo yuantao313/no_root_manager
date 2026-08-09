@@ -15,15 +15,14 @@ User = get_user_model()
 class TestLoginPage:
     @pytest.fixture(autouse=True)
     def gitcode_app(self):
-        """创建 GitCode SocialApp（provider 配置后登录页显示可点入口）。"""
-        from allauth.socialaccount.models import SocialApp
-        from django.contrib.sites.models import Site
+        """配置 GitCode（SystemConfig 真源）：登录页显示可点入口。"""
+        from accounts.models import SystemConfig
 
-        app, _ = SocialApp.objects.get_or_create(
-            provider="gitcode", defaults={"name": "GitCode", "client_id": "cid", "secret": "sec"}
-        )
-        app.sites.add(Site.objects.get_current())
-        return app
+        sc = SystemConfig.get_singleton()
+        sc.gitcode_client_id = "cid"
+        sc.gitcode_client_secret = "sec"
+        sc.save()
+        return sc
 
     def test_gitcode_button_shown(self, client):
         resp = client.get(reverse("accounts:login"))
@@ -41,14 +40,13 @@ class TestProfileBinding:
 
     @pytest.fixture
     def gitcode_app(self):
-        from allauth.socialaccount.models import SocialApp
-        from django.contrib.sites.models import Site
+        from accounts.models import SystemConfig
 
-        app, _ = SocialApp.objects.get_or_create(
-            provider="gitcode", defaults={"name": "GitCode", "client_id": "cid", "secret": "sec"}
-        )
-        app.sites.add(Site.objects.get_current())
-        return app
+        sc = SystemConfig.get_singleton()
+        sc.gitcode_client_id = "cid"
+        sc.gitcode_client_secret = "sec"
+        sc.save()
+        return sc
 
     def test_profile_shows_bind_entry_when_unbound(self, client, user, gitcode_app):
         client.force_login(user)
