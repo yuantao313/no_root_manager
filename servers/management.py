@@ -382,8 +382,6 @@ def migrate_home_dir(server, source_dir, username):
 
 # ===== 初始化脚本 / NPU 分组 / 用户公告 =====
 
-NOTICE_FILE = "nrm_notifications.md"
-
 
 def run_init_script(server):
     """远程 get 初始化脚本并在目标机运行（curl -sL <url> | sudo bash）。返回 (ok, msg)。"""
@@ -421,31 +419,13 @@ def grant_npu_access(server, username, groups):
 
 
 def _announcement_text():
-    """启用公告拼成的纯文本（用于写入用户 home 与服务器 motd）。"""
+    """启用公告拼成的纯文本（用于写入服务器 motd）。"""
     from accounts.models import Announcement
 
     notices = [n for n in Announcement.objects.filter(enabled=True) if n.content.strip()]
     if not notices:
         return ""
     return "\n\n".join(f"# {n.title}\n{n.content}" for n in notices)
-
-
-def write_user_notice(server, username):
-    """把启用中的公告写入用户 home 的 nrm_notifications.md（个人目录留存）。
-
-    返回 (ok, msg)。无启用公告时跳过。
-    """
-    content = _announcement_text()
-    if not content:
-        return True, "无启用公告，跳过"
-    home = f"/home/{username}"
-    ok, _, err = _exec(
-        server,
-        f"echo {shlex.quote(content)} > {home}/{NOTICE_FILE} && chown {username}:{username} {home}/{NOTICE_FILE}",
-    )
-    if not ok:
-        return False, f"公告写入失败：{err}"
-    return True, f"公告已写入 {home}/{NOTICE_FILE}"
 
 
 def write_server_motd(server):
@@ -467,7 +447,7 @@ def write_server_motd(server):
 
 
 def push_notices(server=None):
-    """批量推送公告：目标机 motd（登录显示）+ 各受管用户 home 目录留存。
+    """批量推送公告：写入目标机 motd（SSH 登录显示）。
 
     server 为空则推送全部服务器。返回 (ok, msg)。
     """
@@ -477,12 +457,8 @@ def push_notices(server=None):
     done, fail = 0, []
     for s in servers:
         ok, msg = write_server_motd(s)
-        if not ok:
+        if ok:
+            done += 1
+        else:
             fail.append(f"{s.name}：{msg}")
-        for mu in ManagedUser.objects.filter(server=s):
-            ok, msg = write_user_notice(s, mu.username)
-            if ok:
-                done += 1
-            else:
-                fail.append(f"{s.name}/{mu.username}：{msg}")
-    return True, f"公告推送完成（motd + {done} 个用户 home）" + (f"；失败：{'；'.join(fail)}" if fail else "")
+    return True, f"公告推送完成：{done} 台服务器 motd" + (f"；失败：{'；'.join(fail)}" if fail else "")

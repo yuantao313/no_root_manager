@@ -19,7 +19,7 @@ from servers.management import (
     migrate_home_dir,
     provision_user,
     take_over_user,
-    write_user_notice,
+    write_server_motd,
 )
 from servers.models import ManagedUser, Server
 
@@ -81,8 +81,8 @@ def _provision_on_approve(application, request):
         else:
             messages.warning(request, msg_npu)
 
-    # 开通后写入用户公告（个人目录 nrm_notifications.md + .bashrc 登录打印）
-    _ok_notice, _msg_notice = write_user_notice(server, application.username)
+    # 开通后写入目标机 motd 公告（SSH 登录显示）
+    _ok_notice, _msg_notice = write_server_motd(server)
 
     # 使用截止时间：到期后机器账号自动失效（usermod -e）
     expire_date = application.valid_until.date() if application.valid_until else None

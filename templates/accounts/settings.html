@@ -191,7 +191,7 @@
             <div class="panel-body"><p class="text-muted">暂无公告。</p></div>
             {% endif %}
             <div class="panel-body" style="border-top:1px solid #ddd;">
-                <p class="text-muted" style="font-size:13px;">公告将写入目标服务器的 motd（用户 SSH 登录时显示）与受管用户 home 目录的 nrm_notifications.md，并在系统首页同步展示；在服务器详情页可批量推送。</p>
+                <p class="text-muted" style="font-size:13px;">公告将写入目标服务器的 motd（用户 SSH 登录时显示），并在系统首页同步展示；在服务器详情页可批量推送。</p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>标题</label><input type="text" name="title" class="form-control"></p>

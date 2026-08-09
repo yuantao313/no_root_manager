@@ -47,17 +47,16 @@ def test_groups_api_returns_npu(server, client):
     assert r.json()["is_npu"] is True
 
 
-def test_write_notice_and_motd(server):
-    from servers.management import write_server_motd, write_user_notice
+def test_write_motd(server):
+    from servers.management import write_server_motd
 
     Announcement.objects.create(title="使用规范", content="禁止挖矿", enabled=True)
     with patch("servers.management._exec", return_value=(True, "", "")) as m:
-        ok1, _ = write_user_notice(server, "alice")
         ok2, _ = write_server_motd(server)
     cmds = [c.args[1] for c in m.call_args_list]
-    assert ok1 and ok2
-    assert any("nrm_notifications.md" in c for c in cmds)
+    assert ok2
     assert any("/etc/motd.d" in c for c in cmds)
+    assert not any("nrm_notifications.md" in c for c in cmds)
 
 
 def test_homepage_shows_announcement(client, server):
