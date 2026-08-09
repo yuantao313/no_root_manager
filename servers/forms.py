@@ -32,7 +32,6 @@ class ServerForm(forms.ModelForm):
             "port",
             "credential",
             "default_group",
-            "extra_groups",
             "is_npu",
             "init_script",
             "nproc_limit",
@@ -53,7 +52,6 @@ class ServerForm(forms.ModelForm):
         }
         help_texts = {
             "default_group": "多个分组用英文逗号分隔，如：dev,ops",
-            "extra_groups": "多个分组用英文逗号分隔，如：dev,ops；申请时作为可勾选分组展示",
             "nproc_limit": "每个用户最大进程数，0 表示不限制",
             "nofile_limit": "每个用户最大打开文件数，0 表示不限制",
             "as_limit": "每个用户最大虚拟内存（KB），0 表示不限制",

@@ -11,7 +11,6 @@ class ServerAdmin(admin.ModelAdmin):
         "port",
         "credential",
         "default_group",
-        "extra_groups",
         "nproc_limit",
         "nofile_limit",
         "updated_at",
@@ -20,7 +19,10 @@ class ServerAdmin(admin.ModelAdmin):
     search_fields = ("name", "host", "credential__name", "credential__username")
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("name", "host", "port", "credential", "default_group", "extra_groups")}),
+        (
+            None,
+            {"fields": ("name", "host", "port", "credential", "default_group", "is_npu", "npu_groups", "init_script")},
+        ),
         (
             "资源限制（高级设置）",
             {

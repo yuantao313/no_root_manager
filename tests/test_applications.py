@@ -226,33 +226,36 @@ class TestReviewProvision:
         assert mock.call_args.kwargs["with_home"] is False
 
 
-class TestStringGroups:
-    """服务器分组使用逗号分隔字符串，申请时按服务器读取并校验。"""
+class TestNpuGroups:
+    """分组选择已升级为 NPU 卡组：仅 NPU 服务器可选手组，普通服务器无分组可选。"""
 
     @pytest.fixture
-    def group_server(self, server):
+    def npu_server(self, server):
         server.default_group = "dev,ops"
-        server.extra_groups = "qa,test"
+        server.is_npu = True
+        server.npu_groups = "npu,npu0,npu1"
         server.save()
         return server
 
-    def test_group_list_parsing(self, group_server):
-        assert group_server.default_groups_list() == ["dev", "ops"]
-        assert group_server.extra_groups_list() == ["qa", "test"]
+    def test_npu_groups_parsing(self, npu_server):
+        assert npu_server.default_groups_list() == ["dev", "ops"]
+        assert npu_server.npu_groups_list() == ["npu", "npu0", "npu1"]
 
-    def test_empty_groups(self, server):
-        assert server.default_groups_list() == []
-        assert server.extra_groups_list() == []
-
-    def test_groups_api(self, client, staff, group_server):
+    def test_groups_api_plain_server_empty(self, client, staff, server):
         client.force_login(staff)
-        resp = client.get(reverse("servers:groups_api", args=[group_server.pk]))
-        assert resp.status_code == 200
+        resp = client.get(reverse("servers:groups_api", args=[server.pk]))
         data = resp.json()
-        assert data["default_groups"] == ["dev", "ops"]
-        assert data["extra_groups"] == ["qa", "test"]
+        assert data["extra_groups"] == []
+        assert data["is_npu"] is False
 
-    def test_valid_group_accepted(self, client, group_server):
+    def test_groups_api_npu_server(self, client, staff, npu_server):
+        client.force_login(staff)
+        resp = client.get(reverse("servers:groups_api", args=[npu_server.pk]))
+        data = resp.json()
+        assert data["extra_groups"] == ["npu", "npu0", "npu1"]
+        assert data["is_npu"] is True
+
+    def test_valid_npu_group_accepted(self, client, npu_server):
         from applications.forms import ApplicationForm
 
         form = ApplicationForm(
@@ -262,16 +265,16 @@ class TestStringGroups:
                 "email": "z@x.com",
                 "employee_id": "E1",
                 "apply_type": "create",
-                "target_server": str(group_server.pk),
+                "target_server": str(npu_server.pk),
                 "title": "t",
-                "applied_groups": ["qa"],
+                "applied_groups": ["npu0"],
             }
         )
         assert form.is_valid(), form.errors
         app = form.save()
-        assert app.applied_groups == "qa"
+        assert app.applied_groups == "npu0"
 
-    def test_invalid_group_rejected(self, group_server):
+    def test_group_rejected_on_plain_server(self, client, server):
         from applications.forms import ApplicationForm
 
         form = ApplicationForm(
@@ -281,7 +284,25 @@ class TestStringGroups:
                 "email": "z@x.com",
                 "employee_id": "E1",
                 "apply_type": "create",
-                "target_server": str(group_server.pk),
+                "target_server": str(server.pk),
+                "title": "t",
+                "applied_groups": ["npu0"],
+            }
+        )
+        assert form.is_valid() is False
+        assert "不支持分组选择" in form.errors["applied_groups"][0]
+
+    def test_invalid_npu_group_rejected(self, npu_server):
+        from applications.forms import ApplicationForm
+
+        form = ApplicationForm(
+            {
+                "applicant_name": "张三",
+                "username": "zs",
+                "email": "z@x.com",
+                "employee_id": "E1",
+                "apply_type": "create",
+                "target_server": str(npu_server.pk),
                 "title": "t",
                 "applied_groups": ["hacker"],
             }
@@ -301,25 +322,7 @@ class TestStringGroups:
                 "apply_type": "create",
                 "target_server": "",
                 "title": "t",
-                "applied_groups": ["qa"],
+                "applied_groups": ["npu0"],
             }
         )
         assert form.is_valid() is False
-        assert "请先选择目标服务器" in form.errors["applied_groups"][0]
-
-    def test_provision_uses_default_plus_applied(self, client, staff, group_server):
-        app = Application.objects.create(
-            applicant_name="张三",
-            username="zs",
-            email="z@x.com",
-            employee_id="E1",
-            title="分组",
-            target_server=group_server,
-            applied_groups="qa",
-        )
-        client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")) as mock:
-            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
-        groups = mock.call_args.kwargs["groups"]
-        # 默认组 + 勾选组，不含未勾选的 test
-        assert groups == ["dev", "ops", "qa"]

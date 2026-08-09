@@ -17,11 +17,11 @@ class DynamicMultipleChoiceField(forms.MultipleChoiceField):
 
 
 class ApplicationForm(forms.ModelForm):
-    # 附加分组多选框：选项由前端根据所选服务器动态填充（servers:groups_api）
+    # NPU 卡组多选框：仅 NPU 服务器提供，选项由前端根据所选服务器动态填充（npu + npuN）
     applied_groups = DynamicMultipleChoiceField(
         required=False,
-        label="附加分组",
-        help_text="可附加加入的用户分组（来自所选服务器配置）",
+        label="NPU 卡组（可选）",
+        help_text="NPU 服务器可选择授权使用的算力卡组",
         widget=forms.CheckboxSelectMultiple,
     )
     # 转移类型：指定目标机器上已有的用户名（选择式输入，带提示）
@@ -75,15 +75,17 @@ class ApplicationForm(forms.ModelForm):
             self.fields["applied_groups"].initial = initial
 
     def clean_applied_groups(self):
-        """校验勾选的分组必须属于所选服务器的可附加分组。"""
+        """校验勾选的分组：仅 NPU 服务器可选 NPU 卡组，普通服务器不可选分组。"""
         groups = self.cleaned_data.get("applied_groups") or []
         server = self.cleaned_data.get("target_server")
         if not groups:
             return ",".join([])
         if server is None:
-            raise forms.ValidationError("请先选择目标服务器再选择附加分组。")
-        allowed = server.extra_groups_list()
+            raise forms.ValidationError("请先选择目标服务器。")
+        if not server.is_npu:
+            raise forms.ValidationError("该服务器不支持分组选择（仅 NPU 服务器可选 NPU 卡组）。")
+        allowed = server.npu_groups_list()
         invalid = [g for g in groups if g not in allowed]
         if invalid:
-            raise forms.ValidationError(f"分组 {', '.join(invalid)} 不属于所选服务器。")
+            raise forms.ValidationError(f"卡组 {', '.join(invalid)} 不属于所选服务器。")
         return ",".join(groups)

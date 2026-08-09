@@ -22,12 +22,13 @@ from .ssh import test_server_connection
 
 
 def server_groups_api(request, pk):
-    """返回服务器的分组配置（默认分组 + 可附加分组），供申请表单前端联动。
+    """返回服务器的分组配置，供申请表单前端联动。
 
-    NPU 服务器：可附加分组返回 NPU 卡组（npu + npuN），分组选择直接转换为 NPU 选择。
+    仅 NPU 服务器提供分组选择（NPU 卡组 npu + npuN）；
+    普通服务器无附加分组可选。
     """
     server = get_object_or_404(Server, pk=pk)
-    extra = server.npu_groups_list() if server.is_npu else server.extra_groups_list()
+    extra = server.npu_groups_list() if server.is_npu else []
     return JsonResponse(
         {
             "id": server.pk,
