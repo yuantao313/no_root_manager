@@ -38,15 +38,15 @@ class ApplicationForm(forms.ModelForm):
         fields = [
             "apply_type",
             "target_server",
-            "title",
             "description",
             "valid_until",
             "needs_sudo",
-            "migrate_from_dir",
             "applied_groups",
         ]
         widgets = {
-            "description": forms.Textarea(attrs={"rows": 5}),
+            "description": forms.Textarea(
+                attrs={"rows": 5, "placeholder": "请说明申请理由，如需要使用哪些服务、用途等"}
+            ),
             "valid_until": forms.DateTimeInput(
                 attrs={"type": "datetime-local"},
                 format="%Y-%m-%dT%H:%M",
@@ -55,12 +55,10 @@ class ApplicationForm(forms.ModelForm):
         labels = {
             "apply_type": "申请类型",
             "target_server": "目标服务器",
-            "title": "申请标题",
-            "description": "申请内容",
+            "description": "申请理由",
             "valid_until": "使用截止时间",
             "needs_sudo": "同时申请 root/sudo 权限",
-            "migrate_from_dir": "迁移已有目录",
-            "applied_groups": "附加分组",
+            "applied_groups": "NPU 卡组（可选）",
         }
 
     def __init__(self, *args, **kwargs):

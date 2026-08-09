@@ -129,20 +129,31 @@
     if (serverSelect && groupsUl) {
         var groupsApiUrl = serverSelect.dataset.groupsUrl || "/servers/api/groups/";
         var selected = Array.prototype.slice.call(groupsUl.querySelectorAll("input:checked")).map(function (i) { return i.value; });
-        function renderGroups(groups) {
+        function renderGroups(groups, isNpu) {
+            // NPU 卡组仅 NPU 环境显示；普通服务器隐藏整个分组选择区
+            var wrap = groupsUl.parentElement;
+            if (!isNpu) { if (wrap) { wrap.style.display = "none"; } return; }
+            if (wrap) { wrap.style.display = ""; }
             var html = groups.map(function (g) {
                 var checked = selected.indexOf(g) !== -1 ? " checked" : "";
                 return '<li><label style="font-weight:normal;font-size:14px;margin:4px 0;">' +
                     '<input type="checkbox" name="applied_groups" value="' + g + '"' + checked + "> " + g + "</label></li>";
             }).join("");
-            groupsUl.innerHTML = html || '<li class="text-muted">该服务器无附加分组</li>';
+            groupsUl.innerHTML = html || '<li class="text-muted">该服务器无可用 NPU 卡组</li>';
         }
         function loadGroups(serverId) {
-            if (!serverId) { groupsUl.innerHTML = '<li class="text-muted">请先选择目标服务器</li>'; return; }
+            if (!serverId) {
+                var wrap = groupsUl.parentElement;
+                if (wrap) { wrap.style.display = "none"; }
+                return;
+            }
             fetch(groupsApiUrl + serverId + "/")
                 .then(function (r) { return r.json(); })
-                .then(function (data) { renderGroups(data.extra_groups || []); })
-                .catch(function () { groupsUl.innerHTML = '<li class="text-muted">分组加载失败</li>'; });
+                .then(function (data) { renderGroups(data.extra_groups || [], data.is_npu); })
+                .catch(function () {
+                    var wrap = groupsUl.parentElement;
+                    if (wrap) { wrap.style.display = "none"; }
+                });
         }
         serverSelect.addEventListener("change", function () {
             selected = [];

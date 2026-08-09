@@ -9,7 +9,6 @@ from servers.management import (
     _random_password,
     _sudo_wrap,
     apply_resource_limits,
-    migrate_home_dir,
     provision_user,
     take_over_user,
 )
@@ -59,59 +58,6 @@ class TestSudoWrap:
 
     def test_plain_command_not_wrapped(self, ubuntu_server):
         assert _sudo_wrap(ubuntu_server, "getent group x") == "getent group x"
-
-
-class TestMigrateHomeDir:
-    def test_empty_source(self, ubuntu_server):
-        ok, msg = migrate_home_dir(ubuntu_server, "", "u")
-        assert ok is False and "未指定" in msg
-
-    def test_relative_path_rejected(self, ubuntu_server):
-        ok, msg = migrate_home_dir(ubuntu_server, "home/old/u", "u")
-        assert ok is False and "绝对路径" in msg
-
-    def test_injection_chars_rejected(self, ubuntu_server):
-        ok, msg = migrate_home_dir(ubuntu_server, "/home/old/u; rm -rf /", "u")
-        assert ok is False and "非法字符" in msg
-
-    def test_rollback_on_chown_failure(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("test -d /home/u"):
-                return True, "", ""
-            if cmd.startswith("sudo -n sh -c"):
-                return True, "0", ""
-            if "mv -T" in cmd:
-                return True, "", ""
-            if "chown" in cmd:
-                return False, "", "denied"
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
-            ok, msg = migrate_home_dir(ubuntu_server, "/home/old/u", "u")
-        assert ok is False
-        assert "已回滚" in msg
-        assert any("mv -T /home/u /home/old/u" in c for c in commands)
-
-    def test_success_no_rollback(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("test -d /home/u"):
-                return True, "", ""
-            if cmd.startswith("sudo -n sh -c"):
-                return True, "0", ""
-            if "mv -T" in cmd or "chown" in cmd or "rmdir" in cmd:
-                return True, "", ""
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
-            ok, msg = migrate_home_dir(ubuntu_server, "/home/old/u", "u")
-        assert ok is True
-        assert not any("mv -T /home/u /home/old/u" in c for c in commands)
 
 
 class TestTakeOver:

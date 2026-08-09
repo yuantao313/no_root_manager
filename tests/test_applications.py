@@ -69,8 +69,8 @@ class TestRequireLogin:
             },
         )
         assert resp.status_code == 302
-        app = Application.objects.get(title="开通账号")
-        assert app.applicant == normal  # 记录登录用户
+        app = Application.objects.filter(applicant=normal).first()
+        assert app is not None and app.applicant == normal  # 记录登录用户
 
     def test_anonymous_cannot_see_list(self, client):
         assert client.get(reverse("applications:list")).status_code == 302
@@ -205,25 +205,6 @@ class TestReviewProvision:
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         grant = SudoGrant.objects.filter(application=app).first()
         assert grant.status == SudoGrant.Status.EXPIRED
-
-    def test_migrate_dir_passed_without_home(self, client, staff, server):
-        app = Application.objects.create(
-            applicant_name="孙八",
-            username="sun",
-            email="s@x.com",
-            employee_id="E6",
-            title="迁移",
-            target_server=server,
-            migrate_from_dir="/home/old/sun",
-        )
-        client.force_login(staff)
-        with (
-            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")) as mock,
-            patch("applications.views.migrate_home_dir", return_value=(True, "已迁移")),
-        ):
-            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
-        # 申请了迁移时不预建 home
-        assert mock.call_args.kwargs["with_home"] is False
 
 
 class TestNpuGroups:

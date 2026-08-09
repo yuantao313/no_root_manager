@@ -70,7 +70,7 @@ def test_frontend_apply_and_approve_flow(client, server):
                 "applied_groups": [],
             },
         )
-        app = Application.objects.get(title="前端流程测试")
+        app = Application.objects.filter(applicant=applicant).first()
         print("③ 提交申请:", resp.status_code, "| 状态:", app.status, "| 申请人:", app.applicant_name)
         assert app.status == Application.Status.PENDING
 
@@ -79,8 +79,8 @@ def test_frontend_apply_and_approve_flow(client, server):
         c.post(reverse("accounts:login"), {"username": "admin1", "password": "x12345!abc"})
         # 申请列表页
         resp = c.get(reverse("applications:list"))
-        print("④ 管理员申请列表:", resp.status_code, "| 含申请:", "前端流程测试" in resp.content.decode())
-        assert "前端流程测试" in resp.content.decode()
+        print("④ 管理员申请列表:", resp.status_code, "| 含申请:", "通过前端页面提交" in resp.content.decode())
+        assert "通过前端页面提交" in resp.content.decode()
 
         # ⑤ 申请详情页
         resp = c.get(reverse("applications:detail", args=[app.pk]))

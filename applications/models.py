@@ -15,6 +15,7 @@ class Application(models.Model):
         PENDING = "pending", "待审批"
         APPROVED = "approved", "已通过"
         REJECTED = "rejected", "已驳回"
+        WITHDRAWN = "withdrawn", "已撤回"
 
     # 申请人（登录用户，地位平等；身份信息见 applicant_name/contact）
     applicant = models.ForeignKey(
@@ -36,20 +37,13 @@ class Application(models.Model):
         choices=ApplyType.choices,
         default=ApplyType.CREATE,
     )
-    title = models.CharField("申请标题", max_length=100)
+    title = models.CharField("申请标题", max_length=100, blank=True, default="")
     # 申请内容（账号/权限的具体说明）
     description = models.TextField("申请内容", blank=True)
     # 使用截止时间：到期后账号在目标机器自动失效
     valid_until = models.DateTimeField("使用截止时间", null=True, blank=True, help_text="到期后账号自动停用，可不填")
     # 申请 root/sudo 权限（当天有效，次日失效需重新申请）
     needs_sudo = models.BooleanField("申请 root/sudo 权限", default=False, help_text="该权限当天有效，次日自动失效")
-    # 迁移来源目录：开通时从该路径迁移到 /home/username
-    migrate_from_dir = models.CharField(
-        "迁移来源目录",
-        max_length=500,
-        blank=True,
-        help_text="可选，例如 /home/old/username：开通账号时自动迁移该目录到 /home/username",
-    )
     # 目标服务器（从服务器表选择）
     target_server = models.ForeignKey(
         Server,

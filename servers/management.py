@@ -342,47 +342,6 @@ def revoke_sudo(server, username):
     return True, f"已撤销用户 {username} 的 sudo 权限"
 
 
-def migrate_home_dir(server, source_dir, username):
-    """迁移用户已有目录到 /home/username。
-
-    source_dir 为用户指定的来源目录（如 /home/old/username），
-    迁移后源目录将被移动到 /home/username。返回 (ok, msg)。
-    """
-    source_dir = (source_dir or "").strip().rstrip("/")
-    if not source_dir:
-        return False, "未指定迁移目录"
-    if not source_dir.startswith("/"):
-        return False, "迁移目录必须是绝对路径"
-    if any(ch in source_dir for ch in (";", "|", "&", "$", "`", "\n")):
-        return False, "迁移目录包含非法字符"
-
-    target = f"/home/{username}"
-    # 目标已存在：用 root 权限判断是否为空（useradd -m 会预建空 home）
-    # 空则移除后迁移，非空则拒绝避免覆盖
-    ok, _, _ = _exec(server, f"test -d {target}")
-    if ok:
-        ok2, out2, _ = _exec(server, f"sudo -n sh -c 'ls -A {target} | wc -l'")
-        if ok2 and out2.strip() != "0":
-            return False, f"目标目录 {target} 已存在且非空，未迁移"
-        _exec(server, f"rmdir {target}")
-    ok, out, err = _exec(server, f"test -d {source_dir}")
-    if not ok:
-        return False, f"来源目录 {source_dir} 不存在或无法访问：{err or '不存在'}"
-    # 用 -T 保证目标已存在时直接报错，绝不嵌套移动
-    ok, _, err = _exec(server, f"mv -T {source_dir} {target}")
-    if not ok:
-        return False, f"迁移失败：{err}"
-    # 修正属主，确保新用户可读写；失败则回滚 mv，恢复原状
-    ok, _, err = _exec(server, f"chown -R {username}:{username} {target}")
-    if not ok:
-        _exec(server, f"mv -T {target} {source_dir}")
-        return False, f"迁移后设置属主失败，已回滚：{err}"
-    return True, f"已将 {source_dir} 迁移到 {target}"
-
-
-# ===== 初始化脚本 / NPU 分组 / 用户公告 =====
-
-
 def run_init_script(server):
     """远程 get 初始化脚本并在目标机运行（curl -sL <url> | sudo bash）。返回 (ok, msg)。"""
     url = (server.init_script or "").strip()

@@ -48,7 +48,7 @@ def test_full_flow_apply_approve_provision_sudo_expire(client, env):
             "applied_groups": [],
         },
     )
-    app = Application.objects.get(title="E2E 开通")
+    app = Application.objects.filter(applicant=env["applicant"]).first()
     print("① 提交申请:", resp.status_code, "| 用户名:", app.username, "| 状态:", app.status)
     assert resp.status_code == 302
     assert app.username == "zhangsan"  # 中文姓名拼音规则

@@ -21,7 +21,7 @@
         <tbody>
             {% for app in applications %}
             <tr>
-                <td>{{ app.title }}</td>
+                <td>{{ app.description|truncatechars:40 }}</td>
                 <td>{{ app.applicant_name }}{% if app.applicant %}（{{ app.applicant.username }}）{% endif %}</td>
                 <td>{{ app.employee_id|default:"—" }}</td>
                 <td>{{ app.get_apply_type_display }}</td>
