@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load socialaccount %}
+{% block title %}第三方账号绑定 - NRM{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-sm-8 col-sm-offset-2 col-md-6 col-md-offset-4">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">第三方账号绑定</h3></div>
+            <div class="panel-body">
+                {% if form.accounts %}
+                <p class="text-muted" style="margin-bottom:10px;">已绑定的第三方账号（选中后点击移除）：</p>
+                <form method="post" action="{% url 'socialaccount_connections' %}">
+                    {% csrf_token %}
+                    {% for acc in form.fields.account.choices %}
+                    {% with account=acc.0.instance %}
+                    <div class="radio">
+                        <label style="font-weight:normal;">
+                            <input type="radio" name="account" value="{{ account.pk }}">
+                            <strong>{{ account.get_provider.name }}</strong>
+                            {% if account.get_provider.id == 'gitcode' %}（uid: <code>{{ account.uid }}</code>）{% else %}（{{ account.uid }}）{% endif %}
+                        </label>
+                    </div>
+                    {% endwith %}
+                    {% endfor %}
+                    <button type="submit" class="btn btn-danger btn-xs">移除选中账号</button>
+                </form>
+                {% else %}
+                <p class="text-muted">尚未绑定任何第三方账号。</p>
+                {% endif %}
+                <hr>
+                <p class="text-muted" style="margin-bottom:8px;">添加第三方账号：</p>
+                <a href="{% provider_login_url 'gitcode' process='connect' %}" class="btn btn-gitcode btn-block">绑定 GitCode 账号</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
