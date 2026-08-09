@@ -341,20 +341,6 @@ def settings(request):
             request.session.pop("pending_smtp", None)
             request.session.pop("smtp_verified", None)
             messages.success(request, "SMTP 配置已通过验证并保存。")
-        elif "send_test_email" in request.POST:
-            target = request.POST.get("test_email", "").strip()
-            if not target:
-                messages.error(request, "请填写测试收件邮箱。")
-            else:
-                ok = send_email(
-                    "NRM 邮件发送测试",
-                    "这是一封 NRM 系统的测试邮件，收到即表示 SMTP 配置可用。",
-                    [target],
-                )
-                if ok:
-                    messages.success(request, f"测试邮件已成功发送至 {target}。")
-                else:
-                    messages.error(request, "测试邮件发送失败（请检查 SMTP 配置是否启用、地址/端口/认证是否正确）。")
         elif "add_webhook" in request.POST:
             name = request.POST.get("name", "").strip()
             url = request.POST.get("url", "").strip()
