@@ -154,6 +154,50 @@ class GitCodeLoginView(LoginView):
         return context
 
 
+def _email_code_cooldown(request):
+    """邮箱验证码剩余冷却秒数（60 秒窗口）。"""
+    from django.utils import timezone
+
+    sent_at = request.session.get("email_code_sent_at")
+    if not sent_at:
+        return 0
+    return max(0, 60 - int(timezone.now().timestamp() - sent_at))
+
+
+@login_required
+def send_email_code_ajax(request):
+    """AJAX 发送邮箱验证码（修改邮箱前置）：60 秒冷却 + JSON 返回，不刷新页面。"""
+    from django.utils import timezone
+
+    email = (request.POST.get("email") or "").strip()
+    # 60 秒冷却（session 时间戳）
+    sent_at = request.session.get("email_code_sent_at")
+    if sent_at:
+        remaining = 60 - int(timezone.now().timestamp() - sent_at)
+        if remaining > 0:
+            return JsonResponse(
+                {"ok": False, "error": f"发送过于频繁，请 {remaining} 秒后再试。", "cooldown": remaining}
+            )
+    if not email:
+        return JsonResponse({"ok": False, "error": "请先填写新的邮箱地址。", "cooldown": 0})
+    if email == request.user.email:
+        return JsonResponse({"ok": False, "error": "新邮箱与当前邮箱相同，无需验证。", "cooldown": 0})
+    ok = send_user_email_code(email, request.user)
+    if ok:
+        request.session["email_code_sent_at"] = int(timezone.now().timestamp())
+        return JsonResponse({"ok": True, "error": "", "cooldown": 60})
+    return JsonResponse({"ok": False, "error": "验证码发送失败（SMTP 未配置或不可用）。", "cooldown": 0})
+
+
+@login_required
+def verify_email_code_ajax(request):
+    """AJAX 校验邮箱验证码：通过才允许保存邮箱，失败前端提示错误（不刷新）。"""
+    email = (request.POST.get("email") or "").strip()
+    code = (request.POST.get("code") or "").strip()
+    ok, err = verify_code(email, code, EmailVerification.PURPOSE_USER_EMAIL, user=request.user)
+    return JsonResponse({"ok": ok, "error": err})
+
+
 @login_required
 def profile(request):
     """个人中心：资料行内编辑 + 邮箱验证码确认 + 内嵌 Webhook（仅管理员）。"""
@@ -210,6 +254,8 @@ def profile(request):
         {
             "user": request.user,
             "gitcode_enabled": _gitcode_enabled(),
+            # 邮箱验证码剩余冷却秒数（前端初始倒计时，不刷新）
+            "email_code_cooldown": _email_code_cooldown(request),
             "form": form,
             "webhook_form": webhook_form,
             "hooks": hooks,

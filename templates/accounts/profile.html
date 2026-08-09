@@ -37,13 +37,15 @@
                             <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
                             <span id="field-email" class="field-input" style="display:none;">
                                 <span style="white-space:nowrap;">
-                                    <input type="email" name="email" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
-                                    <button type="submit" name="send_email_code" class="btn btn-default btn-xs">发送验证码</button>
+                                    <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
+                                    <button type="button" id="btn-send-code" class="btn btn-default btn-xs">发送验证码</button>
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
                                     <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
                                 </span>
                                 <br>
-                                <input type="text" name="code" class="form-control" style="display:inline-block;width:50%;margin-top:6px;" placeholder="邮箱验证码（修改邮箱时填写）">
+                                <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:50%;margin-top:6px;" placeholder="邮箱验证码（修改邮箱时填写）">
+                                <br>
+                                <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;"></span>
                             </span>
                         </dd>
                     </dl>
@@ -145,5 +147,93 @@ function cancelEdit(field) {
 document.querySelectorAll('.field-edit').forEach(function (a) {
     a.addEventListener('click', function () { editField(this.dataset.field); });
 });
+
+// ===== 邮箱验证码 AJAX（发送不刷新、60 秒倒计时、错误前端提示）=====
+function getCookie(name) {
+    var m = document.cookie.match(new RegExp('(^|; )' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[2]) : '';
+}
+
+function showEmailTip(msg, ok) {
+    var tip = document.getElementById('email-code-tip');
+    if (!tip) return;
+    tip.textContent = msg;
+    tip.className = ok ? 'text-success' : 'text-danger';
+    tip.style.fontSize = '13px';
+    tip.style.display = 'inline';
+}
+
+function startCooldown(seconds) {
+    var btn = document.getElementById('btn-send-code');
+    if (!btn) return;
+    btn.disabled = true;
+    var left = seconds;
+    btn.textContent = '已发送（' + left + ' 秒后重试）';
+    window._emailCodeTimer && clearInterval(window._emailCodeTimer);
+    window._emailCodeTimer = setInterval(function () {
+        left--;
+        if (left <= 0) {
+            clearInterval(window._emailCodeTimer);
+            btn.disabled = false;
+            btn.textContent = '发送验证码';
+        } else {
+            btn.textContent = '已发送（' + left + ' 秒后重试）';
+        }
+    }, 1000);
+}
+
+var sendBtn = document.getElementById('btn-send-code');
+if (sendBtn) {
+    sendBtn.addEventListener('click', function () {
+        var email = document.getElementById('field-email-input').value;
+        fetch('{% url "accounts:send_email_code_ajax" %}', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCookie('csrftoken') },
+            body: new URLSearchParams({ email: email }),
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            if (data.ok) {
+                showEmailTip('验证码已发送，请查收（60 秒后可重发）。', true);
+                startCooldown(data.cooldown || 60);
+            } else if (data.cooldown > 0) {
+                startCooldown(data.cooldown);
+                showEmailTip(data.error, false);
+            } else {
+                showEmailTip(data.error, false);
+            }
+        });
+    });
+}
+
+// 保存邮箱前先 AJAX 校验验证码（通过才提交，失败前端提示）
+var profileForm = document.getElementById('profile-form');
+if (profileForm) {
+    profileForm.addEventListener('submit', function (e) {
+        var emailField = document.getElementById('field-email');
+        if (!emailField || emailField.style.display === 'none') return; // 非邮箱编辑
+        var emailInput = document.getElementById('field-email-input');
+        var currentEmail = '{{ user.email|escapejs }}';
+        if (emailInput && emailInput.value.trim() !== currentEmail) {
+            e.preventDefault();
+            var code = document.getElementById('field-code-input').value;
+            if (!code) { showEmailTip('请先填写邮箱验证码。', false); return; }
+            fetch('{% url "accounts:verify_email_code_ajax" %}', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                body: new URLSearchParams({ email: emailInput.value, code: code }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok) {
+                    profileForm.submit();
+                } else {
+                    showEmailTip('验证码错误：' + data.error, false);
+                }
+            });
+        }
+    });
+}
+
+// 页面加载：若已有冷却则前端直接显示倒计时（不刷新恢复）
+{% if email_code_cooldown %}
+startCooldown({{ email_code_cooldown }});
+{% endif %}
 </script>
 {% endblock %}
