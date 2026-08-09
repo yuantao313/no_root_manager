@@ -18,12 +18,13 @@ class TestProfileEdit:
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
-        # 正文展示 + 每个字段右侧"编辑"链接 + 就地输入框（隐藏）+ 行内 JS
+        # 正文展示 + 每个字段右侧"编辑"链接 + 就地输入框（隐藏）
+        # 行内编辑 JS 已抽离到 static/js/app.js（页面引用静态文件）
         assert "张三" in html
         assert "field-edit" in html
         assert 'id="field-name"' in html
         assert 'id="field-email"' in html
-        assert "editField" in html
+        assert "/static/js/app.js" in html
 
     def test_update_name_without_email_change(self, client):
         # 仅改姓名（邮箱不变）无需验证码
