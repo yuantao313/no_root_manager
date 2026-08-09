@@ -29,9 +29,8 @@
 
 ## 文档导航
 
+- [使用指南](usage/index.md)：普通用户 / 管理员 / 超级管理员操作说明
 - [快速开始](quickstart.md)
-- [用户申请](usage/applications.md)
-- [服务器与凭据](usage/servers.md)
-- [通知配置](usage/notifications.md)
+- [部署指南](deploy.md)：安装、配置、启动、定时任务、备份恢复
 - [架构设计](architecture.md)
 - [运维手册](operations.md)

@@ -15,8 +15,10 @@ nav:
   - 首页: index.md
   - 快速开始: quickstart.md
   - 使用指南:
-      - 用户申请: usage/applications.md
-      - 服务器与凭据: usage/servers.md
-      - 通知配置: usage/notifications.md
+      - 总览: usage/index.md
+      - 普通用户: usage/user.md
+      - 管理员: usage/admin.md
+      - 超级管理员: usage/superuser.md
+  - 部署指南: deploy.md
   - 架构设计: architecture.md
   - 运维手册: operations.md
