@@ -12,7 +12,10 @@ class EmailConfig(models.Model):
     username = models.CharField("用户名", max_length=255)
     password = EncryptedTextField("密码/授权码", blank=True, help_text="存储时加密")
     from_email = models.CharField("发件人地址", max_length=255, blank=True, help_text="留空则使用用户名")
-    use_tls = models.BooleanField("使用 SSL/TLS", default=True)
+    # 加密方式：use_ssl=True 为 SSL 直连（465 端口），use_ssl=False 为 STARTTLS（587/25）
+    use_ssl = models.BooleanField(
+        "使用 SSL 直连", default=True, help_text="465 端口为 SSL 直连；587/25 端口请取消勾选（STARTTLS）"
+    )
     enabled = models.BooleanField("启用邮件通知", default=False)
 
     created_at = models.DateTimeField("创建时间", auto_now_add=True)

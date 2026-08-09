@@ -265,7 +265,7 @@ def settings(request):
             username = request.POST.get("username", "").strip()
             new_pw = request.POST.get("password", "").strip()
             from_email = request.POST.get("from_email", "").strip()
-            use_tls = "use_tls" in request.POST
+            use_ssl = "use_ssl" in request.POST
             enabled = "enabled" in request.POST
             target = request.POST.get("verify_email", "").strip()
             if not host or not username:
@@ -280,7 +280,7 @@ def settings(request):
                     "username": username,
                     "password": new_pw,
                     "from_email": from_email,
-                    "use_tls": use_tls,
+                    "use_ssl": use_ssl,
                     "enabled": enabled,
                     "verify_email": target,
                 }
@@ -294,7 +294,7 @@ def settings(request):
                         username,
                         new_pw,
                         from_email,
-                        use_tls,
+                        use_ssl,
                         subject,
                         body,
                         to_list,
@@ -341,7 +341,7 @@ def settings(request):
             if pending.get("password"):
                 email_cfg.password = pending["password"]
             email_cfg.from_email = pending.get("from_email", "")
-            email_cfg.use_tls = pending.get("use_tls", False)
+            email_cfg.use_ssl = pending.get("use_ssl", True)
             email_cfg.enabled = pending.get("enabled", False)
             email_cfg.save()
             request.session.pop("pending_smtp", None)

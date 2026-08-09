@@ -46,7 +46,7 @@
                     <p><label>用户名</label><input type="text" name="username" class="form-control" value="{{ email_cfg.username|default:'' }}"></p>
                     <p><label>密码/授权码（留空表示不修改）</label><input type="password" name="password" class="form-control"></p>
                     <p><label>发件人地址</label><input type="text" name="from_email" class="form-control" value="{{ email_cfg.from_email|default:'' }}"></p>
-                    <p><label><input type="checkbox" name="use_tls" {% if email_cfg.use_tls %}checked{% endif %}> 使用 SSL/TLS</label></p>
+                    <p><label><input type="checkbox" name="use_ssl" {% if email_cfg.use_ssl %}checked{% endif %}> 使用 SSL 直连（465 端口）</label></p>
                     <p><label><input type="checkbox" name="enabled" {% if email_cfg.enabled %}checked{% endif %}> 启用邮件通知</label></p>
                     <p>
                         <label>验证收件邮箱</label>

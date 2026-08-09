@@ -13,11 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def send_email_with_config(
-    host, port, username, password, from_email, use_tls, subject: str, body: str, to_list: list[str]
+    host, port, username, password, from_email, use_ssl, subject: str, body: str, to_list: list[str]
 ) -> bool:
     """使用指定 SMTP 配置发送邮件（不依赖数据库 EmailConfig）。
 
     用于 SMTP 配置在写入数据库前验证可用性（发验证码邮件）。
+
+    use_ssl=True 为 SSL 直连（465 端口）；False 为 STARTTLS（587/25）。
     """
     from_email = from_email or username
     connection = EmailBackend(
@@ -25,7 +27,8 @@ def send_email_with_config(
         port=port,
         username=username,
         password=password,
-        use_tls=use_tls,
+        use_tls=not use_ssl,
+        use_ssl=use_ssl,
         fail_silently=False,
     )
     message = EmailMessage(
@@ -56,7 +59,7 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
         cfg.username,
         cfg.password,
         cfg.from_email,
-        cfg.use_tls,
+        cfg.use_ssl,
         subject,
         body,
         to_list,

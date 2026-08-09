@@ -44,7 +44,7 @@ class TestSendEmail:
             username="nrm",
             password="pw",
             from_email="nrm@x.com",
-            use_tls=True,
+            use_ssl=True,
             enabled=True,
         )
         with patch("notifications.services.EmailBackend") as mock_backend:
