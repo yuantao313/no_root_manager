@@ -108,7 +108,7 @@ uv run python manage.py makemigrations --check --dry-run   # 迁移一致
 3. **发布前本地提交**：正式 release 宣布前提交仅本地保存（不推送远程），发布时统一推送并锁定 master
 4. **未来计划走 GitHub Issues**：设计方案、UX 改进、待办不写进仓库文档
 5. **中文代码支持**：保留现有中文注释与命名习惯；新代码用英文标识符
-6. **严禁破坏开发数据库**：验证/调试一律使用 pytest（隔离测试库）或只读检查；**禁止在 `manage.py shell -c` 中对开发库执行 `delete()`/`all().delete()`/清空配置类操作**（曾因此误删用户配置的 SMTP/GitCode 凭据，属 P0 事故）。确需操作真实数据时先备份 `db.sqlite3`
+6. **严禁破坏开发数据库**：验证/调试一律使用 pytest（隔离测试库）或只读检查；**禁止在 `manage.py shell -c` 中对开发库执行 `delete()`/`all().delete()`/清空配置类操作**（曾因此误删用户配置的 SMTP/GitCode 凭据，属 P0 事故）。**页面/接口验证也禁止用 shell 创建数据再删除**（哪怕"创建后清理"也会误删用户已有配置，同样 P0）——一律写成 pytest 临时测试（隔离库）或纯只读检查。确需操作真实数据时先备份 `db.sqlite3`
 
 ## 常见陷阱速查
 
