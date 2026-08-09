@@ -39,11 +39,13 @@
                                 <span style="white-space:nowrap;">
                                     <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
                                     <button type="button" id="btn-send-code" class="btn btn-default btn-xs" data-send-url="{% url 'accounts:send_email_code_ajax' %}">发送验证码</button>
+                                </span>
+                                <br>
+                                <span style="white-space:nowrap;">
+                                    <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:45%;margin-top:6px;" placeholder="邮箱验证码">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
                                     <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
                                 </span>
-                                <br>
-                                <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:50%;margin-top:6px;" placeholder="邮箱验证码（修改邮箱时填写）">
                                 <br>
                                 <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;" data-cooldown="{{ email_code_cooldown }}"></span>
                             </span>

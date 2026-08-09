@@ -191,10 +191,15 @@ def send_email_code_ajax(request):
 
 @login_required
 def verify_email_code_ajax(request):
-    """AJAX 校验邮箱验证码：通过才允许保存邮箱，失败前端提示错误（不刷新）。"""
+    """AJAX 校验邮箱验证码：通过才允许保存邮箱，失败前端提示错误（不刷新）。
+
+    注意：此处为非消耗校验（consume=False），真正消耗发生在
+    save_profile 保存邮箱时——避免验证码被前端预检消耗后，
+    后端二次校验报"已使用"导致邮箱无法保存。
+    """
     email = (request.POST.get("email") or "").strip()
     code = (request.POST.get("code") or "").strip()
-    ok, err = verify_code(email, code, EmailVerification.PURPOSE_USER_EMAIL, user=request.user)
+    ok, err = verify_code(email, code, EmailVerification.PURPOSE_USER_EMAIL, user=request.user, consume=False)
     return JsonResponse({"ok": ok, "error": err})
 
 

@@ -71,10 +71,12 @@ def send_smtp_code(email, send_fn) -> bool:
     )
 
 
-def verify_code(email, code, purpose, user=None) -> tuple[bool, str]:
+def verify_code(email, code, purpose, user=None, consume=True) -> tuple[bool, str]:
     """校验验证码。
 
     规则：验证码须存在、未使用、未过期、匹配，且尝试次数未超限。
+    consume=True：校验通过后标记已使用（真正的消耗，保存邮箱/配置时用）；
+    consume=False：仅校验不消耗（前端 AJAX 预检用，避免被二次校验拦截）。
     返回 (是否通过, 错误信息)。
     """
     code = (code or "").strip()
@@ -94,7 +96,8 @@ def verify_code(email, code, purpose, user=None) -> tuple[bool, str]:
         rec.attempts += 1
         rec.save(update_fields=["attempts"])
         return False, "验证码错误，请重新输入。"
-    # 校验通过：标记已使用
-    rec.used = True
-    rec.save(update_fields=["used"])
+    # 校验通过：仅 consume=True 时标记已使用
+    if consume:
+        rec.used = True
+        rec.save(update_fields=["used"])
     return True, ""
