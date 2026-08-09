@@ -64,9 +64,9 @@
                 </ul>
                 <ul class="nav navbar-nav navbar-right">
                     {% if user.is_authenticated %}
-                    <li><p class="navbar-text"><a href="{% url 'accounts:profile' %}" style="color:#cfd8dc;">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</a></p></li>
-                    <li>
-                        <form method="post" action="{% url 'accounts:logout' %}" class="navbar-form">
+                    <li style="padding-top:15px;white-space:nowrap;">
+                        <span style="color:#cfd8dc;vertical-align:middle;"><a href="{% url 'accounts:profile' %}" style="color:#cfd8dc;">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</a></span>
+                        <form method="post" action="{% url 'accounts:logout' %}" style="display:inline-block;vertical-align:middle;margin:0 0 0 10px;">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-danger btn-xs"><span class="glyphicon glyphicon-log-out"></span> 退出</button>
                         </form>
