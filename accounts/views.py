@@ -18,6 +18,7 @@ from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
 from notifications.services import send_email, send_email_with_config
+from servers.management import push_notices
 from servers.models import Server, ServerAdminBinding
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
@@ -437,14 +438,18 @@ def settings(request):
                     content=content,
                     enabled="enabled" in request.POST,
                 )
-                messages.success(request, "公告已添加，可到服务器详情「批量推送」给受管用户。")
+                # 默认自动推送公告到全部服务器 motd（无需手动）
+                ok_push, msg_push = push_notices()
+                messages.success(request, "公告已添加并自动推送到服务器。" + (msg_push if ok_push else ""))
             else:
                 messages.error(request, "公告内容必填。")
         elif "del_announcement" in request.POST:
             ann = Announcement.objects.filter(pk=request.POST.get("announcement_id")).first()
             if ann:
                 ann.delete()
-                messages.success(request, "公告已删除。")
+                # 删除后自动重新推送（公告变化同步到服务器 motd）
+                push_notices()
+                messages.success(request, "公告已删除，服务器 motd 已同步更新。")
         return redirect("accounts:settings")
 
     return render(

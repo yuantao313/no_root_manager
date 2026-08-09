@@ -430,20 +430,24 @@ def _announcement_text():
 
 def write_server_motd(server):
     """把启用中的公告写入目标服务器 motd（/etc/motd.d/nrm_notifications），
-    所有用户 SSH 登录时自动显示。返回 (ok, msg)。
+    所有用户 SSH 登录时自动显示；无启用公告时清除 motd 文件。返回 (ok, msg)。
     """
     content = _announcement_text()
-    if not content:
-        return True, "无启用公告，跳过"
     motd_file = "/etc/motd.d/nrm_notifications"
     # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
-    ok, _, err = _exec(
-        server,
-        f"mkdir -p /etc/motd.d && echo {shlex.quote(content)} > {motd_file}",
-    )
+    if content:
+        ok, _, err = _exec(
+            server,
+            f"mkdir -p /etc/motd.d && echo {shlex.quote(content)} > {motd_file}",
+        )
+        if not ok:
+            return False, f"motd 写入失败：{err}"
+        return True, f"公告已写入目标机 motd：{motd_file}"
+    # 无启用公告：清除 motd 文件，避免残留旧公告
+    ok, _, err = _exec(server, f"rm -f {motd_file}")
     if not ok:
-        return False, f"motd 写入失败：{err}"
-    return True, f"公告已写入目标机 motd：{motd_file}"
+        return False, f"motd 清理失败：{err}"
+    return True, "无启用公告，已清除 motd 公告"
 
 
 def push_notices(server=None):
