@@ -33,3 +33,25 @@ def credential_detail(request, pk):
     """凭据详情（仅超级管理员），展示掩码信息。"""
     credential = get_object_or_404(Credential, pk=pk)
     return render(request, "credentials/detail.html", {"credential": credential})
+
+
+@superuser_required
+def credential_delete(request, pk):
+    """删除凭据（仅超级管理员）。
+
+    若凭据被服务器引用（Server.credential 外键，on_delete=PROTECT），
+    阻止删除并提示关联服务器数量，引导去服务器管理解除。
+    """
+    credential = get_object_or_404(Credential, pk=pk)
+    if request.method == "POST":
+        linked_count = credential.servers.count()
+        if linked_count > 0:
+            messages.error(
+                request,
+                f"该凭据被 {linked_count} 个服务器使用，无法删除。请先到「服务器」管理中删除/更换使用该凭据的服务器。",
+            )
+            return redirect("credentials:list")
+        credential.delete()
+        messages.success(request, f"凭据「{credential.name}」已删除。")
+        return redirect("credentials:list")
+    return redirect("credentials:list")

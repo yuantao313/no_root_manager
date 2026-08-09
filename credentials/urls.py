@@ -8,4 +8,5 @@ urlpatterns = [
     path("", views.credential_list, name="list"),
     path("new/", views.credential_create, name="create"),
     path("<int:pk>/", views.credential_detail, name="detail"),
+    path("<int:pk>/delete/", views.credential_delete, name="delete"),
 ]
