@@ -7,9 +7,12 @@ from config.decorators import superuser_required
 
 from .forms import ServerForm
 from .management import (
+    detect_npu_groups,
     ensure_nrm_group,
     list_system_users,
     lock_user,
+    push_notices,
+    run_init_script,
     sync_managed_users,
     sync_user_usage,
     take_over_user,
@@ -20,13 +23,18 @@ from .ssh import test_server_connection
 
 
 def server_groups_api(request, pk):
-    """返回服务器的分组配置（默认分组 + 可附加分组），供申请表单前端联动。"""
+    """返回服务器的分组配置（默认分组 + 可附加分组），供申请表单前端联动。
+
+    NPU 服务器：可附加分组返回 NPU 卡组（npu + npuN），分组选择直接转换为 NPU 选择。
+    """
     server = get_object_or_404(Server, pk=pk)
+    extra = server.npu_groups_list() if server.is_npu else server.extra_groups_list()
     return JsonResponse(
         {
             "id": server.pk,
             "default_groups": server.default_groups_list(),
-            "extra_groups": server.extra_groups_list(),
+            "extra_groups": extra,
+            "is_npu": server.is_npu,
         },
         json_dumps_params={"ensure_ascii": False},
     )
@@ -201,5 +209,44 @@ def server_unlock_user(request, pk):
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     ok, msg = unlock_user(server, username)
+    messages.success(request, msg) if ok else messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_run_init(request, pk):
+    """执行服务器初始化脚本（远程 get 并在目标机运行，仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    if request.method != "POST":
+        return redirect("servers:detail", pk=pk)
+    ok, msg = run_init_script(server)
+    messages.success(request, msg) if ok else messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_configure_npu(request, pk):
+    """NPU 服务器：检测目标机 NPU 卡组并保存（仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    if request.method != "POST":
+        return redirect("servers:detail", pk=pk)
+    ok, groups, msg = detect_npu_groups(server)
+    if ok:
+        server.is_npu = True
+        server.npu_groups = ",".join(groups)
+        server.save(update_fields=["is_npu", "npu_groups"])
+        messages.success(request, f"NPU 检测完成并保存：{msg}")
+    else:
+        messages.error(request, f"NPU 检测失败：{msg}")
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_push_notices(request, pk):
+    """批量推送用户公告给该服务器的受管用户（仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    if request.method != "POST":
+        return redirect("servers:detail", pk=pk)
+    ok, msg = push_notices(server)
     messages.success(request, msg) if ok else messages.error(request, msg)
     return redirect("servers:detail", pk=pk)

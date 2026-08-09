@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from accounts.models import Announcement
 from accounts.username_gen import generate_username_groups
 from config.decorators import staff_required
 from notifications.services import (
@@ -12,7 +13,14 @@ from notifications.services import (
     webhook_new_application,
     webhook_review_result,
 )
-from servers.management import grant_sudo, migrate_home_dir, provision_user, take_over_user
+from servers.management import (
+    grant_npu_access,
+    grant_sudo,
+    migrate_home_dir,
+    provision_user,
+    take_over_user,
+    write_user_notice,
+)
 from servers.models import ManagedUser, Server
 
 from .forms import ApplicationForm
@@ -64,6 +72,17 @@ def _provision_on_approve(application, request):
     for g in applied:
         if g not in groups:
             groups.append(g)
+
+    # NPU 服务器：分组选择即 NPU 卡组，开通时执行卡授权（usermod -aG npu,npuN）
+    if server.is_npu and applied:
+        ok_npu, msg_npu = grant_npu_access(server, application.username, applied)
+        if ok_npu:
+            messages.success(request, msg_npu)
+        else:
+            messages.warning(request, msg_npu)
+
+    # 开通后写入用户公告（个人目录 nrm_notifications.md + .bashrc 登录打印）
+    _ok_notice, _msg_notice = write_user_notice(server, application.username)
 
     # 使用截止时间：到期后机器账号自动失效（usermod -e）
     expire_date = application.valid_until.date() if application.valid_until else None
@@ -180,6 +199,8 @@ def my_applications(request):
             "applications": applications,
             "form": form,
             "needs_name": needs_name,
+            # 系统首页同步显示启用中的公告
+            "announcements": Announcement.objects.filter(enabled=True),
         },
     )
 

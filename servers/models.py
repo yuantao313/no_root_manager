@@ -106,6 +106,27 @@ class Server(models.Model):
         default="",
         help_text="用户申请时可附加选择加入的分组，多个用英文逗号分隔",
     )
+    # NPU 服务器：勾选后分组选择升级为 NPU 卡组（npu + npuN），开通时执行卡授权
+    is_npu = models.BooleanField(
+        "NPU 服务器",
+        default=False,
+        help_text="勾选后，用户申请的分组选择转换为 NPU 算力卡组选择",
+    )
+    npu_groups = models.CharField(
+        "NPU 卡组（自动检测）",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="检测 /dev/davinciN 后生成，如 npu,npu0,npu1（逗号分隔）",
+    )
+    # 初始化脚本：目标机远程 get 并运行（如 NPU 环境配置脚本 URL）
+    init_script = models.CharField(
+        "初始化脚本 URL",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="服务器接入时在目标机远程下载并执行的脚本地址（如 NPU 配置脚本）",
+    )
     # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制；写入 limits.d）
     nproc_limit = models.PositiveIntegerField(
         "进程数限制 nproc",
@@ -152,6 +173,10 @@ class Server(models.Model):
     def extra_groups_list(self):
         """解析可附加分组为列表。"""
         return [g.strip() for g in self.extra_groups.split(",") if g.strip()]
+
+    def npu_groups_list(self):
+        """解析 NPU 卡组（含公共组 npu）为列表。"""
+        return [g.strip() for g in self.npu_groups.split(",") if g.strip()]
 
     def default_groups_list(self):
         """解析默认分组为列表。"""

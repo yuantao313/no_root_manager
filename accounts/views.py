@@ -21,7 +21,7 @@ from notifications.services import send_email, send_email_with_config
 from servers.models import Server, ServerAdminBinding
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
-from .models import EmailVerification, SystemConfig, UserProfile
+from .models import Announcement, EmailVerification, SystemConfig, UserProfile
 from .username_gen import generate_username_groups
 
 
@@ -428,6 +428,23 @@ def settings(request):
             if binding:
                 binding.delete()
                 messages.success(request, "绑定关系已解除。")
+        elif "add_announcement" in request.POST:
+            title = request.POST.get("title", "").strip()
+            content = request.POST.get("content", "").strip()
+            if content:
+                Announcement.objects.create(
+                    title=title,
+                    content=content,
+                    enabled="enabled" in request.POST,
+                )
+                messages.success(request, "公告已添加，可到服务器详情「批量推送」给受管用户。")
+            else:
+                messages.error(request, "公告内容必填。")
+        elif "del_announcement" in request.POST:
+            ann = Announcement.objects.filter(pk=request.POST.get("announcement_id")).first()
+            if ann:
+                ann.delete()
+                messages.success(request, "公告已删除。")
         return redirect("accounts:settings")
 
     return render(
@@ -436,6 +453,7 @@ def settings(request):
         {
             "syscfg": syscfg,
             "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
+            "announcements": Announcement.objects.all(),
             "gitcode_callback_url": request.build_absolute_uri(reverse("gitcode_callback")),
             "email_cfg": email_cfg,
             "hooks": hooks,

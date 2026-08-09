@@ -12,6 +12,7 @@
     <li role="presentation"><a href="#tab-email" aria-controls="tab-email" role="tab" data-toggle="tab">邮件通知</a></li>
     <li role="presentation"><a href="#tab-webhook" aria-controls="tab-webhook" role="tab" data-toggle="tab">全局 Webhook</a></li>
     <li role="presentation"><a href="#tab-binding" aria-controls="tab-binding" role="tab" data-toggle="tab">管理员与服务器</a></li>
+    <li role="presentation"><a href="#tab-announcement" aria-controls="tab-announcement" role="tab" data-toggle="tab">用户公告</a></li>
 </ul>
 
 <div class="tab-content" style="padding-top:16px;">
@@ -159,6 +160,46 @@
                 </tbody>
             </table>
             {% endif %}
+        </div>
+    </div>
+
+    <!-- 用户公告 -->
+    <div role="tabpanel" class="tab-pane" id="tab-announcement">
+        <div class="panel panel-default">
+            <div class="panel-heading"><h3 class="panel-title">用户公告</h3></div>
+            {% if announcements %}
+            <table class="table table-striped">
+                <thead><tr><th>标题</th><th>内容</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                    {% for ann in announcements %}
+                    <tr>
+                        <td>{{ ann.title|default:"—" }}</td>
+                        <td style="word-break:break-all;max-width:320px;">{{ ann.content|truncatechars:80 }}</td>
+                        <td>{% if ann.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
+                        <td>
+                            <form method="post" style="display:inline;">
+                                {% csrf_token %}
+                                <input type="hidden" name="announcement_id" value="{{ ann.pk }}">
+                                <button type="submit" name="del_announcement" class="btn btn-danger btn-xs" onclick="return confirm('确定删除该公告吗？');">删除</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="panel-body"><p class="text-muted">暂无公告。</p></div>
+            {% endif %}
+            <div class="panel-body" style="border-top:1px solid #ddd;">
+                <p class="text-muted" style="font-size:13px;">公告将写入目标服务器的 motd（用户 SSH 登录时显示）与受管用户 home 目录的 nrm_notifications.md，并在系统首页同步展示；在服务器详情页可批量推送。</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <p><label>标题</label><input type="text" name="title" class="form-control"></p>
+                    <p><label>内容</label><textarea name="content" class="form-control" rows="4" required></textarea></p>
+                    <p><label><input type="checkbox" name="enabled" checked> 启用</label></p>
+                    <button type="submit" name="add_announcement" class="btn btn-primary">添加公告</button>
+                </form>
+            </div>
         </div>
     </div>
 </div>

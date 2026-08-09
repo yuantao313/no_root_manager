@@ -17,6 +17,12 @@
                 </p>
                 {% endif %}
             {% endfor %}
+            {% if form.instance.pk and form.instance.is_npu %}
+            <p class="text-muted" style="font-size:13px;">
+                NPU 卡组（检测结果）：<code>{{ form.instance.npu_groups|default:"未检测" }}</code>
+                — 可在服务器详情页执行"NPU 检测配置"更新。
+            </p>
+            {% endif %}
 
             <!-- 高级设置：资源限制（默认收起） -->
             <div class="panel panel-default">

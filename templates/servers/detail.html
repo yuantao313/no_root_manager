@@ -7,6 +7,20 @@
         <div class="col-xs-6 text-right">
             <a href="{% url 'servers:edit' server.pk %}" class="btn btn-primary">编辑</a>
             <a href="{% url 'servers:test' server.pk %}" class="btn btn-success">测试连接</a>
+            {% if server.init_script %}
+            <form method="post" action="{% url 'servers:run_init' server.pk %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-info btn-xs">执行初始化</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{% url 'servers:configure_npu' server.pk %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-warning btn-xs">NPU 检测配置</button>
+            </form>
+            <form method="post" action="{% url 'servers:push_notices' server.pk %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-default btn-xs">批量推送公告</button>
+            </form>
             <a href="{% url 'servers:list' %}" class="btn btn-default">返回列表</a>
         </div>
     </div>

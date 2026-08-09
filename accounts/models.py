@@ -25,6 +25,26 @@ class UserProfile(models.Model):
         return f"{self.user.username}（{self.employee_id or '未填工号'}）"
 
 
+class Announcement(models.Model):
+    """用户公告：启用后写入目标机用户个人目录（nrm_notifications.md），
+    并在用户登录时打印（.bashrc 追加 cat）。
+    """
+
+    title = models.CharField("标题", max_length=200, blank=True, default="")
+    content = models.TextField("内容", blank=True, help_text="将写入用户 home 目录的 nrm_notifications.md")
+    enabled = models.BooleanField("启用", default=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        verbose_name = "用户公告"
+        verbose_name_plural = "用户公告"
+
+    def __str__(self):
+        return self.title or "（无标题公告）"
+
+
 class SystemConfig(models.Model):
     """系统配置（单行单例）：GitCode OAuth 等原环境变量配置转移至数据库。
 

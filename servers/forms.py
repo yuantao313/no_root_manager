@@ -33,6 +33,8 @@ class ServerForm(forms.ModelForm):
             "credential",
             "default_group",
             "extra_groups",
+            "is_npu",
+            "init_script",
             "nproc_limit",
             "nofile_limit",
             "as_limit",

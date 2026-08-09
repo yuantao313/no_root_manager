@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}我的申请 - NRM{% endblock %}
 {% block content %}
+{% if announcements %}
+<div class="alert alert-info" style="margin-bottom:16px;">
+    <strong>系统公告</strong>
+    {% for ann in announcements %}
+    <div style="margin-top:6px;">{% if ann.title %}<strong>{{ ann.title }}</strong><br>{% endif %}{{ ann.content|linebreaksbr }}</div>
+    {% endfor %}
+</div>
+{% endif %}
 <div class="row">
     <!-- 左侧：新建申请 -->
     <div class="col-md-4">

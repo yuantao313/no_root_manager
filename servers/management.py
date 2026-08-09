@@ -3,11 +3,12 @@
 import logging
 import re
 import secrets
+import shlex
 import string
 
 from django.utils import timezone
 
-from .models import ManagedUser
+from .models import ManagedUser, Server
 from .ssh import exec_command
 
 logger = logging.getLogger(__name__)
@@ -377,3 +378,111 @@ def migrate_home_dir(server, source_dir, username):
         _exec(server, f"mv -T {target} {source_dir}")
         return False, f"迁移后设置属主失败，已回滚：{err}"
     return True, f"已将 {source_dir} 迁移到 {target}"
+
+
+# ===== 初始化脚本 / NPU 分组 / 用户公告 =====
+
+NOTICE_FILE = "nrm_notifications.md"
+
+
+def run_init_script(server):
+    """远程 get 初始化脚本并在目标机运行（curl -sL <url> | sudo bash）。返回 (ok, msg)。"""
+    url = (server.init_script or "").strip()
+    if not url:
+        return False, "未配置初始化脚本 URL"
+    ok, out, err = _exec(server, f"curl -sL '{url}' | sudo -n bash -s")
+    if ok:
+        return True, f"初始化脚本执行完成：{out[:200]}"
+    return False, f"初始化脚本执行失败：{err or out[:200]}"
+
+
+def detect_npu_groups(server):
+    """检测目标机 NPU 卡组：返回 (ok, groups_list, msg)，groups 含公共组 npu + 卡组 npuN。"""
+    ok, out, err = _exec(server, "ls -1 /dev/davinci[0-9]* 2>/dev/null")
+    if not ok or not out:
+        return False, [], err or "未检测到 /dev/davinciN（Ascend 驱动未加载）"
+    ids = sorted(
+        {m.group(1) for line in out.split() if (m := re.search(r"davinci(\d+)$", line))},
+        key=int,
+    )
+    groups = ["npu"] + [f"npu{i}" for i in ids]
+    return True, groups, f"检测到 {len(ids)} 张 NPU 卡：{ids}"
+
+
+def grant_npu_access(server, username, groups):
+    """授权用户 NPU 卡组（usermod -aG npu,npuN）。返回 (ok, msg)。"""
+    username = (username or "").strip()
+    if not username or not groups:
+        return False, "参数错误"
+    ok, _, err = _exec(server, f"usermod -aG {','.join(groups)} {username}")
+    if ok:
+        return True, f"用户 {username} 已加入 NPU 卡组：{','.join(groups)}"
+    return False, f"NPU 授权失败：{err}"
+
+
+def _announcement_text():
+    """启用公告拼成的纯文本（用于写入用户 home 与服务器 motd）。"""
+    from accounts.models import Announcement
+
+    notices = [n for n in Announcement.objects.filter(enabled=True) if n.content.strip()]
+    if not notices:
+        return ""
+    return "\n\n".join(f"# {n.title}\n{n.content}" for n in notices)
+
+
+def write_user_notice(server, username):
+    """把启用中的公告写入用户 home 的 nrm_notifications.md（个人目录留存）。
+
+    返回 (ok, msg)。无启用公告时跳过。
+    """
+    content = _announcement_text()
+    if not content:
+        return True, "无启用公告，跳过"
+    home = f"/home/{username}"
+    ok, _, err = _exec(
+        server,
+        f"echo {shlex.quote(content)} > {home}/{NOTICE_FILE} && chown {username}:{username} {home}/{NOTICE_FILE}",
+    )
+    if not ok:
+        return False, f"公告写入失败：{err}"
+    return True, f"公告已写入 {home}/{NOTICE_FILE}"
+
+
+def write_server_motd(server):
+    """把启用中的公告写入目标服务器 motd（/etc/motd.d/nrm_notifications），
+    所有用户 SSH 登录时自动显示。返回 (ok, msg)。
+    """
+    content = _announcement_text()
+    if not content:
+        return True, "无启用公告，跳过"
+    motd_file = "/etc/motd.d/nrm_notifications"
+    # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
+    ok, _, err = _exec(
+        server,
+        f"mkdir -p /etc/motd.d && echo {shlex.quote(content)} > {motd_file}",
+    )
+    if not ok:
+        return False, f"motd 写入失败：{err}"
+    return True, f"公告已写入目标机 motd：{motd_file}"
+
+
+def push_notices(server=None):
+    """批量推送公告：目标机 motd（登录显示）+ 各受管用户 home 目录留存。
+
+    server 为空则推送全部服务器。返回 (ok, msg)。
+    """
+    if not _announcement_text():
+        return True, "无启用公告，跳过"
+    servers = [server] if server else list(Server.objects.all())
+    done, fail = 0, []
+    for s in servers:
+        ok, msg = write_server_motd(s)
+        if not ok:
+            fail.append(f"{s.name}：{msg}")
+        for mu in ManagedUser.objects.filter(server=s):
+            ok, msg = write_user_notice(s, mu.username)
+            if ok:
+                done += 1
+            else:
+                fail.append(f"{s.name}/{mu.username}：{msg}")
+    return True, f"公告推送完成（motd + {done} 个用户 home）" + (f"；失败：{'；'.join(fail)}" if fail else "")
