@@ -48,6 +48,11 @@ class ManagedUser(models.Model):
     synced_at = models.DateTimeField("最近同步时间", auto_now=True)
     # 用户在目标机器上的附加分组（逗号分隔，同步时读取）
     groups = models.CharField("机器分组", max_length=500, blank=True)
+    # 资源使用（同步采集时更新；空表示未采集或用户无进程/家目录）
+    disk_used = models.CharField("磁盘占用", max_length=50, blank=True, default="")
+    mem_used = models.CharField("内存占用", max_length=50, blank=True, default="")
+    cpu_used = models.CharField("CPU 占用", max_length=50, blank=True, default="")
+    usage_synced_at = models.DateTimeField("资源采集时间", null=True, blank=True)
 
     class Meta:
         ordering = ["username"]

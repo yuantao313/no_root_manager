@@ -41,35 +41,71 @@
         <div class="row">
             <div class="col-xs-6"><h3 class="panel-title">受管用户（nrm_managed 组）</h3></div>
             <div class="col-xs-6 text-right">
+                {% if last_sync_at %}<span class="text-muted" style="font-size:13px;margin-right:10px;">上次同步：{{ last_sync_at|date:"Y-m-d H:i:s" }}</span>{% endif %}
                 <a href="{% url 'servers:sync_users' server.pk %}" class="btn btn-default btn-xs">同步</a>
             </div>
         </div>
     </div>
     <div class="panel-body">
-        <form method="post" action="{% url 'servers:takeover' server.pk %}" class="form-inline" style="margin-bottom:12px;">
-            {% csrf_token %}
-            <div class="form-group">
-                <input type="text" name="username" class="form-control" placeholder="输入要接管的用户名" style="width:220px;">
-            </div>
-            <button type="submit" class="btn btn-primary btn-sm">接管用户</button>
-        </form>
         {% if server.managed_users.all %}
         <table class="table table-striped">
             <thead>
-                <tr><th>用户名</th><th>机器分组</th><th>最近同步</th></tr>
+                <tr><th>用户名</th><th>机器分组</th><th>磁盘</th><th>内存</th><th>CPU</th><th>采集时间</th><th>操作</th></tr>
             </thead>
             <tbody>
                 {% for mu in server.managed_users.all %}
                 <tr>
                     <td>{{ mu.username }}</td>
                     <td>{{ mu.groups|default:"—" }}</td>
-                    <td>{{ mu.synced_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ mu.disk_used|default:"—" }}</td>
+                    <td>{{ mu.mem_used|default:"—" }}</td>
+                    <td>{{ mu.cpu_used|default:"—" }}</td>
+                    <td>{% if mu.usage_synced_at %}{{ mu.usage_synced_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
+                    <td>
+                        <form method="post" action="{% url 'servers:lock_user' server.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="username" value="{{ mu.username }}">
+                            <button type="submit" class="btn btn-warning btn-xs" onclick="return confirm('确定禁用用户 {{ mu.username }} 吗？');">禁用</button>
+                        </form>
+                        <form method="post" action="{% url 'servers:unlock_user' server.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="username" value="{{ mu.username }}">
+                            <button type="submit" class="btn btn-success btn-xs">启用</button>
+                        </form>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
-        <p class="text-muted">暂无受管用户，可先同步或手动接管。</p>
+        <p class="text-muted">暂无受管用户，可先同步或在下方接管。</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel panel-default">
+    <div class="panel-heading"><h3 class="panel-title">可接管用户（/home 下未受管）</h3></div>
+    <div class="panel-body">
+        {% if available_users %}
+        <table class="table table-striped">
+            <thead><tr><th>用户名</th><th>操作</th></tr></thead>
+            <tbody>
+                {% for name in available_users %}
+                <tr>
+                    <td>{{ name }}</td>
+                    <td>
+                        <form method="post" action="{% url 'servers:takeover' server.pk %}" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="username" value="{{ name }}">
+                            <button type="submit" class="btn btn-primary btn-xs">接管</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">无可接管用户（或目标机器不可达/未关联凭据）。</p>
         {% endif %}
     </div>
 </div>

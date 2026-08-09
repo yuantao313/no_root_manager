@@ -5,7 +5,15 @@ from django.shortcuts import get_object_or_404, redirect, render
 from config.decorators import superuser_required
 
 from .forms import ServerForm
-from .management import ensure_nrm_group, sync_managed_users, take_over_user
+from .management import (
+    ensure_nrm_group,
+    list_system_users,
+    lock_user,
+    sync_managed_users,
+    sync_user_usage,
+    take_over_user,
+    unlock_user,
+)
 from .models import Server
 from .ssh import test_server_connection
 
@@ -94,14 +102,33 @@ def server_test(request, pk):
 
 @superuser_required
 def server_detail(request, pk):
-    """服务器详情（仅超级管理员），含受管用户列表。"""
+    """服务器详情（仅超级管理员），含受管用户列表与可接管用户候选。"""
     server = get_object_or_404(Server, pk=pk)
-    return render(request, "servers/detail.html", {"server": server})
+    available_users = []
+    if server.credential:
+        try:
+            ok, available_users, _ = list_system_users(server)
+        except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
+            available_users = []
+    return render(
+        request,
+        "servers/detail.html",
+        {
+            "server": server,
+            "available_users": available_users,
+            # 最近一次资源同步时间（全部受管用户中取最大）
+            "last_sync_at": (
+                server.managed_users.order_by("-usage_synced_at").values_list("usage_synced_at", flat=True).first()
+                if server.managed_users.exists()
+                else None
+            ),
+        },
+    )
 
 
 @superuser_required
 def server_sync_users(request, pk):
-    """同步目标机器 nrm_managed 组成员到数据库（仅超级管理员）。"""
+    """同步目标机器状态（仅超级管理员）：nrm_managed 组成员 + 资源使用采集。"""
     server = get_object_or_404(Server, pk=pk)
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法同步。")
@@ -111,10 +138,13 @@ def server_sync_users(request, pk):
         messages.error(request, msg)
         return redirect("servers:detail", pk=pk)
     ok, msg = sync_managed_users(server)
-    if ok:
-        messages.success(request, msg)
-    else:
+    if not ok:
         messages.error(request, msg)
+        return redirect("servers:detail", pk=pk)
+    messages.success(request, msg)
+    # 采集各用户资源使用（磁盘/内存/CPU）
+    ok2, msg2 = sync_user_usage(server)
+    messages.success(request, msg2) if ok2 else messages.error(request, msg2)
     return redirect("servers:detail", pk=pk)
 
 
@@ -131,4 +161,30 @@ def server_takeover_user(request, pk):
         messages.success(request, msg)
     else:
         messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_lock_user(request, pk):
+    """禁用目标机器用户（passwd -l，仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    if request.method != "POST" or not username:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    ok, msg = lock_user(server, username)
+    messages.success(request, msg) if ok else messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_unlock_user(request, pk):
+    """启用目标机器用户（passwd -u，仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    if request.method != "POST" or not username:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    ok, msg = unlock_user(server, username)
+    messages.success(request, msg) if ok else messages.error(request, msg)
     return redirect("servers:detail", pk=pk)

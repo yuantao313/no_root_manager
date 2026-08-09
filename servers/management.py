@@ -5,6 +5,8 @@ import re
 import secrets
 import string
 
+from django.utils import timezone
+
 from .models import ManagedUser
 from .ssh import exec_command
 
@@ -108,6 +110,89 @@ def sync_managed_users(server):
     # 删除已不在组成员中的记录
     ManagedUser.objects.filter(server=server).exclude(username__in=members).delete()
     return True, f"同步完成，共 {len(members)} 个受管用户"
+
+
+def lock_user(server, username):
+    """禁用目标机器用户（passwd -l）。返回 (ok, msg)。"""
+    username = (username or "").strip()
+    if not username:
+        return False, "用户名为空"
+    ok, _, err = _exec(server, f"passwd -l {username}")
+    if ok:
+        return True, f"用户 {username} 已禁用"
+    return False, f"禁用失败：{err}"
+
+
+def unlock_user(server, username):
+    """启用目标机器用户（passwd -u）。返回 (ok, msg)。"""
+    username = (username or "").strip()
+    if not username:
+        return False, "用户名为空"
+    ok, _, err = _exec(server, f"passwd -u {username}")
+    if ok:
+        return True, f"用户 {username} 已启用"
+    return False, f"启用失败：{err}"
+
+
+def list_system_users(server):
+    """列出目标机器 /home 下可接管的系统用户（排除已受管成员）。
+
+    返回 (ok, available_users:list, msg)。用于接管按钮化的候选列表。
+    """
+    ok, out, err = _exec(server, "ls -1 /home")
+    if not ok:
+        return False, [], err or "读取用户列表失败"
+    names = [n for n in out.split() if n]
+    _, members, _ = list_nrm_members(server)
+    available = [n for n in names if n not in members]
+    return True, available, f"共 {len(available)} 个可接管用户"
+
+
+def collect_user_usage(server, username):
+    """采集单个用户资源使用：磁盘占用、内存、CPU。
+
+    返回 (ok, dict(disk/mem/cpu), msg)。磁盘取 /home 大小（如 1.2G），
+    内存/CPU 由 ps 按用户汇总（如 256MB / 3.5%）。
+    """
+    username = (username or "").strip()
+    if not username:
+        return False, {}, "用户名为空"
+    cmd = (
+        f'echo "DISK=$(du -sh /home/{username} 2>/dev/null | cut -f1) '
+        f"USAGE=$(ps -u {username} -o rss=,%cpu= --no-headers 2>/dev/null | "
+        f'awk \'{{m+=$1;c+=$2}} END{{printf "%.0fMB %.1f%%", m/1024, c}}\')"'
+    )
+    ok, out, err = _exec(server, cmd)
+    if not ok:
+        return False, {}, err or "采集失败"
+    disk, mem, cpu = "", "", ""
+    m = re.search(r"DISK=(\S+)", out)
+    if m:
+        disk = m.group(1)
+    m = re.search(r"USAGE=(\S+)", out)
+    if m:
+        parts = m.group(1).split()
+        if len(parts) == 2:
+            mem, cpu = parts[0], parts[1]
+    return True, {"disk": disk, "mem": mem, "cpu": cpu}, out
+
+
+def sync_user_usage(server):
+    """采集全部受管用户的资源使用并入库。返回 (ok, msg)。"""
+    users = list(ManagedUser.objects.filter(server=server))
+    if not users:
+        return True, "无受管用户可采集"
+    collected = 0
+    for mu in users:
+        ok, data, _ = collect_user_usage(server, mu.username)
+        if ok:
+            mu.disk_used = data["disk"]
+            mu.mem_used = data["mem"]
+            mu.cpu_used = data["cpu"]
+            mu.usage_synced_at = timezone.now()
+            mu.save(update_fields=["disk_used", "mem_used", "cpu_used", "usage_synced_at"])
+            collected += 1
+    return True, f"资源采集完成：{collected}/{len(users)} 个用户"
 
 
 def provision_user(server, username, groups=None, expire_date=None, with_home=True, force_pwd_change=True):
