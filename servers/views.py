@@ -11,7 +11,6 @@ from .management import (
     ensure_nrm_group,
     list_system_users,
     lock_user,
-    push_notices,
     run_init_script,
     sync_managed_users,
     sync_user_usage,
@@ -238,15 +237,4 @@ def server_configure_npu(request, pk):
         messages.success(request, f"NPU 检测完成并保存：{msg}")
     else:
         messages.error(request, f"NPU 检测失败：{msg}")
-    return redirect("servers:detail", pk=pk)
-
-
-@superuser_required
-def server_push_notices(request, pk):
-    """批量推送用户公告给该服务器的受管用户（仅超级管理员）。"""
-    server = get_object_or_404(Server, pk=pk)
-    if request.method != "POST":
-        return redirect("servers:detail", pk=pk)
-    ok, msg = push_notices(server)
-    messages.success(request, msg) if ok else messages.error(request, msg)
     return redirect("servers:detail", pk=pk)

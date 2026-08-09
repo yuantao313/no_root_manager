@@ -16,6 +16,5 @@ urlpatterns = [
     path("<int:pk>/unlock/", views.server_unlock_user, name="unlock_user"),
     path("<int:pk>/run-init/", views.server_run_init, name="run_init"),
     path("<int:pk>/configure-npu/", views.server_configure_npu, name="configure_npu"),
-    path("<int:pk>/push-notices/", views.server_push_notices, name="push_notices"),
     path("<int:pk>/", views.server_detail, name="detail"),
 ]
