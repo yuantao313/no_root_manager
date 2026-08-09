@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -14,7 +15,7 @@ from .management import (
     take_over_user,
     unlock_user,
 )
-from .models import Server
+from .models import ManagedUser, Server
 from .ssh import test_server_connection
 
 
@@ -116,6 +117,7 @@ def server_detail(request, pk):
         {
             "server": server,
             "available_users": available_users,
+            "sys_users": User.objects.order_by("username"),
             # 最近一次资源同步时间（全部受管用户中取最大）
             "last_sync_at": (
                 server.managed_users.order_by("-usage_synced_at").values_list("usage_synced_at", flat=True).first()
@@ -150,7 +152,10 @@ def server_sync_users(request, pk):
 
 @superuser_required
 def server_takeover_user(request, pk):
-    """将指定用户加入目标机器 nrm_managed 组（接管，仅超级管理员）。"""
+    """将指定用户加入目标机器 nrm_managed 组（接管，仅超级管理员）。
+
+    可同时绑定一个 NRM 系统账号（机器受管用户 ↔ 系统用户一对一）。
+    """
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     if request.method != "POST" or not username:
@@ -158,6 +163,16 @@ def server_takeover_user(request, pk):
         return redirect("servers:detail", pk=pk)
     ok, msg = take_over_user(server, username)
     if ok:
+        # 接管成功：若指定了绑定用户，则写入 ManagedUser.user
+        bind_id = request.POST.get("bind_user_id", "").strip()
+        if bind_id:
+            mu = ManagedUser.objects.filter(server=server, username=username).first()
+            if mu:
+                try:
+                    mu.user_id = int(bind_id)
+                    mu.save(update_fields=["user"])
+                except (ValueError, TypeError):
+                    pass
         messages.success(request, msg)
     else:
         messages.error(request, msg)

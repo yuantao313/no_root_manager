@@ -134,6 +134,17 @@ def generate_usernames(name: str) -> list[str]:
     return groups["suggestions"]
 
 
+def _english_username(name: str) -> str:
+    """英文名用户名规则：纯英文+空格时 name_words[0][0] + name_words[-1] 小写。
+
+    如 "John Smith" -> "js"；"Alice Bob Carol" -> "acarol"。
+    """
+    words = [w for w in name.split(" ") if w]
+    if not words:
+        return ""
+    return (words[0][0] + words[-1]).lower()
+
+
 def generate_username_groups(name: str) -> dict:
     """返回分组结果，供接口使用。
 
@@ -157,7 +168,19 @@ def generate_username_groups(name: str) -> dict:
     if not name:
         return empty
 
-    # 单姓拆分（对复姓姓名即“姓取首字”的单姓情况）
+    # 英文名（纯 ASCII 字母 + 空格）：用英文规则，不走拼音
+    if all(ch.isascii() and (ch.isalpha() or ch == " ") for ch in name):
+        eng = _english_username(name)
+        if eng:
+            return {
+                "name": name,
+                "is_compound_surname": False,
+                "single_surname": [eng],
+                "compound_surname": [],
+                "suggestions": [eng],
+            }
+
+    # 单姓拆分（对复姓姓名即"姓取首字"的单姓情况）
     single = list(dict.fromkeys(r for r in _generate(name[0], name[1:]) if r))
 
     # 复姓拆分（额外提供）

@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from accounts.username_gen import generate_username_groups
 from config.decorators import staff_required
 from notifications.services import (
     notify_new_application,
@@ -11,22 +12,53 @@ from notifications.services import (
     webhook_new_application,
     webhook_review_result,
 )
-from servers.management import grant_sudo, migrate_home_dir, provision_user
-from servers.models import Server
+from servers.management import grant_sudo, migrate_home_dir, provision_user, take_over_user
+from servers.models import ManagedUser, Server
 
 from .forms import ApplicationForm
 from .models import Application, SudoGrant
 
 
+def _auto_username(user):
+    """按姓名自动生成目标机器用户名（中文拼音 / 英文首字母规则）。
+
+    规则：generate_username_groups 返回的首个建议；无姓名时退回账号用户名。
+    """
+    name = (user.first_name or "").strip()
+    if name:
+        groups = generate_username_groups(name)
+        if groups["suggestions"]:
+            return groups["suggestions"][0]
+    return user.username
+
+
 def _provision_on_approve(application, request):
-    """申请通过时在目标机器开通账号：建用户、随机密码并邮件发送。"""
+    """申请通过时执行：申请服务器账号 -> 开通；转移已有账号 -> 接管并绑定申请人。"""
     if not application.target_server or not application.target_server.credential:
         application.provision_note = "未开通：未关联目标服务器或凭据"
         application.save()
         return
 
     server = application.target_server
-    # 分组：服务器默认组 + 用户申请时勾选的附加组（均为字符串逗号分隔）
+
+    # 转移类型：将目标机器已有用户接管为受管用户，并一对一绑定申请人
+    if application.apply_type == Application.ApplyType.TRANSFER:
+        ok, msg = take_over_user(server, application.username)
+        if ok:
+            ManagedUser.objects.update_or_create(
+                server=server, username=application.username, defaults={"user": application.applicant}
+            )
+            application.provision_note = f"已接管并绑定：{msg}"
+            application.provisioned_at = timezone.now()
+            application.save()
+            messages.success(request, f"账号已接管并绑定：{msg}")
+        else:
+            application.provision_note = f"接管失败：{msg}"
+            application.save()
+            messages.warning(request, f"接管失败：{msg}")
+        return
+
+    # 创建类型：开通新账号
     groups = list(server.default_groups_list())
     applied = [g.strip() for g in (application.applied_groups or "").split(",") if g.strip()]
     for g in applied:
@@ -123,9 +155,18 @@ def my_applications(request):
         if form.is_valid():
             application = form.save(commit=False)
             application.applicant = request.user
-            # 身份信息来自账号（个人中心维护），不再由申请表单填写
+            # 身份信息/工号/目标用户名全部来自账号，不再由申请表单填写
             application.applicant_name = request.user.first_name or request.user.username
             application.email = request.user.email
+            application.employee_id = getattr(getattr(request.user, "profile", None), "employee_id", "") or ""
+            if application.apply_type == Application.ApplyType.TRANSFER:
+                # 转移类型：目标机器已有用户名由申请者指定，不自动生成
+                application.username = (form.cleaned_data.get("transfer_username") or "").strip()
+                if not application.username:
+                    messages.error(request, "转移已有账号需填写目标机器上已存在的用户名。")
+                    return redirect("applications:my")
+            else:
+                application.username = _auto_username(request.user) or request.user.username
             application.save()
             messages.success(request, "申请已提交，等待管理员审批。")
             notify_new_application(application)

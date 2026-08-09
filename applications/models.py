@@ -8,9 +8,8 @@ class Application(models.Model):
     """申请单：用户提交账号/权限申请，管理员审批。"""
 
     class ApplyType(models.TextChoices):
-        ACCOUNT = "account", "开通服务器账号"
-        PERMISSION = "permission", "申请权限"
-        OTHER = "other", "其他"
+        CREATE = "create", "申请服务器账号"
+        TRANSFER = "transfer", "转移已有账号为受管用户"
 
     class Status(models.TextChoices):
         PENDING = "pending", "待审批"
@@ -35,7 +34,7 @@ class Application(models.Model):
         "申请类型",
         max_length=20,
         choices=ApplyType.choices,
-        default=ApplyType.ACCOUNT,
+        default=ApplyType.CREATE,
     )
     title = models.CharField("申请标题", max_length=100)
     # 申请内容（账号/权限的具体说明）

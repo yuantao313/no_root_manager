@@ -24,12 +24,18 @@ class ApplicationForm(forms.ModelForm):
         help_text="可附加加入的用户分组（来自所选服务器配置）",
         widget=forms.CheckboxSelectMultiple,
     )
+    # 转移类型：指定目标机器上已有的用户名（选择式输入，带提示）
+    transfer_username = forms.CharField(
+        required=False,
+        label="已有机器用户名",
+        help_text="选择“转移已有账号为受管用户”时填写目标机器上已存在的用户名",
+        widget=forms.TextInput(attrs={"placeholder": "如：john"}),
+    )
 
     class Meta:
         model = Application
+        # 用户名/工号/姓名不再手填：从账号（User.username/UserProfile/姓名）自动带入
         fields = [
-            "username",
-            "employee_id",
             "apply_type",
             "target_server",
             "title",
@@ -47,8 +53,6 @@ class ApplicationForm(forms.ModelForm):
             ),
         }
         labels = {
-            "username": "用户名",
-            "employee_id": "工号",
             "apply_type": "申请类型",
             "target_server": "目标服务器",
             "title": "申请标题",

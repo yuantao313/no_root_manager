@@ -21,14 +21,15 @@ from notifications.services import send_email, send_email_with_config
 from servers.models import Server, ServerAdminBinding
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
-from .models import EmailVerification, SystemConfig
+from .models import EmailVerification, SystemConfig, UserProfile
 from .username_gen import generate_username_groups
 
 
 class ProfileForm(forms.Form):
-    """个人资料编辑：姓名（一体化，映射 first_name）+ 邮箱 + 验证码。"""
+    """个人资料编辑：姓名（一体化，映射 first_name）+ 工号 + 邮箱 + 验证码。"""
 
     name = forms.CharField(label="姓名", max_length=100, required=False)
+    employee_id = forms.CharField(label="工号", max_length=50, required=False)
     email = forms.EmailField(label="邮箱", required=False)
     code = forms.CharField(
         label="邮箱验证码", max_length=6, required=False, help_text="修改邮箱时需先点击“发送验证码”并填写"
@@ -40,14 +41,19 @@ class ProfileForm(forms.Form):
         self.instance = instance
         if instance:
             self.fields["name"].initial = instance.first_name
+            self.fields["employee_id"].initial = getattr(getattr(instance, "profile", None), "employee_id", "") or ""
             self.fields["email"].initial = instance.email
 
     def save(self, commit=True):
         user = self.instance
         user.first_name = self.cleaned_data["name"].strip()
         user.email = self.cleaned_data["email"].strip()
+        # 工号写入扩展资料（不存在则创建）
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.employee_id = self.cleaned_data["employee_id"].strip()
         if commit:
             user.save()
+            profile.save()
         return user
 
 

@@ -45,6 +45,16 @@ class ManagedUser(models.Model):
         verbose_name="所属服务器",
     )
     username = models.CharField("用户名", max_length=100)
+    # 机器受管用户 ↔ 系统账号一对一绑定（可选；接管/转移时指定具体用户）
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="managed_user",
+        verbose_name="绑定系统用户",
+        help_text="目标机器用户对应的 NRM 账号（一对一）",
+    )
     synced_at = models.DateTimeField("最近同步时间", auto_now=True)
     # 用户在目标机器上的附加分组（逗号分隔，同步时读取）
     groups = models.CharField("机器分组", max_length=500, blank=True)

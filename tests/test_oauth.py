@@ -82,7 +82,7 @@ class TestProfileGate:
             {
                 "username": "m1",
                 "employee_id": "E1",
-                "apply_type": "account",
+                "apply_type": "create",
                 "target_server": "",
                 "title": "t",
                 "applied_groups": [],
@@ -104,7 +104,7 @@ class TestProfileGate:
             {
                 "username": "m1",
                 "employee_id": "E1",
-                "apply_type": "account",
+                "apply_type": "create",
                 "target_server": "",
                 "title": "t",
                 "applied_groups": [],
@@ -122,7 +122,7 @@ class TestProfileGate:
             {
                 "username": "m1",
                 "employee_id": "E1",
-                "apply_type": "account",
+                "apply_type": "create",
                 "target_server": "",
                 "title": "t",
                 "applied_groups": [],

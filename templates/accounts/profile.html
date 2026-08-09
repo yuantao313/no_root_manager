@@ -21,6 +21,16 @@
                                 <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('name')">取消</a>
                             </span>
                         </dd>
+                        <dt>工号</dt>
+                        <dd>
+                            <span class="field-text" data-field="employee_id">{{ user.profile.employee_id|default:"—" }}</span>
+                            <a href="javascript:void(0)" class="field-edit" data-field="employee_id">编辑</a>
+                            <span id="field-employee_id" class="field-input" style="display:none;white-space:nowrap;">
+                                <input type="text" name="employee_id" class="form-control" style="display:inline-block;width:60%;" value="{{ user.profile.employee_id }}">
+                                <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
+                                <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('employee_id')">取消</a>
+                            </span>
+                        </dd>
                         <dt>邮箱</dt>
                         <dd>
                             <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>

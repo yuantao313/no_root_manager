@@ -11,7 +11,7 @@
         </div>
     </div>
 </div>
-<div class="panel panel-default" style="max-width:640px;">
+<div class="panel panel-default" style="max-width:640px;margin:0 auto;">
     <div class="panel-body">
         <dl>
             <dt>名称</dt>
@@ -50,12 +50,13 @@
         {% if server.managed_users.all %}
         <table class="table table-striped">
             <thead>
-                <tr><th>用户名</th><th>机器分组</th><th>磁盘</th><th>内存</th><th>CPU</th><th>采集时间</th><th>操作</th></tr>
+                <tr><th>用户名</th><th>绑定账号</th><th>机器分组</th><th>磁盘</th><th>内存</th><th>CPU</th><th>采集时间</th><th>操作</th></tr>
             </thead>
             <tbody>
                 {% for mu in server.managed_users.all %}
                 <tr>
                     <td>{{ mu.username }}</td>
+                    <td>{% if mu.user %}<a href="{% url 'accounts:profile' %}">{{ mu.user.username }}</a>{% else %}<span class="text-muted">未绑定</span>{% endif %}</td>
                     <td>{{ mu.groups|default:"—" }}</td>
                     <td>{{ mu.disk_used|default:"—" }}</td>
                     <td>{{ mu.mem_used|default:"—" }}</td>
@@ -94,9 +95,13 @@
                 <tr>
                     <td>{{ name }}</td>
                     <td>
-                        <form method="post" action="{% url 'servers:takeover' server.pk %}" style="display:inline;">
+                        <form method="post" action="{% url 'servers:takeover' server.pk %}" class="form-inline" style="display:inline;">
                             {% csrf_token %}
                             <input type="hidden" name="username" value="{{ name }}">
+                            <select name="bind_user_id" class="form-control input-sm" style="width:140px;">
+                                <option value="">不绑定</option>
+                                {% for u in sys_users %}<option value="{{ u.pk }}">{{ u.username }}</option>{% endfor %}
+                            </select>
                             <button type="submit" class="btn btn-primary btn-xs">接管</button>
                         </form>
                     </td>

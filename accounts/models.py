@@ -2,6 +2,29 @@ from django.conf import settings
 from django.db import models
 
 
+class UserProfile(models.Model):
+    """用户扩展资料（OneToOne 关联 auth 用户，不自定义用户模型）。
+
+    存放入职工号等申请工单复用信息；姓名用 first_name、用户名用
+    User.username，申请时均从账号自动带入，无需重复填写。
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+        verbose_name="用户",
+    )
+    employee_id = models.CharField("工号", max_length=50, blank=True, default="")
+
+    class Meta:
+        verbose_name = "用户扩展资料"
+        verbose_name_plural = "用户扩展资料"
+
+    def __str__(self):
+        return f"{self.user.username}（{self.employee_id or '未填工号'}）"
+
+
 class SystemConfig(models.Model):
     """系统配置（单行单例）：GitCode OAuth 等原环境变量配置转移至数据库。
 
