@@ -85,9 +85,7 @@ SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_QUERY_EMAIL = False
 SOCIALACCOUNT_LOGIN_ON_GET = False
 
-# GitCode OAuth 第三方登录（https://gitcode.com 应用管理页注册）
-GITCODE_CLIENT_ID = os.environ.get("GITCODE_CLIENT_ID", "")
-GITCODE_CLIENT_SECRET = os.environ.get("GITCODE_CLIENT_SECRET", "")
+# GitCode OAuth 配置由 django-allauth 的 SocialApp 管理（系统设置页维护）
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

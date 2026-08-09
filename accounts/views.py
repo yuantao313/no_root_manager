@@ -90,34 +90,9 @@ def register(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
-def _sync_gitcode_socialapp():
-    """将 SystemConfig 的 GitCode 配置同步到 allauth SocialApp（配置真源是 SystemConfig）。
-
-    用户通过系统设置页维护 client_id/secret（SystemConfig），OAuth 实际读取
-    SocialApp；二者必须一致，缺失/过期时自动补建（幂等）。
-    """
-    from django.contrib.sites.models import Site
-
-    syscfg = SystemConfig.objects.first()
-    if not syscfg or not syscfg.gitcode_client_id:
-        return False
-    app, _ = SocialApp.objects.get_or_create(provider="gitcode")
-    app.name = "GitCode"
-    app.client_id = syscfg.gitcode_client_id
-    if syscfg.gitcode_client_secret:
-        app.secret = syscfg.gitcode_client_secret
-    app.save()
-    app.sites.add(Site.objects.get_current())
-    return True
-
-
 def _gitcode_enabled():
-    """GitCode OAuth 是否已配置：以 SystemConfig 为准（并同步 SocialApp，保证可登录）。"""
-    syscfg = SystemConfig.objects.first()
-    if not syscfg or not syscfg.gitcode_client_id:
-        return False
-    _sync_gitcode_socialapp()
-    return True
+    """GitCode OAuth 是否已配置：直接检测 allauth SocialApp（唯一配置源）。"""
+    return SocialApp.objects.filter(provider="gitcode").exists()
 
 
 class GitCodeLoginView(LoginView):
@@ -215,24 +190,23 @@ def settings(request):
 
     if request.method == "POST":
         if "save_gitcode" in request.POST:
-            syscfg.gitcode_client_id = request.POST.get("gitcode_client_id", "").strip()
-            # secret 留空表示不修改（密文不回显）
+            # 唯一配置源：allauth SocialApp（由 django-allauth 插件管理）
+            client_id = request.POST.get("gitcode_client_id", "").strip()
+            # secret 留空表示不修改（不展示明文）
             new_secret = request.POST.get("gitcode_client_secret", "").strip()
-            if new_secret:
-                syscfg.gitcode_client_secret = new_secret
-            syscfg.save()
-            # 同步到 allauth SocialApp（OAuth 登录实际读取该配置）
-            if syscfg.gitcode_client_id:
+            if client_id:
                 app, _ = SocialApp.objects.get_or_create(provider="gitcode")
                 app.name = "GitCode"
-                app.client_id = syscfg.gitcode_client_id
+                app.client_id = client_id
                 if new_secret:
                     app.secret = new_secret
                 app.save()
                 from django.contrib.sites.models import Site
 
                 app.sites.add(Site.objects.get_current())
-            messages.success(request, "GitCode 配置已保存。")
+                messages.success(request, "GitCode 配置已保存。")
+            else:
+                messages.error(request, "请填写 GitCode Client ID。")
         elif "save_email" in request.POST:
             # 第一步：发送验证码（60 秒冷却），用表单配置（未入库）发信
             if cooldown_remaining > 0:
@@ -376,6 +350,7 @@ def settings(request):
         "accounts/settings.html",
         {
             "syscfg": syscfg,
+            "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
             "email_cfg": email_cfg,
             "hooks": hooks,
             "bindings": bindings,

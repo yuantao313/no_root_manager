@@ -1,21 +1,12 @@
 from django.conf import settings
 from django.db import models
 
-from servers.fields import EncryptedTextField
-
 
 class SystemConfig(models.Model):
     """系统配置（单行单例）：GitCode OAuth 等原环境变量配置转移至数据库。
 
     - 通过 get_singleton() 获取唯一实例（不存在则创建）
-    - 敏感字段（client_secret）加密落库
-    - 读取时优先数据库，未配置时回退环境变量（兼容过渡）
     """
-
-    gitcode_client_id = models.CharField("GitCode Client ID", max_length=200, blank=True, default="")
-    gitcode_client_secret = EncryptedTextField(
-        "GitCode Client Secret", blank=True, help_text="存储时加密，页面不展示明文"
-    )
 
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 
@@ -24,7 +15,7 @@ class SystemConfig(models.Model):
         verbose_name_plural = "系统配置"
 
     def __str__(self):
-        return "系统配置（GitCode OAuth）"
+        return "系统配置"
 
     @classmethod
     def get_singleton(cls):
