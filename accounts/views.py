@@ -10,7 +10,7 @@ from django.contrib.auth.views import LoginView, PasswordResetView
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
@@ -351,6 +351,7 @@ def settings(request):
         {
             "syscfg": syscfg,
             "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
+            "gitcode_callback_url": request.build_absolute_uri(reverse("gitcode_callback")),
             "email_cfg": email_cfg,
             "hooks": hooks,
             "bindings": bindings,

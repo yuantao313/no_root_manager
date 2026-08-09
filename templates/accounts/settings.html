@@ -20,6 +20,10 @@
         <div class="panel panel-default" style="max-width:640px;">
             <div class="panel-heading"><h3 class="panel-title">GitCode OAuth 配置</h3></div>
             <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;word-break:break-all;">
+                    回调地址（请到 GitCode 应用管理页配置为完全一致的值）：<br>
+                    <code>{{ gitcode_callback_url }}</code>
+                </p>
                 <form method="post">
                     {% csrf_token %}
                     <p><label>Client ID</label><input type="text" name="gitcode_client_id" class="form-control" value="{{ gitcode_app.client_id }}"></p>
