@@ -15,23 +15,28 @@
                         <dd>
                             <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
                             <a href="javascript:void(0)" class="field-edit" data-field="name">编辑</a>
-                            <input type="text" id="field-name" name="name" class="form-control field-input" style="display:none;width:60%;" value="{{ user.first_name }}">
+                            <span id="field-name" class="field-input" style="display:none;white-space:nowrap;">
+                                <input type="text" name="name" class="form-control" style="display:inline-block;width:60%;" value="{{ user.first_name }}">
+                                <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
+                                <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('name')">取消</a>
+                            </span>
                         </dd>
                         <dt>邮箱</dt>
                         <dd>
                             <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
                             <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
-                            <div id="field-email" class="field-input" style="display:none;">
-                                <input type="email" name="email" class="form-control" style="width:70%;" value="{{ user.email }}">
-                                <button type="submit" name="send_email_code" class="btn btn-default btn-xs">发送验证码</button>
-                                <input type="text" name="code" class="form-control" style="width:70%;margin-top:6px;" placeholder="邮箱验证码（修改邮箱时填写）">
-                            </div>
+                            <span id="field-email" class="field-input" style="display:none;">
+                                <span style="white-space:nowrap;">
+                                    <input type="email" name="email" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
+                                    <button type="submit" name="send_email_code" class="btn btn-default btn-xs">发送验证码</button>
+                                    <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
+                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
+                                </span>
+                                <br>
+                                <input type="text" name="code" class="form-control" style="display:inline-block;width:50%;margin-top:6px;" placeholder="邮箱验证码（修改邮箱时填写）">
+                            </span>
                         </dd>
                     </dl>
-                    <p id="field-actions" style="display:none;">
-                        <button type="submit" name="save_profile" class="btn btn-primary btn-sm">保存</button>
-                        <a href="javascript:void(0)" class="btn btn-default btn-sm" onclick="cancelEdit()">取消</a>
-                    </p>
                 </form>
                 <dl>
                     <dt>用户名</dt>
@@ -109,26 +114,23 @@
     {% endif %}
 </div>
 <script>
-// 行内编辑：点击"编辑"后该字段就地变为输入框，其他字段保持文本
+// 行内编辑：点击"编辑"后该字段就地变为输入框（保存/取消内联在输入框右侧），其他字段保持文本
 function editField(field) {
     document.querySelectorAll('.field-input').forEach(function (i) { i.style.display = 'none'; });
     document.querySelectorAll('.field-text').forEach(function (s) { s.style.display = 'inline'; });
     document.querySelectorAll('.field-edit').forEach(function (a) { a.style.display = 'inline'; });
     var input = document.getElementById('field-' + field);
-    var text = document.querySelector('.field-text[data-field="' + field + '"]');
-    var edit = document.querySelector('.field-edit[data-field="' + field + '"]');
-    input.style.display = 'inline-block';
-    text.style.display = 'none';
-    edit.style.display = 'none';
-    document.getElementById('field-actions').style.display = 'block';
+    document.querySelector('.field-text[data-field="' + field + '"]').style.display = 'none';
+    document.querySelector('.field-edit[data-field="' + field + '"]').style.display = 'none';
+    input.style.display = 'inline';
     var firstInput = input.querySelector('input');
-    if (firstInput) { firstInput.focus(); } else { input.focus(); }
+    if (firstInput) { firstInput.focus(); }
 }
-function cancelEdit() {
-    document.querySelectorAll('.field-input').forEach(function (i) { i.style.display = 'none'; });
-    document.querySelectorAll('.field-text').forEach(function (s) { s.style.display = 'inline'; });
-    document.querySelectorAll('.field-edit').forEach(function (a) { a.style.display = 'inline'; });
-    document.getElementById('field-actions').style.display = 'none';
+function cancelEdit(field) {
+    var input = document.getElementById('field-' + field);
+    input.style.display = 'none';
+    document.querySelector('.field-text[data-field="' + field + '"]').style.display = 'inline';
+    document.querySelector('.field-edit[data-field="' + field + '"]').style.display = 'inline';
 }
 document.querySelectorAll('.field-edit').forEach(function (a) {
     a.addEventListener('click', function () { editField(this.dataset.field); });
