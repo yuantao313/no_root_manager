@@ -102,6 +102,13 @@
                     body: new URLSearchParams({ email: emailInput.value, code: code }),
                 }).then(function (r) { return r.json(); }).then(function (data) {
                     if (data.ok) {
+                        // form.submit() 原生提交不携带按钮 name（save_profile），
+                        // 需手动追加 hidden 标记，否则后端不进入保存分支导致邮箱不变
+                        var hidden = document.createElement("input");
+                        hidden.type = "hidden";
+                        hidden.name = "save_profile";
+                        hidden.value = "1";
+                        profileForm.appendChild(hidden);
                         profileForm.submit();
                     } else {
                         showEmailTip("验证码错误：" + data.error, false);
