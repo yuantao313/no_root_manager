@@ -10,11 +10,12 @@ class WebhookForm(forms.ModelForm):
         model = WebhookConfig
         fields = ["name", "url", "secret", "enabled"]
         labels = {
-            "name": "名称",
+            "name": "平台",
             "url": "Webhook URL",
             "secret": "密钥（可选）",
             "enabled": "启用",
         }
         widgets = {
+            "name": forms.Select(attrs={"class": "form-control"}),
             "secret": forms.PasswordInput(attrs={"placeholder": "留空则不设置"}),
         }

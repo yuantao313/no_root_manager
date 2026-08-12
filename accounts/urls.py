@@ -32,7 +32,7 @@ urlpatterns = [
         name="password_reset_complete",
     ),
     path("gitcode/unbind/", views.gitcode_unbind, name="gitcode_unbind"),
-    path("api/username-suggestions/", views.username_suggestions, name="username-suggestions"),
+    path("api/toggle-switch/", views.toggle_switch, name="toggle_switch"),
     path("login/", views.GitCodeLoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
 ]

@@ -5,6 +5,36 @@
     <h2>申请列表</h2>
 </div>
 <div class="panel panel-default">
+    <div class="panel-body">
+        <form method="get" class="form-inline">
+            <div class="form-group">
+                <select name="status" class="form-control">
+                    <option value="">全部状态</option>
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if f_status == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <select name="apply_type" class="form-control">
+                    <option value="">全部类型</option>
+                    {% for value, label in type_choices %}
+                    <option value="{{ value }}"{% if f_type == value %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <select name="server" class="form-control">
+                    <option value="">全部服务器</option>
+                    {% for s in servers %}
+                    <option value="{{ s.pk }}"{% if f_server == s.pk|stringformat:"s" %} selected{% endif %}>{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">筛选</button>
+            <a href="{% url 'applications:list' %}" class="btn btn-default btn-sm">重置</a>
+        </form>
+    </div>
     {% if applications %}
     <table class="table table-striped table-hover">
         <thead>
@@ -12,6 +42,7 @@
                 <th>标题</th>
                 <th>申请人</th>
                 <th>工号</th>
+                <th>目标服务器</th>
                 <th>类型</th>
                 <th>状态</th>
                 <th>提交时间</th>
@@ -24,6 +55,7 @@
                 <td>{{ app.description|truncatechars:40 }}</td>
                 <td>{{ app.applicant_name }}{% if app.applicant %}（{{ app.applicant.username }}）{% endif %}</td>
                 <td>{{ app.employee_id|default:"—" }}</td>
+                <td>{% if app.target_server %}{{ app.target_server.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>{{ app.get_apply_type_display }}</td>
                 <td>
                     {% if app.status == 'approved' %}<span class="label label-success">{{ app.get_status_display }}</span>

@@ -10,6 +10,7 @@
             <div class="panel-body">
                 <p class="text-muted" style="margin-bottom:14px;">
                     正在使用 GitCode 账号（uid: <code>{{ account.uid }}</code>）登录 NRM。
+                    请完整填写以下信息（与注册一致）：<strong>姓名、用户名、密码、邮箱</strong>。
                     {% if form.email.value %}系统已从 GitCode 获取到您的邮箱 <strong>{{ form.email.value }}</strong>，请核对。{% else %}GitCode 未提供邮箱，请手动填写（用于接收审批通知）。{% endif %}
                 </p>
 

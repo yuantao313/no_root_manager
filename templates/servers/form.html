@@ -10,7 +10,7 @@
             {% csrf_token %}
             {% for field in form %}
                 {% if field.name not in form.advanced_fields %}
-                <p>
+                <p{% if field.name == "npu_groups" %} id="npu-groups-field"{% if not form.instance.is_npu %} style="display:none;"{% endif %}{% endif %}>
                     {{ field.label_tag }} {{ field }}
                     {% if field.help_text %}<span class="help-block" style="font-size:13px;">{{ field.help_text }}</span>{% endif %}
                     {{ field.errors }}

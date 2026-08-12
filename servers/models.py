@@ -35,43 +35,44 @@ class ServerAdminBinding(models.Model):
         return f"{self.admin.username} → {self.server.name}"
 
 
-class ManagedUser(models.Model):
-    """受管用户：目标机器上被 NRM 接管（加入 nrm_managed 组）的用户。"""
+class MachineUserBinding(models.Model):
+    """机器用户 ↔ 平台用户归属绑定（数据库记录，不单独做前端展示）。
+
+    所有受 NRM 监管（nrm_managed 组）的用户都在系统里有记录：
+    - 转移/创建/管理员/用户组类型审批通过时自动写入（机器用户 → 申请人）
+    - 管理员手动接管时可选写入
+    - server+username 唯一：同一机器用户只归属一个平台用户（防重复接管）
+    """
 
     server = models.ForeignKey(
         "Server",
         on_delete=models.CASCADE,
-        related_name="managed_users",
-        verbose_name="所属服务器",
+        related_name="machine_user_bindings",
+        verbose_name="服务器",
     )
-    username = models.CharField("用户名", max_length=100)
-    # 机器受管用户 ↔ 系统账号一对一绑定（可选；接管/转移时指定具体用户）
-    user = models.OneToOneField(
+    username = models.CharField("机器用户名", max_length=100)
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="managed_user",
-        verbose_name="绑定系统用户",
-        help_text="目标机器用户对应的 NRM 账号（一对一）",
+        related_name="machine_user_bindings",
+        verbose_name="归属平台用户",
     )
-    synced_at = models.DateTimeField("最近同步时间", auto_now=True)
-    # 用户在目标机器上的附加分组（逗号分隔，同步时读取）
-    groups = models.CharField("机器分组", max_length=500, blank=True)
-    # 资源使用（同步采集时更新；空表示未采集或用户无进程/家目录）
-    disk_used = models.CharField("磁盘占用", max_length=50, blank=True, default="")
-    mem_used = models.CharField("内存占用", max_length=50, blank=True, default="")
-    cpu_used = models.CharField("CPU 占用", max_length=50, blank=True, default="")
-    usage_synced_at = models.DateTimeField("资源采集时间", null=True, blank=True)
+    source = models.CharField("来源", max_length=20, default="transfer",
+                              choices=[("transfer", "转移接管"), ("manual", "手动接管"),
+                                       ("create", "创建开通"), ("admin", "平台管理员"), ("group", "用户组")])
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:
-        ordering = ["username"]
         unique_together = ("server", "username")
-        verbose_name = "受管用户"
-        verbose_name_plural = "受管用户"
+        ordering = ["server", "username"]
+        verbose_name = "机器用户绑定"
+        verbose_name_plural = "机器用户绑定"
 
     def __str__(self):
-        return f"{self.server.name} / {self.username}"
+        owner = self.user.username if self.user else "未绑定"
+        return f"{self.server.name} / {self.username} → {owner}"
 
 
 class Server(models.Model):

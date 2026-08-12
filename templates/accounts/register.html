@@ -14,8 +14,6 @@
                     {{ form|crispy }}
                     <button type="submit" class="btn btn-primary btn-block">注册</button>
                 </form>
-                <hr>
-                {% include "accounts/_gitcode_button.html" %}
                 <p class="text-muted" style="font-size:13px;margin-top:12px;">已有账号？<a href="{% url 'accounts:login' %}">去登录</a></p>
             </div>
         </div>

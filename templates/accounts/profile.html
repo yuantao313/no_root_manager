@@ -10,80 +10,102 @@
             <div class="panel-body">
                 <form method="post" id="profile-form" data-verify-url="{% url 'accounts:verify_email_code_ajax' %}" data-current-email="{{ user.email|escapejs }}">
                     {% csrf_token %}
-                    <dl>
-                        <dt>姓名</dt>
-                        <dd>
-                            <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
-                            <a href="javascript:void(0)" class="field-edit" data-field="name">编辑</a>
-                            <span id="field-name" class="field-input" style="display:none;white-space:nowrap;">
-                                <input type="text" name="name" class="form-control" style="display:inline-block;width:60%;" value="{{ user.first_name }}">
-                                <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('name')">取消</a>
-                            </span>
-                        </dd>
-                        <dt>工号</dt>
-                        <dd>
-                            <span class="field-text" data-field="employee_id">{{ user.profile.employee_id|default:"—" }}</span>
-                            <a href="javascript:void(0)" class="field-edit" data-field="employee_id">编辑</a>
-                            <span id="field-employee_id" class="field-input" style="display:none;white-space:nowrap;">
-                                <input type="text" name="employee_id" class="form-control" style="display:inline-block;width:60%;" value="{{ user.profile.employee_id }}">
-                                <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('employee_id')">取消</a>
-                            </span>
-                        </dd>
-                        <dt>邮箱</dt>
-                        <dd>
-                            <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
-                            <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
-                            <span id="field-email" class="field-input" style="display:none;">
-                                <span style="white-space:nowrap;">
-                                    <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
-                                    <button type="button" id="btn-send-code" class="btn btn-default btn-xs" data-send-url="{% url 'accounts:send_email_code_ajax' %}">发送验证码</button>
-                                </span>
-                                <br>
-                                <span style="white-space:nowrap;">
-                                    <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:45%;margin-top:6px;" placeholder="邮箱验证码">
+                    <table class="table table-hover" style="margin-bottom:0;">
+                        <tbody>
+                        <tr>
+                            <th style="width:120px;">姓名</th>
+                            <td>
+                                <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
+                                <a href="javascript:void(0)" class="field-edit" data-field="name">编辑</a>
+                                <span id="field-name" class="field-input" style="display:none;white-space:nowrap;">
+                                    <input type="text" name="name" class="form-control" style="display:inline-block;width:60%;" value="{{ user.first_name }}">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
+                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('name')">取消</a>
                                 </span>
-                                <br>
-                                <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;" data-cooldown="{{ email_code_cooldown }}"></span>
-                            </span>
-                        </dd>
-                    </dl>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>工号</th>
+                            <td>
+                                <span class="field-text" data-field="employee_id">{{ user.profile.employee_id|default:"—" }}</span>
+                                <a href="javascript:void(0)" class="field-edit" data-field="employee_id">编辑</a>
+                                <span id="field-employee_id" class="field-input" style="display:none;white-space:nowrap;">
+                                    <input type="text" name="employee_id" class="form-control" style="display:inline-block;width:60%;" value="{{ user.profile.employee_id }}">
+                                    <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
+                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('employee_id')">取消</a>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>邮箱</th>
+                            <td>
+                                <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
+                                <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
+                                <span id="field-email" class="field-input" style="display:none;">
+                                    <span style="white-space:nowrap;">
+                                        <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
+                                        <button type="button" id="btn-send-code" class="btn btn-default btn-xs" data-send-url="{% url 'accounts:send_email_code_ajax' %}">发送验证码</button>
+                                    </span>
+                                    <br>
+                                    <span style="white-space:nowrap;">
+                                        <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:45%;margin-top:6px;" placeholder="邮箱验证码">
+                                        <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
+                                        <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
+                                    </span>
+                                    <br>
+                                    <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;" data-cooldown="{{ email_code_cooldown }}"></span>
+                                </span>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
                 </form>
-                <dl>
-                    <dt>用户名</dt>
-                    <dd>{{ user.username }}</dd>
-                    <dt>角色</dt>
-                    <dd>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</dd>
-                    <dt>注册时间</dt>
-                    <dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
-                    <dt>GitCode</dt>
-                    <dd>
-                        {% with gc_account=user.socialaccount_set.all|first %}
-                        {% if gc_account %}
-                        <span class="label label-success">已绑定</span> gitcode#{{ gc_account.uid }}
-                        {% if not user.has_usable_password %}
-                        <span class="label label-warning">无本地密码</span>
-                        <a href="{% url 'accounts:set_password' %}" class="btn btn-primary btn-xs">先设置本地密码</a>
-                        {% else %}
-                        <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-warning btn-xs">解绑</button>
-                        </form>
-                        {% endif %}
-                        {% else %}
-                        <span class="text-muted">未绑定</span>
-                        {% if gitcode_enabled %}
-                        <a href="{% provider_login_url 'gitcode' process='connect' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
-                        {% else %}
-                        <span class="text-muted">（GitCode 登录未配置）</span>
-                        {% endif %}
-                        {% endif %}
-                        {% endwith %}
-                    </dd>
-                </dl>
+                <table class="table table-hover" style="margin-bottom:0;">
+                    <tbody>
+                    <tr>
+                        <th style="width:120px;">用户 ID</th>
+                        <td>{{ user.pk }}</td>
+                    </tr>
+                    <tr>
+                        <th>用户名</th>
+                        <td>{{ user.username }}</td>
+                    </tr>
+                    <tr>
+                        <th>角色</th>
+                        <td>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>注册时间</th>
+                        <td>{{ user.date_joined|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    <tr>
+                        <th>GitCode</th>
+                        <td>
+                            {% with gc_account=user.socialaccount_set.all|first %}
+                            {% if gc_account %}
+                            <span class="label label-success">已绑定</span> gitcode#{{ gc_account.uid }}
+                            {% if not user.has_usable_password %}
+                            <span class="label label-warning">无本地密码</span>
+                            <a href="{% url 'accounts:set_password' %}" class="btn btn-primary btn-xs">先设置本地密码</a>
+                            {% else %}
+                            <form method="post" action="{% url 'accounts:gitcode_unbind' %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-warning btn-xs">解绑</button>
+                            </form>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-muted">未绑定</span>
+                            {% if gitcode_enabled %}
+                            <a href="{% provider_login_url 'gitcode' process='connect' %}" class="btn btn-default btn-xs">绑定 GitCode</a>
+                            {% else %}
+                            <span class="text-muted">（GitCode 登录未配置）</span>
+                            {% endif %}
+                            {% endif %}
+                            {% endwith %}
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -92,35 +114,16 @@
     <div class="col-md-6">
         <div class="panel panel-default">
             <div class="panel-heading"><h3 class="panel-title">我的 Webhook</h3></div>
-            {% if hooks %}
-            <table class="table table-striped">
-                <thead>
-                    <tr><th>名称</th><th>URL</th><th>状态</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                    {% for hook in hooks %}
-                    <tr>
-                        <td>{{ hook.name }}</td>
-                        <td style="word-break:break-all;">{{ hook.url }}</td>
-                        <td>{% if hook.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
-                        <td>
-                            <form method="post" action="{% url 'notifications:delete' hook.pk %}" style="display:inline;">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-danger btn-xs">删除</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="panel-body"><p class="text-muted">暂无个人 Webhook。</p></div>
-            {% endif %}
-            <div class="panel-body" style="border-top:1px solid #ddd;">
+            <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;">
+                    申请事件推送 JSON 到指定 URL；每人仅保留一个个人 Webhook，保存即覆盖。
+                </p>
                 <form method="post">
                     {% csrf_token %}
                     {{ webhook_form|crispy }}
-                    <button type="submit" name="add_webhook" class="btn btn-primary">添加 Webhook</button>
+                    <button type="submit" name="add_webhook" class="btn btn-primary">保存 Webhook</button>
+                    <button type="submit" name="test_webhook" class="btn btn-default">测试推送</button>
+                    <span class="text-muted" style="font-size:13px;">测试推送将向表单中的 URL 发送一条测试事件（不会保存配置）。</span>
                 </form>
             </div>
         </div>

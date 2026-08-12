@@ -1,19 +1,26 @@
-"""目标机器用户接管与开通服务：所有受管用户加入 nrm_managed 组。"""
+"""目标机器用户接管与开通服务：所有受管用户加入 nrm_managed 组。
+
+常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权/资源限制）统一收敛到
+servers/scripts/nrm_mgmt.sh 脚本，经 SFTP 上传目标机后以 root 执行，
+不再在 Python 中散落字符串命令。
+"""
 
 import logging
 import re
 import secrets
 import shlex
 import string
+from pathlib import Path
 
-from django.utils import timezone
-
-from .models import ManagedUser, Server
-from .ssh import exec_command
+from .models import Server
+from .ssh import exec_command, run_script
 
 logger = logging.getLogger(__name__)
 
 NRM_GROUP = "nrm_managed"
+
+# 服务器管理脚本（代码库内，经 SFTP 上传目标机执行）
+MGMT_SCRIPT = str(Path(__file__).parent / "scripts" / "nrm_mgmt.sh")
 
 # 需要 root 权限的管理命令（SSH 用户非 root 时自动加 sudo -n 前缀）
 PRIVILEGED_CMDS = (
@@ -28,7 +35,15 @@ PRIVILEGED_CMDS = (
     "rm",
     "rmdir",
     "userdel",
+    "passwd",
+    "mkdir",
+    "tee",
 )
+
+
+def _run_mgmt(server, args, stdin_data=None, timeout=60):
+    """上传并执行服务器管理脚本，返回 (ok, stdout, stderr)。"""
+    return run_script(server, MGMT_SCRIPT, args, timeout=timeout, stdin_data=stdin_data)
 
 
 def _sudo_wrap(server, command: str) -> str:
@@ -66,13 +81,10 @@ def _random_password(length=16):
 
 def ensure_nrm_group(server):
     """确保目标机器存在 nrm_managed 组，不存在则创建。返回 (ok, msg)。"""
-    ok, out, err = _exec(server, f"getent group {NRM_GROUP}")
-    if ok and out:
-        return True, f"nrm_managed 组已存在：{out}"
-    ok2, _, err2 = _exec(server, f"groupadd {NRM_GROUP}")
-    if ok2:
-        return True, "已创建 nrm_managed 组"
-    return False, f"创建 nrm_managed 组失败：{err2 or err}"
+    ok, out, err = _run_mgmt(server, ["ensure_group", NRM_GROUP])
+    if ok:
+        return True, out or "nrm_managed 组已就绪"
+    return False, err or "创建 nrm_managed 组失败"
 
 
 def list_nrm_members(server):
@@ -91,26 +103,98 @@ def list_nrm_members(server):
 
 
 def take_over_user(server, username):
-    """将用户加入 nrm_managed 组（接管）。返回 (ok, msg)。"""
+    """将用户加入 nrm_managed 组（接管）。返回 (ok, msg)。
+
+    脚本内置容错：用户不存在时明确报错，不再由 usermod 报"用户不存在"。
+    """
     username = (username or "").strip()
     if not username:
         return False, "用户名为空"
-    ok, _, err = _exec(server, f"usermod -aG {NRM_GROUP} {username}")
+    ok, out, err = _run_mgmt(server, ["takeover", username])
     if ok:
-        return True, f"用户 {username} 已加入 {NRM_GROUP} 组"
-    return False, f"接管失败：{err}"
+        return True, out or f"用户 {username} 已加入 {NRM_GROUP} 组"
+    return False, err or f"接管失败：{username}"
+
+
+# 受管用户内存缓存（进程内，避免每次访问都 SSH 扫描；刷新按钮清缓存）
+_MANAGED_USERS_CACHE: dict[int, tuple[list, str]] = {}
+
+# NPU 状态内存缓存：server_id -> {"is_npu": bool, "groups": list, "msg": str}
+# 添加服务器时与服务启动时同步，申请界面读取走缓存，避免每次 SSH 检测卡顿
+_NPU_STATE_CACHE: dict[int, dict] = {}
+
+
+def get_npu_state_cached(server, force_refresh=False):
+    """读取服务器 NPU 状态（内存缓存，未命中或强制刷新时才 SSH 检测）。
+
+    返回 {"is_npu": bool, "groups": list[str], "msg": str}。
+    非 NPU 服务器直接返回空缓存（不 SSH）；NPU 服务器首次/刷新时
+    调用 detect_npu_groups 检测并缓存，检测失败时降级用库内 npu_groups。
+    """
+    key = server.pk
+    if not force_refresh and key in _NPU_STATE_CACHE:
+        return _NPU_STATE_CACHE[key]
+    if not server.is_npu:
+        state = {"is_npu": False, "groups": [], "msg": ""}
+        _NPU_STATE_CACHE[key] = state
+        return state
+    ok, groups, msg = detect_npu_groups(server)
+    state = {
+        "is_npu": ok,
+        "groups": groups if ok else server.npu_groups_list(),
+        "msg": msg if ok else (msg or "NPU 检测失败，使用已保存配置"),
+    }
+    _NPU_STATE_CACHE[key] = state
+    return state
+
+
+def sync_npu_states():
+    """同步全部 NPU 服务器的状态到内存缓存（服务启动时调用，后台线程执行）。"""
+    from .models import Server
+
+    for server in Server.objects.filter(is_npu=True).only("pk", "is_npu", "npu_groups"):
+        try:
+            get_npu_state_cached(server, force_refresh=True)
+        except Exception:  # noqa: BLE001 —— 单台失败不影响其余
+            logger.exception("NPU 状态同步失败：%s", server)
+
+
+def clear_npu_state_cache(server=None):
+    """清空 NPU 状态内存缓存（服务器修改后调用）。"""
+    if server is None:
+        _NPU_STATE_CACHE.clear()
+    else:
+        _NPU_STATE_CACHE.pop(server.pk, None)
+
+
+def get_managed_users_cached(server, force_refresh=False):
+    """扫描目标机 nrm_managed 组成员并缓存到内存（不落库）。
+
+    返回 (members:list[str], msg)。force_refresh=True 时强制重新扫描。
+    """
+    key = server.pk
+    if not force_refresh and key in _MANAGED_USERS_CACHE:
+        return _MANAGED_USERS_CACHE[key]
+    ok, members, msg = list_nrm_members(server)
+    if not ok:
+        _MANAGED_USERS_CACHE[key] = ([], msg)
+        return [], msg
+    _MANAGED_USERS_CACHE[key] = (members, msg)
+    return members, msg
+
+
+def clear_managed_users_cache(server=None):
+    """清空受管用户内存缓存（刷新按钮调用）。"""
+    if server is None:
+        _MANAGED_USERS_CACHE.clear()
+    else:
+        _MANAGED_USERS_CACHE.pop(server.pk, None)
 
 
 def sync_managed_users(server):
-    """同步目标机器 nrm_managed 组成员到数据库。返回 (ok, msg)。"""
-    ok, members, msg = list_nrm_members(server)
-    if not ok:
-        return False, msg
-    for name in members:
-        ManagedUser.objects.update_or_create(server=server, username=name)
-    # 删除已不在组成员中的记录
-    ManagedUser.objects.filter(server=server).exclude(username__in=members).delete()
-    return True, f"同步完成，共 {len(members)} 个受管用户"
+    """兼容入口：不再写数据库，改为返回内存缓存扫描结果。返回 (ok, msg)。"""
+    members, msg = get_managed_users_cached(server, force_refresh=True)
+    return True, f"已扫描 {len(members)} 个受管用户：{msg}"
 
 
 def lock_user(server, username):
@@ -118,10 +202,10 @@ def lock_user(server, username):
     username = (username or "").strip()
     if not username:
         return False, "用户名为空"
-    ok, _, err = _exec(server, f"passwd -l {username}")
+    ok, out, err = _run_mgmt(server, ["lock", username])
     if ok:
         return True, f"用户 {username} 已禁用"
-    return False, f"禁用失败：{err}"
+    return False, err or f"禁用失败：{username}"
 
 
 def unlock_user(server, username):
@@ -129,18 +213,22 @@ def unlock_user(server, username):
     username = (username or "").strip()
     if not username:
         return False, "用户名为空"
-    ok, _, err = _exec(server, f"passwd -u {username}")
+    ok, out, err = _run_mgmt(server, ["unlock", username])
     if ok:
         return True, f"用户 {username} 已启用"
-    return False, f"启用失败：{err}"
+    return False, err or f"启用失败：{username}"
 
 
 def list_system_users(server):
-    """列出目标机器 /home 下可接管的系统用户（排除已受管成员）。
+    """列出目标机器可接管的系统用户（读取 /etc/passwd，uid≥1000 的真实登录用户）。
 
     返回 (ok, available_users:list, msg)。用于接管按钮化的候选列表。
+    排除已受管成员（nrm_managed 组）与系统账号（uid<1000、nobody 65534）。
     """
-    ok, out, err = _exec(server, "ls -1 /home")
+    # 读取用户配置文件 /etc/passwd：取 uid 1000~65533 的真实登录用户
+    # （仅扫描 /home 目录会漏掉 home 不在 /home 下的用户）
+    cmd = r"awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd"
+    ok, out, err = _exec(server, cmd)
     if not ok:
         return False, [], err or "读取用户列表失败"
     names = [n for n in out.split() if n]
@@ -179,21 +267,19 @@ def collect_user_usage(server, username):
 
 
 def sync_user_usage(server):
-    """采集全部受管用户的资源使用并入库。返回 (ok, msg)。"""
-    users = list(ManagedUser.objects.filter(server=server))
-    if not users:
+    """兼容入口：采集受管用户资源使用（走内存缓存，不写数据库）。返回 (ok, msg)。
+
+    各用户资源使用直接采集并随缓存返回；如需持久化展示可自行调用 collect_user_usage。
+    """
+    members, _ = get_managed_users_cached(server, force_refresh=True)
+    if not members:
         return True, "无受管用户可采集"
     collected = 0
-    for mu in users:
-        ok, data, _ = collect_user_usage(server, mu.username)
-        if ok:
-            mu.disk_used = data["disk"]
-            mu.mem_used = data["mem"]
-            mu.cpu_used = data["cpu"]
-            mu.usage_synced_at = timezone.now()
-            mu.save(update_fields=["disk_used", "mem_used", "cpu_used", "usage_synced_at"])
+    for name in members:
+        ok, data, _ = collect_user_usage(server, name)
+        if ok and data.get("disk"):
             collected += 1
-    return True, f"资源采集完成：{collected}/{len(users)} 个用户"
+    return True, f"资源采集完成：{collected}/{len(members)} 个用户"
 
 
 def provision_user(server, username, groups=None, expire_date=None, with_home=True, force_pwd_change=True):
@@ -205,6 +291,9 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
         让迁移流程把用户已有目录移到 /home/username。
     force_pwd_change: 是否强制首次登录修改密码（chage -d 0）。
     返回 (ok, password, msg)。
+
+    全部操作收敛到 nrm_mgmt.sh provision 子命令执行：
+    自动补建缺失组、useradd/usermod、chpasswd（stdin 传密码）、chage -d 0。
     """
     username = (username or "").strip()
     if not username:
@@ -215,40 +304,20 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
         groups.append(NRM_GROUP)
     group_args = ",".join(groups)
 
-    # 用户已存在则跳过创建，只补分组
-    exists, _, _ = _exec(server, f"id -u {username}")
-    if exists:
-        ok, _, err = _exec(server, f"usermod -aG {group_args} {username}")
-        if not ok:
-            return False, "", f"更新用户分组失败：{err}"
-    else:
-        home_flag = "-m " if with_home else ""
-        ok, _, err = _exec(
-            server,
-            f"useradd {home_flag}-s /bin/bash -G {group_args} {username}".replace("  ", " "),
-        )
-        if not ok:
-            return False, "", f"创建用户失败：{err}"
-
-    if expire_date:
-        ok, _, err = _exec(server, f"usermod -e {expire_date} {username}")
-        if not ok:
-            return False, "", f"设置到期时间失败：{err}"
-
-    # 生成随机密码并通过 chpasswd 设置
+    # 生成随机密码，经 stdin 传给脚本（避免出现在命令行参数里）
     password = _random_password()
-    ok, _, err = _exec(server, f"echo '{username}:{password}' | chpasswd")
-    if not ok:
-        return False, "", f"设置随机密码失败：{err}"
-
-    # 强制首次登录修改密码（chage -d 0 使密码立即过期，下次登录需改密）
-    if force_pwd_change:
-        ok, _, err = _exec(server, f"chage -d 0 {username}")
-        if not ok:
-            return False, "", f"设置强制改密失败：{err}"
+    args = [
+        "provision",
+        username,
+        group_args,
+        expire_date or "-",
+        "1" if with_home else "0",
+        "1" if force_pwd_change else "0",
+    ]
+    ok, out, err = _run_mgmt(server, args, stdin_data=f"{username}:{password}")
 
     # 写入资源限制（ulimit），防止单个用户耗尽服务器资源
-    if any(
+    if ok and any(
         [
             server.nproc_limit,
             server.nofile_limit,
@@ -258,11 +327,13 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
             server.maxlogins_limit,
         ]
     ):
-        ok, err = apply_resource_limits(server, username)
+        ok, limit_err = apply_resource_limits(server, username)
         if not ok:
-            return False, "", f"设置资源限制失败：{err}"
+            return False, "", f"设置资源限制失败：{limit_err}"
 
-    return True, password, f"用户 {username} 已开通（分组：{group_args}）"
+    if not ok:
+        return False, "", err or f"开通失败：{username}"
+    return True, password, out or f"用户 {username} 已开通（分组：{group_args}）"
 
 
 # 资源限制项：字段名 -> limits.conf 的 item 名（hard 限制）
@@ -287,24 +358,19 @@ def apply_resource_limits(server, username):
     if not username:
         return False, "用户名为空"
 
-    lines = []
+    items = []
     for field, item in RESOURCE_LIMIT_ITEMS:
         value = getattr(server, field, 0)
         if value:
-            lines.append(f"{username} hard {item} {value}")
-    if not lines:
+            items.append(f"{item}={value}")
+    if not items:
         return True, "未配置资源限制"
 
-    conf = f"/etc/security/limits.d/nrm-{username}.conf"
-    content = "\n".join(lines)
-    # 用 printf 写入避免引号/换行转义问题；先写临时文件再 mv 防半截
-    ok, _, err = _exec(
-        server,
-        f"printf '%s\\n' '{content}' | sudo -n tee {conf} >/dev/null",
-    )
-    if not ok:
-        return False, err or "写入失败"
-    return True, f"已写入资源限制（{content.replace(chr(10), ', ')}）"
+    # 收敛到脚本 set_limits 子命令：脚本内写 /etc/security/limits.d/nrm-<user>.conf
+    ok, out, err = _run_mgmt(server, ["set_limits", username] + items)
+    if ok:
+        return True, out or f"已写入资源限制：{', '.join(items)}"
+    return False, err or "写入失败"
 
 
 # sudo 组名：Debian/Ubuntu 为 sudo，RHEL/CentOS 为 wheel，这里按 sudo 优先探测
@@ -321,25 +387,31 @@ def detect_sudo_group(server):
 
 
 def grant_sudo(server, username):
-    """授予用户 root/sudo 权限（加入 sudo 组）。返回 (ok, group, msg)。"""
-    ok, group, msg = detect_sudo_group(server)
-    if not ok:
-        return False, "", msg
-    ok2, _, err = _exec(server, f"usermod -aG {group} {username}")
-    if ok2:
-        return True, group, f"用户 {username} 已加入 {group} 组，获得 sudo 权限"
-    return False, "", f"授予 sudo 失败：{err}"
+    """授予用户 root/sudo 权限（加入 sudo 组）。返回 (ok, group, msg)。
+
+    收敛到脚本 grant_sudo 子命令：脚本自动探测 sudo/wheel 并加入。
+    """
+    username = (username or "").strip()
+    if not username:
+        return False, "", "用户名为空"
+    ok, out, err = _run_mgmt(server, ["grant_sudo", username])
+    if ok:
+        return True, "sudo", out or f"用户 {username} 已加入 sudo 组，获得 sudo 权限"
+    return False, "", err or "授予 sudo 失败"
 
 
 def revoke_sudo(server, username):
-    """撤销用户 sudo 权限（从 sudo/wheel 组移除）。返回 (ok, msg)。"""
-    ok, _, msg = detect_sudo_group(server)
-    if not ok:
-        return False, msg
-    # 从所有可能的 sudo 组移除
-    for group in SUDO_GROUPS:
-        _exec(server, f"gpasswd -d {username} {group}")
-    return True, f"已撤销用户 {username} 的 sudo 权限"
+    """撤销用户 sudo 权限（从 sudo/wheel 组移除）。返回 (ok, msg)。
+
+    收敛到脚本 revoke_sudo 子命令：脚本从所有可能的 sudo 组移除。
+    """
+    username = (username or "").strip()
+    if not username:
+        return False, "用户名为空"
+    ok, out, err = _run_mgmt(server, ["revoke_sudo", username])
+    if ok:
+        return True, out or f"已撤销用户 {username} 的 sudo 权限"
+    return False, err or "撤销 sudo 失败"
 
 
 def run_init_script(server):
@@ -367,24 +439,229 @@ def detect_npu_groups(server):
 
 
 def grant_npu_access(server, username, groups):
-    """授权用户 NPU 卡组（usermod -aG npu,npuN）。返回 (ok, msg)。"""
+    """授权用户 NPU 卡组（usermod -aG npu,npuN）。返回 (ok, msg)。
+
+    收敛到脚本 grant_npu 子命令：脚本内确保组存在并授权，
+    用户不存在时明确报错（容错，不再由 usermod 报"用户不存在"）。
+    """
     username = (username or "").strip()
     if not username or not groups:
         return False, "参数错误"
-    ok, _, err = _exec(server, f"usermod -aG {','.join(groups)} {username}")
+    group_args = ",".join(groups)
+    ok, out, err = _run_mgmt(server, ["grant_npu", username, group_args])
     if ok:
-        return True, f"用户 {username} 已加入 NPU 卡组：{','.join(groups)}"
-    return False, f"NPU 授权失败：{err}"
+        return True, out or f"用户 {username} 已加入 NPU 卡组：{group_args}"
+    return False, err or f"NPU 授权失败：{username}"
+
+
+def usermod_add_group(server, username, group):
+    """将用户加入单个用户组（usermod -aG <group>，如 sudo/docker/HwHiAiUser）。返回 (ok, msg)。
+
+    收敛到脚本 grant_sudo 子命令（其支持指定组名），
+    用户不存在时由脚本明确报错。
+    """
+    username = (username or "").strip()
+    group = (group or "").strip()
+    if not username or not group:
+        return False, "参数错误"
+    ok, out, err = _run_mgmt(server, ["grant_sudo", username, group])
+    if ok:
+        return True, out or f"用户 {username} 已加入 {group} 组"
+    return False, err or f"加入用户组失败：{group}"
 
 
 def _announcement_text():
-    """启用公告拼成的纯文本（用于写入服务器 motd）。"""
+    """启用公告拼成的终端文本（优先用 HTML 渲染为 ANSI 彩色，无 HTML 时回退纯文本）。
+
+    用于写入服务器 motd：SSH 登录时终端解释 ANSI 转义码显示颜色/高亮。
+    """
     from accounts.models import Announcement
 
     notices = [n for n in Announcement.objects.filter(enabled=True) if n.content.strip()]
     if not notices:
         return ""
-    return "\n\n".join(f"# {n.title}\n{n.content}" for n in notices)
+    parts = []
+    for n in notices:
+        parts.append(f"# {n.title}")
+        if n.html_content.strip():
+            parts.append(_html_to_ansi(n.html_content))
+        else:
+            parts.append(n.content)
+    return "\n\n".join(parts)
+
+
+# ANSI 颜色映射（HTML 颜色名/十六进制 → 终端 SGR 码）
+_ANSI_COLOR_MAP = {
+    "black": 30, "red": 31, "green": 32, "yellow": 33, "blue": 34,
+    "magenta": 35, "cyan": 36, "white": 37,
+    "darkred": 31, "darkgreen": 32, "darkyellow": 33, "darkblue": 34,
+    "gray": 37, "grey": 37, "orange": 33, "purple": 35, "pink": 35,
+}
+_ANSI_BG_MAP = {k: v + 10 for k, v in _ANSI_COLOR_MAP.items()}
+
+
+def _hex_to_ansi(hex_color: str) -> int | None:
+    """十六进制颜色 → 就近的 ANSI 16 色（256 色方案更复杂，取近似）。"""
+    try:
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return None
+    # 亮色判断：取最接近的基本色
+    if r > 200 and g > 200 and b > 200:
+        return 37
+    if r < 80 and g < 80 and b < 80:
+        return 30
+    if r > g and r > b:
+        return 31 if r < 180 else 91  # 红 / 亮红
+    if g > r and g > b:
+        return 32 if g < 180 else 92
+    if b > r and b > g:
+        return 34 if b < 180 else 94
+    return 33  # 默认黄
+
+
+def _html_to_ansi(html: str) -> str:
+    """把公告 HTML 渲染为终端 ANSI 彩色文本（支持颜色/加粗/斜体/下划线/列表/标题）。
+
+    支持的标签与映射（其余标签剥离为纯文本）：
+      - <span style="color/bgColor: ..."> → 前景/背景色
+      - <b>/<strong>/<i>/<em>/<u>/<s> → 加粗/斜体/下划线/删除线
+      - <h1>~<h4> → 加粗彩色标题；<p>/<br>/<li> → 换行
+    不支持的样式降级为纯文本，保证 motd 始终可读。
+    """
+    import re
+
+    out = []
+    style_stack: list[tuple[bool, bool, bool, bool, int | None, int | None]] = []
+    # (bold, italic, underline, strike, fg, bg)
+
+    def _emit_reset():
+        if style_stack:
+            out.append("\x1b[0m")
+            style_stack.clear()
+
+    def _apply_style(bold=False, italic=False, underline=False, strike=False, fg=None, bg=None):
+        _emit_reset()
+        codes = []
+        if bold:
+            codes.append("1")
+        if italic:
+            codes.append("3")
+        if underline:
+            codes.append("4")
+        if strike:
+            codes.append("9")
+        if fg is not None:
+            codes.append(str(fg))
+        if bg is not None:
+            codes.append(str(bg))
+        if codes:
+            out.append("\x1b[" + ";".join(codes) + "m")
+            style_stack.append((bold, italic, underline, strike, fg, bg))
+
+    def _parse_color(val: str, bg=False):
+        val = (val or "").strip().lower()
+        if val in _ANSI_COLOR_MAP:
+            code = _ANSI_COLOR_MAP[val]
+            return code + 10 if bg else code  # 背景色 +10（SGR 40~47）
+        if val.startswith("#") and len(val) == 7:
+            code = _hex_to_ansi(val)
+            if code is not None:
+                return code + 10 if bg else code
+        return None
+
+    # 用正则做轻量解析：只识别 span 的 style，其余标签按映射处理
+    def _style_from_span(attrs):
+        style = ""
+        for k, v in attrs:
+            if k == "style":
+                style = v
+        fg = bg = None
+        m = re.search(r"color\s*:\s*([^;]+)", style)
+        if m:
+            fg = _parse_color(m.group(1))
+        m = re.search(r"background(?:-color)?\s*:\s*([^;]+)", style)
+        if m:
+            bg = _parse_color(m.group(1), bg=True)
+        return fg, bg
+
+    class _Parser:
+        def handle_starttag(self, tag, attrs):
+            t = tag.lower()
+            if t in ("b", "strong"):
+                _apply_style(bold=True)
+            elif t in ("i", "em"):
+                _apply_style(italic=True)
+            elif t == "u":
+                _apply_style(underline=True)
+            elif t in ("s", "del", "strike"):
+                _apply_style(strike=True)
+            elif t == "span":
+                fg, bg = _style_from_span(attrs)
+                if fg is not None or bg is not None:
+                    _apply_style(fg=fg, bg=bg)
+            elif t in ("h1", "h2", "h3", "h4"):
+                # 标题用不同深浅颜色区分层级：h1 最深（亮白），逐级变浅
+                _heading_fg = {"h1": 97, "h2": 93, "h3": 33, "h4": 37}[t]
+                out.append("\n")
+                _apply_style(bold=True, fg=_heading_fg)
+            elif t == "ul":
+                self._list_type = "ul"
+                out.append("\n")
+            elif t == "ol":
+                self._list_type = "ol"
+                self._li_count = 0
+                out.append("\n")
+            elif t == "li":
+                out.append("\n")
+                if getattr(self, "_list_type", None) == "ol":
+                    self._li_count = getattr(self, "_li_count", 0) + 1
+                    out.append(f"{self._li_count}. ")
+                else:
+                    out.append("• ")
+            elif t == "a":
+                self._link_href = ""
+                for k, v in attrs:
+                    if k == "href":
+                        self._link_href = v
+            elif t in ("p", "div"):
+                out.append("\n")
+            elif t == "br":
+                out.append("\n")
+
+        def handle_endtag(self, tag):
+            t = tag.lower()
+            if t in ("b", "strong", "i", "em", "u", "s", "del", "strike", "span",
+                     "h1", "h2", "h3", "h4", "p", "div"):
+                _emit_reset()
+            elif t == "ul":
+                self._list_type = None
+                out.append("\n")
+            elif t == "ol":
+                self._list_type = None
+                out.append("\n")
+            elif t == "li":
+                _emit_reset()
+            elif t == "a":
+                # 链接：文字（URL），让终端用户至少能看到地址
+                if getattr(self, "_link_href", ""):
+                    out.append(f"（{self._link_href}）")
+
+        def handle_data(self, data):
+            out.append(data)
+
+    from html.parser import HTMLParser
+
+    class _NoticeParser(_Parser, HTMLParser):
+        pass
+
+    _NoticeParser().feed(html)
+    _emit_reset()
+    text = "".join(out)
+    # 压缩多余空行（保留至多一个连续空行）
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def write_server_motd(server):
@@ -394,10 +671,12 @@ def write_server_motd(server):
     content = _announcement_text()
     motd_file = "/etc/motd.d/nrm_notifications"
     # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
+    # 注意：不能用 `echo x > file`（重定向由当前 shell 执行，sudo 无法提权），
+    # 必须走 `printf | sudo -n tee` 让 tee 以 root 写文件（与资源限制写入一致）
     if content:
         ok, _, err = _exec(
             server,
-            f"mkdir -p /etc/motd.d && echo {shlex.quote(content)} > {motd_file}",
+            f"mkdir -p /etc/motd.d && printf '%s\\n' {shlex.quote(content)} | sudo -n tee {motd_file} >/dev/null",
         )
         if not ok:
             return False, f"motd 写入失败：{err}"

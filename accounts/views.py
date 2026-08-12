@@ -8,7 +8,9 @@ from django.contrib.auth.decorators import login_not_required, login_required
 from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
 from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.views import LoginView, PasswordResetView
+from django.core.validators import RegexValidator
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
@@ -17,13 +19,11 @@ from django.urls import reverse, reverse_lazy
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
-from notifications.services import send_email, send_email_with_config
+from notifications.services import send_email, send_email_with_config, send_webhook_to
 from servers.management import push_notices
-from servers.models import Server, ServerAdminBinding
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
 from .models import Announcement, EmailVerification, SystemConfig, UserProfile
-from .username_gen import generate_username_groups
 
 
 class ProfileForm(forms.Form):
@@ -77,17 +77,58 @@ class NRMPasswordResetView(PasswordResetView):
     success_url = reverse_lazy("accounts:password_reset_done")
 
 
-def username_suggestions(request):
-    """用户名建议接口：根据姓名返回候选用户名（含复姓/单姓分组），无需登录。"""
-    name = request.GET.get("name", "").strip()
-    data = generate_username_groups(name)
-    return JsonResponse(data, json_dumps_params={"ensure_ascii": False})
+class RegisterForm(UserCreationForm):
+    """注册表单：姓名/工号/邮箱/用户名/密码信息齐全（与 OAuth 补全页一致）。
+
+    工号写入 UserProfile（申请单自动带入），姓名存 first_name。
+    """
+
+    username = forms.CharField(
+        label="用户名",
+        max_length=150,
+        validators=[RegexValidator(r"^[A-Za-z0-9_]+\Z", "仅允许字母、数字、下划线")],
+        help_text="仅限字母/数字/下划线，注册后不可修改，将作为服务器的登录用户名",
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
+    )
+    first_name = forms.CharField(
+        label="姓名",
+        max_length=100,
+        widget=forms.TextInput(attrs={"placeholder": "真实姓名"}),
+    )
+    employee_id = forms.CharField(
+        label="工号",
+        max_length=50,
+        widget=forms.TextInput(attrs={"placeholder": "例如 a00123456"}),
+    )
+    email = forms.EmailField(
+        label="邮箱",
+        widget=forms.EmailInput(attrs={"placeholder": "用于接收审批通知"}),
+    )
+
+    field_order = ["username", "first_name", "employee_id", "email", "password1", "password2"]
+
+    class Meta:
+        model = User
+        fields = ["username", "first_name", "employee_id", "email", "password1", "password2"]
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.first_name = self.cleaned_data["first_name"].strip()
+        user.email = self.cleaned_data["email"].strip()
+        if commit:
+            user.save()
+        # 工号写入扩展资料（申请单自动带入）
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.employee_id = self.cleaned_data["employee_id"].strip()
+        if commit:
+            profile.save()
+        return user
 
 
 def register(request):
     """用户注册：所有用户平等注册为普通用户，注册后自动登录。"""
     if request.method == "POST":
-        form = UserCreationForm(request.POST)
+        form = RegisterForm(request.POST)
         if form.is_valid():
             user = form.save()
             # 多认证后端（axes + ModelBackend）必须显式指定 backend
@@ -95,7 +136,7 @@ def register(request):
             messages.success(request, f"注册成功，欢迎 {user.username}。")
             return redirect("applications:my")
     else:
-        form = UserCreationForm()
+        form = RegisterForm()
     return render(request, "accounts/register.html", {"form": form})
 
 
@@ -123,14 +164,14 @@ def social_signup(request):
                 messages.success(request, f"GitCode 已绑定到账号 {user.username}，欢迎回来。")
                 return redirect("applications:my")
             messages.error(request, "账号或密码错误，绑定失败。")
-            form = SocialSignupForm(sociallogin=sociallogin)
+            form = GitCodeSignupForm(sociallogin=sociallogin)
         else:
             # 创建新账号：默认注册流程（含注册要素）
-            form = SocialSignupForm(request.POST, sociallogin=sociallogin)
+            form = GitCodeSignupForm(request.POST, sociallogin=sociallogin)
             if form.is_valid():
                 return socialaccount_flows.signup.signup_by_form(request, sociallogin, form)
     else:
-        form = SocialSignupForm(sociallogin=sociallogin)
+        form = GitCodeSignupForm(sociallogin=sociallogin)
 
     return render(
         request,
@@ -140,8 +181,137 @@ def social_signup(request):
 
 
 def _gitcode_enabled():
-    """GitCode OAuth 是否已配置：直接检测 allauth SocialApp（唯一配置源）。"""
-    return SocialApp.objects.filter(provider="gitcode").exists()
+    """GitCode OAuth 是否启用：SocialApp 已配置且系统开关开启。"""
+    if not SocialApp.objects.filter(provider="gitcode").exists():
+        return False
+    return SystemConfig.get_singleton().gitcode_enabled
+
+
+@superuser_required
+def toggle_switch(request):
+    """系统功能开关即时切换（AJAX）：gitcode / email / webhook。
+
+    切换后立即写入数据库并生效，不依赖各配置页的"保存"按钮。
+    返回 JSON：{"ok": true} 或 {"ok": false, "error": "..."}。
+    """
+    switch = request.POST.get("switch", "")
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "仅支持 POST"}, status=405)
+    enabled = request.POST.get("enabled") == "1"
+    if switch == "gitcode":
+        cfg = SystemConfig.get_singleton()
+        cfg.gitcode_enabled = enabled
+        cfg.save()
+    elif switch == "email":
+        cfg = EmailConfig.objects.first() or EmailConfig()
+        cfg.enabled = enabled
+        cfg.save()
+    elif switch == "webhook":
+        hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
+        hook.enabled = enabled
+        hook.save()
+    else:
+        return JsonResponse({"ok": False, "error": "未知开关"}, status=400)
+    return JsonResponse({"ok": True})
+
+
+def _html_to_plain(html: str) -> str:
+    """剥离 HTML 标签提取纯文本（公告无纯文本内容时的回退）。"""
+    if not html:
+        return ""
+    import re
+    from html.parser import HTMLParser
+
+    class _TextOnly(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.parts = []
+
+        def handle_data(self, data):
+            self.parts.append(data)
+
+        def handle_endtag(self, tag):
+            if tag in ("p", "div", "li", "br", "h1", "h2", "h3", "h4"):
+                self.parts.append("\n")
+
+    parser = _TextOnly()
+    parser.feed(html)
+    text = "".join(parser.parts)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+class GitCodeSignupForm(SocialSignupForm):
+    """GitCode 首次登录创建新账号：与注册一致，强制填写姓名/工号/用户名/密码/邮箱。
+
+    - 邮箱从 OAuth 预填（SocialSignupForm 的 initial 机制），缺失时手动填写
+    - 密码采用 password1/password2 双字段，复用 Django 密码强度校验（与注册一致）
+    """
+
+    first_name = forms.CharField(
+        label="姓名",
+        max_length=100,
+        widget=forms.TextInput(attrs={"placeholder": "真实姓名（用于生成目标机用户名）"}),
+    )
+    employee_id = forms.CharField(
+        label="工号",
+        max_length=50,
+        widget=forms.TextInput(attrs={"placeholder": "例如 a00123456"}),
+    )
+    password1 = forms.CharField(
+        label="密码",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    password2 = forms.CharField(
+        label="确认密码",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 仅邮箱从 OAuth 自动填充；用户名/姓名不预填（避免以 gc<id> 占位身份进入系统）
+        self.initial.pop("username", None)
+        self.initial.pop("first_name", None)
+        self.initial.pop("last_name", None)
+        # 邮箱必填（OAuth 已提供则预填，未提供需手动填写）
+        self.fields["email"].required = True
+        self.fields["email"].label = "邮箱"
+        self.fields["username"].label = "用户名"
+        self.fields["username"].help_text = "仅限字母/数字/下划线，注册后不可修改，将作为服务器的登录用户名"
+        self.fields["username"].validators = [RegexValidator(r"^[A-Za-z0-9_]+\Z", "仅允许字母、数字、下划线")]
+        # 字段顺序：姓名 → 工号 → 用户名 → 邮箱 → 密码 → 确认密码
+        order = ["first_name", "employee_id", "username", "email", "password1", "password2"]
+        self.fields = {key: self.fields[key] for key in order if key in self.fields}
+        for key in self.fields:
+            if key not in order:
+                self.fields[key] = self.fields.pop(key)
+
+    def custom_signup(self, request, user):
+        # 工号写入扩展资料（申请单自动带入），与注册表单一致
+        super().custom_signup(request, user)
+        employee_id = (self.cleaned_data.get("employee_id") or "").strip()
+        if employee_id:
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.employee_id = employee_id
+            profile.save()
+
+    def clean_password2(self):
+        password1 = self.cleaned_data.get("password1")
+        password2 = self.cleaned_data.get("password2")
+        if password1 and password2 and password1 != password2:
+            raise forms.ValidationError("两次输入的密码不一致。")
+        return password2
+
+    def _post_clean(self):
+        super()._post_clean()
+        # 与注册一致：应用 AUTH_PASSWORD_VALIDATORS 密码强度校验
+        password1 = self.cleaned_data.get("password1")
+        if password1:
+            try:
+                validate_password(password1)
+            except forms.ValidationError as error:
+                self.add_error("password1", error)
 
 
 class GitCodeLoginView(LoginView):
@@ -209,7 +379,12 @@ def profile(request):
     """个人中心：资料行内编辑 + 邮箱验证码确认 + 内嵌 Webhook（仅管理员）。"""
     hooks = WebhookConfig.objects.filter(owner=request.user)
     form = ProfileForm(instance=request.user)
-    webhook_form = WebhookForm()
+    # 个人 Webhook 单例：已有配置时预填表单（保存即覆盖）
+    my_hook = hooks.first()
+    webhook_form = WebhookForm(
+        instance=my_hook,
+        initial={"name": my_hook.name, "url": my_hook.url, "enabled": my_hook.enabled} if my_hook else None,
+    )
 
     if request.method == "POST":
         # 1. 发送邮箱验证码（修改邮箱的前置步骤）
@@ -248,11 +423,27 @@ def profile(request):
         elif "add_webhook" in request.POST and request.user.is_staff:
             webhook_form = WebhookForm(request.POST)
             if webhook_form.is_valid():
-                hook = webhook_form.save(commit=False)
-                hook.owner = request.user
+                # 个人 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
+                hook = WebhookConfig.objects.filter(owner=request.user).first() or WebhookConfig(owner=request.user)
+                hook.name = webhook_form.cleaned_data["name"]
+                hook.url = webhook_form.cleaned_data["url"]
+                if webhook_form.cleaned_data.get("secret"):
+                    hook.secret = webhook_form.cleaned_data["secret"]
+                hook.enabled = webhook_form.cleaned_data["enabled"]
                 hook.save()
-                messages.success(request, f"Webhook「{hook.name}」已添加。")
+                messages.success(request, f"Webhook「{hook.name}」已保存。")
                 return redirect("accounts:profile")
+        elif "test_webhook" in request.POST and request.user.is_staff:
+            # 测试个人 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
+            test_url = request.POST.get("url", "").strip()
+            test_secret = request.POST.get("secret", "").strip()
+            test_platform = request.POST.get("name", "").strip()
+            ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
+            if ok:
+                messages.success(request, f"Webhook 测试：{msg}")
+            else:
+                messages.error(request, f"Webhook 测试：{msg}")
+            return redirect("accounts:profile")
 
     return render(
         request,
@@ -277,9 +468,6 @@ def settings(request):
     syscfg = SystemConfig.get_singleton()
     email_cfg = EmailConfig.objects.first()
     hooks = WebhookConfig.objects.filter(owner__isnull=True)
-    bindings = ServerAdminBinding.objects.select_related("server", "admin").all()
-    staff_users = User.objects.filter(is_staff=True, is_superuser=False).order_by("username")
-    servers = Server.objects.all().order_by("name")
 
     # 发码冷却：距上次发送 <60 秒则剩余秒数 >0（模板禁用按钮）
     sent_at = request.session.get("smtp_code_sent_at")
@@ -289,7 +477,29 @@ def settings(request):
     smtp_verified = bool(request.session.get("smtp_verified", False))
 
     if request.method == "POST":
-        if "save_gitcode" in request.POST:
+        if "save_site_base_url" in request.POST:
+            # 站点基准地址：GitCode 回调与 webhook 审批链接统一使用
+            base_url = request.POST.get("site_base_url", "").strip().rstrip("/")
+            syscfg.site_base_url = base_url
+            syscfg.save()
+            messages.success(request, "站点地址已保存。")
+        elif "save_mail_webhook" in request.POST:
+            # 邮件 Webhook（独立于通知 Webhook）：发送方式显式选择 + URL/Token
+            send_via = request.POST.get("send_via", "").strip()
+            new_url = request.POST.get("mail_webhook_url", "").strip()
+            new_token = request.POST.get("mail_webhook_token", "").strip()
+            if send_via in dict(EmailConfig.SEND_VIA_CHOICES):
+                email_cfg = EmailConfig.objects.first() or EmailConfig()
+                email_cfg.send_via = send_via
+                if new_url:
+                    email_cfg.mail_webhook_url = new_url
+                if new_token:
+                    email_cfg.mail_webhook_token = new_token
+                email_cfg.save()
+                messages.success(request, "邮件 Webhook 配置已保存。")
+            else:
+                messages.error(request, "发送方式无效。")
+        elif "save_gitcode" in request.POST:
             # 唯一配置源：allauth SocialApp（由 django-allauth 插件管理）
             client_id = request.POST.get("gitcode_client_id", "").strip()
             # secret 留空表示不修改（不展示明文）
@@ -395,6 +605,8 @@ def settings(request):
             email_cfg.from_email = pending.get("from_email", "")
             email_cfg.use_ssl = pending.get("use_ssl", True)
             email_cfg.enabled = pending.get("enabled", False)
+            # 发送方式与页面单选联动（SMTP 保存时固定为 smtp）
+            email_cfg.send_via = EmailConfig.SEND_VIA_SMTP
             email_cfg.save()
             request.session.pop("pending_smtp", None)
             request.session.pop("smtp_verified", None)
@@ -403,53 +615,50 @@ def settings(request):
             name = request.POST.get("name", "").strip()
             url = request.POST.get("url", "").strip()
             if name and url:
-                WebhookConfig.objects.create(
-                    name=name,
-                    url=url,
-                    secret=request.POST.get("secret", "").strip(),
-                    enabled="enabled" in request.POST,
-                    owner=None,
-                )
-                messages.success(request, "全局 Webhook 已添加。")
+                # 全局 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
+                hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
+                hook.name = name
+                hook.url = url
+                if request.POST.get("secret", "").strip():
+                    hook.secret = request.POST.get("secret", "").strip()
+                hook.enabled = "enabled" in request.POST
+                hook.save()
+                messages.success(request, "全局 Webhook 已保存。")
             else:
                 messages.error(request, "Webhook 名称与 URL 必填。")
+        elif "test_webhook" in request.POST:
+            # 测试全局 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
+            test_url = request.POST.get("url", "").strip()
+            test_secret = request.POST.get("secret", "").strip()
+            test_platform = request.POST.get("name", "").strip()
+            ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
+            if ok:
+                messages.success(request, f"Webhook 测试：{msg}")
+            else:
+                messages.error(request, f"Webhook 测试：{msg}")
         elif "del_webhook" in request.POST:
             hook = WebhookConfig.objects.filter(pk=request.POST.get("webhook_id")).first()
             if hook and hook.owner is None:
                 hook.delete()
                 messages.success(request, "Webhook 已删除。")
-        elif "add_binding" in request.POST:
-            server_id = request.POST.get("server_id")
-            admin_id = request.POST.get("admin_id")
-            if server_id and admin_id:
-                ServerAdminBinding.objects.get_or_create(server_id=server_id, admin_id=admin_id)
-                messages.success(request, "绑定关系已添加。")
-        elif "del_binding" in request.POST:
-            binding = ServerAdminBinding.objects.filter(pk=request.POST.get("binding_id")).first()
-            if binding:
-                binding.delete()
-                messages.success(request, "绑定关系已解除。")
         elif "add_announcement" in request.POST:
             title = request.POST.get("title", "").strip()
             content = request.POST.get("content", "").strip()
-            if content:
-                Announcement.objects.create(
-                    title=title,
-                    content=content,
-                    enabled="enabled" in request.POST,
-                )
+            # 公告 HTML 版本（编辑器生成，用于 motd 高亮渲染）；无 HTML 时回退纯文本
+            html_content = request.POST.get("html_content", "").strip()
+            if content or html_content:
+                # 公告单例：有则更新，无则新建（save 内自动清理其他记录）
+                ann = Announcement.objects.first() or Announcement()
+                ann.title = title
+                ann.content = content or _html_to_plain(html_content)
+                ann.html_content = html_content
+                ann.enabled = "enabled" in request.POST
+                ann.save()
                 # 默认自动推送公告到全部服务器 motd（无需手动）
                 ok_push, msg_push = push_notices()
-                messages.success(request, "公告已添加并自动推送到服务器。" + (msg_push if ok_push else ""))
+                messages.success(request, "公告已保存并自动推送到服务器。" + (msg_push if ok_push else ""))
             else:
                 messages.error(request, "公告内容必填。")
-        elif "del_announcement" in request.POST:
-            ann = Announcement.objects.filter(pk=request.POST.get("announcement_id")).first()
-            if ann:
-                ann.delete()
-                # 删除后自动重新推送（公告变化同步到服务器 motd）
-                push_notices()
-                messages.success(request, "公告已删除，服务器 motd 已同步更新。")
         return redirect("accounts:settings")
 
     return render(
@@ -459,14 +668,27 @@ def settings(request):
             "syscfg": syscfg,
             "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
             "announcements": Announcement.objects.all(),
-            "gitcode_callback_url": request.build_absolute_uri(reverse("gitcode_callback")),
+            # 公告编辑器初始内容：html_content 优先，为空回退纯文本 content
+            # （无公告时返回空串；模板内直接 .first.content 会抛 AttributeError，故视图预处理）
+            "announcement_initial": (
+                (lambda a: a.html_content or a.content)(Announcement.objects.first())
+                if Announcement.objects.first()
+                else ""
+            ),
+            # 固定回调地址（与 provider 登录实际使用的 redirect_uri 一致，见 GitCodeOAuth2Adapter.get_callback_url）
+            "gitcode_callback_url": f"{syscfg.get_site_base_url()}{reverse('gitcode_callback')}",
             "email_cfg": email_cfg,
             "hooks": hooks,
-            "bindings": bindings,
-            "staff_users": staff_users,
-            "servers": servers,
+            # 邮件发送方式选项（邮件 Webhook tab 下拉）
+            "email_send_via_choices": EmailConfig.SEND_VIA_CHOICES,
             "cooldown_remaining": cooldown_remaining,
             "smtp_verified": smtp_verified,
+            # 顶部功能开关状态（切换即时生效）
+            "switch_gitcode": syscfg.gitcode_enabled,
+            "switch_email": bool(email_cfg and email_cfg.enabled),
+            "switch_webhook": bool(hooks and hooks.first().enabled),
+            # Webhook 平台选项（表单下拉）
+            "webhook_platform_choices": WebhookConfig.PLATFORM_CHOICES,
         },
     )
 

@@ -21,6 +21,15 @@ pytestmark = pytest.mark.django_db
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def sync_background_tasks(monkeypatch):
+    """测试环境：后台任务（开通/通知）同步执行，保证断言时机确定。"""
+    monkeypatch.setattr(
+        "applications.views.run_in_background",
+        lambda func, *args: func(*args),
+    )
+
+
 @pytest.fixture
 def server():
     cred = Credential.objects.create(name="私人机", username="root", password="p")
@@ -31,19 +40,20 @@ def test_frontend_apply_and_approve_flow(client, server):
     with override_settings(ALLOWED_HOSTS=["127.0.0.1"]):
         c = Client(SERVER_NAME="127.0.0.1")
 
-        # ① 注册用户（前端注册页）
+        # ① 注册用户（前端注册页，注册信息齐全）
         resp = c.post(
             reverse("accounts:register"),
             {
                 "username": "zhangsan",
+                "first_name": "张三",
+                "employee_id": "E10001",
+                "email": "zhangsan@example.com",
                 "password1": "x12345!abc",
                 "password2": "x12345!abc",
             },
             follow=True,
         )
         applicant = User.objects.get(username="zhangsan")
-        applicant.first_name = "张三"
-        applicant.save()
         print("① 注册并登录:", resp.status_code, "| 用户:", applicant.username)
 
         # ② 进入"我的申请"页（合并页：新建申请 + 我的申请）

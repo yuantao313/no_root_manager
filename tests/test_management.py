@@ -65,13 +65,25 @@ class TestTakeOver:
         ok, msg = take_over_user(ubuntu_server, "")
         assert ok is False and "用户名为空" in msg
 
-    def test_takeover_uses_privileged_cmd(self, ubuntu_server):
-        with patch("servers.management._exec", return_value=(True, "", "")) as mock:
+    def test_takeover_uses_mgmt_script(self, ubuntu_server):
+        with patch("servers.management._run_mgmt", return_value=(True, "OK takeover alice", "")) as mock:
             ok, _ = take_over_user(ubuntu_server, "alice")
         assert ok is True
-        cmd = mock.call_args.args[1]
-        # _exec 内部会做 _sudo_wrap 提权包装（由 TestSudoWrap 覆盖），这里断言原始特权命令
-        assert "usermod -aG nrm_managed alice" in cmd
+        # 收敛到脚本子命令 takeover
+        args = mock.call_args.args[1]
+        assert args == ["takeover", "alice"]
+
+    def test_takeover_user_not_exists(self, ubuntu_server):
+        """目标机用户不存在：脚本报错时明确返回，不再由 usermod 报"用户不存在"。"""
+        with patch(
+            "servers.management._run_mgmt",
+            return_value=(False, "", "目标机器用户 ghost 不存在"),
+        ) as mock:
+            ok, msg = take_over_user(ubuntu_server, "ghost")
+        assert ok is False
+        assert "ghost" in msg
+        args = mock.call_args.args[1]
+        assert args == ["takeover", "ghost"]
 
 
 class TestProvisionUser:
@@ -79,66 +91,54 @@ class TestProvisionUser:
         ok, pwd, msg = provision_user(ubuntu_server, "")
         assert ok is False and "用户名为空" in msg
 
-    def test_existing_user_skips_create(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("id -u"):
-                return True, "1000", ""  # 用户已存在
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
-            ok, pwd, msg = provision_user(ubuntu_server, "bob")
-        assert ok is True
-        assert len(pwd) == 16
-        # 已存在用户不应执行 useradd
-        assert not any(c.startswith("useradd") for c in commands)
-        assert any("usermod -aG" in c for c in commands)
-
-    def test_new_user_created_with_groups(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("id -u"):
-                return False, "", ""  # 用户不存在
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
+    def test_provision_uses_mgmt_script_with_groups(self, ubuntu_server):
+        """开通收敛到脚本 provision：分组含 nrm_managed，密码经 stdin 传递。"""
+        with patch(
+            "servers.management._run_mgmt",
+            side_effect=[(True, "OK provision carol", ""), (True, "OK set_limits carol", "")],
+        ) as mock:
             ok, pwd, msg = provision_user(ubuntu_server, "carol", groups=["dev"])
         assert ok is True
-        assert "dev,nrm_managed" in msg
-        assert any("useradd" in c and "dev,nrm_managed" in c for c in commands)
-        # 默认强制首次改密
-        assert any("chage -d 0" in c for c in commands)
+        assert len(pwd) == 16
+        # 第一次调用是 provision（后续 set_limits 是资源限制）
+        args = mock.call_args_list[0].args[1]
+        # provision <user> <groups_csv> <expire> <with_home> <force_pwd>
+        assert args[0] == "provision"
+        assert args[1] == "carol"
+        assert "dev,nrm_managed" in args[2]
+        assert args[3] == "-"  # 无到期时间
+        assert args[4] == "1"  # with_home
+        assert args[5] == "1"  # force_pwd_change
+        # 密码经 stdin 传递（不进命令行参数）
+        stdin_data = mock.call_args_list[0].kwargs.get("stdin_data")
+        assert stdin_data and stdin_data.startswith("carol:")
 
     def test_without_home_flag(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("id -u"):
-                return False, "", ""
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
+        with patch(
+            "servers.management._run_mgmt",
+            side_effect=[(True, "OK provision dave", ""), (True, "OK set_limits dave", "")],
+        ) as mock:
             provision_user(ubuntu_server, "dave", with_home=False)
-        create_cmd = next(c for c in commands if c.startswith("useradd"))
-        assert "-m" not in create_cmd
+        args = mock.call_args_list[0].args[1]
+        assert args[4] == "0"  # with_home=0
 
     def test_force_pwd_change_off(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("id -u"):
-                return False, "", ""
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
+        with patch(
+            "servers.management._run_mgmt",
+            side_effect=[(True, "OK provision erin", ""), (True, "OK set_limits erin", "")],
+        ) as mock:
             provision_user(ubuntu_server, "erin", force_pwd_change=False)
-        assert not any("chage -d 0" in c for c in commands)
+        args = mock.call_args_list[0].args[1]
+        assert args[5] == "0"  # force_pwd_change=0
+
+    def test_expire_date_passed(self, ubuntu_server):
+        with patch(
+            "servers.management._run_mgmt",
+            side_effect=[(True, "OK provision frank", ""), (True, "OK set_limits frank", "")],
+        ) as mock:
+            provision_user(ubuntu_server, "frank", expire_date="2026-12-31")
+        args = mock.call_args_list[0].args[1]
+        assert args[3] == "2026-12-31"
 
 
 class TestApplyResourceLimits:
@@ -150,43 +150,42 @@ class TestApplyResourceLimits:
         ubuntu_server.nproc_limit = 0
         ubuntu_server.nofile_limit = 0
         ubuntu_server.save()
-        with patch("servers.management._exec") as mock:
+        with patch("servers.management._run_mgmt") as mock:
             ok, msg = apply_resource_limits(ubuntu_server, "alice")
         assert ok is True
         assert "未配置" in msg
         mock.assert_not_called()
 
-    def test_writes_limits_conf(self, ubuntu_server):
-        with patch("servers.management._exec", return_value=(True, "", "")) as mock:
+    def test_writes_limits_via_script(self, ubuntu_server):
+        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
             ok, msg = apply_resource_limits(ubuntu_server, "alice")
         assert ok is True
-        cmd = mock.call_args.args[1]
-        assert "limits.d/nrm-alice.conf" in cmd
-        assert "alice hard nproc 128" in cmd
-        assert "alice hard nofile 2048" in cmd
+        args = mock.call_args.args[1]
+        # set_limits <user> <item=value>...
+        assert args[0] == "set_limits"
+        assert args[1] == "alice"
+        assert "nproc=128" in args
+        assert "nofile=2048" in args
 
     def test_zero_limit_skips_line(self, ubuntu_server):
         ubuntu_server.nproc_limit = 0
         ubuntu_server.save()
-        with patch("servers.management._exec", return_value=(True, "", "")) as mock:
+        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
             apply_resource_limits(ubuntu_server, "alice")
-        cmd = mock.call_args.args[1]
-        assert "nproc" not in cmd
-        assert "nofile" in cmd
+        args = mock.call_args.args[1]
+        assert not any(a.startswith("nproc=") for a in args)
+        assert any(a.startswith("nofile=") for a in args)
 
     def test_provision_writes_limits(self, ubuntu_server):
-        commands = []
-
-        def fake_exec(server, cmd):
-            commands.append(cmd)
-            if cmd.startswith("id -u"):
-                return False, "", ""
-            return True, "", ""
-
-        with patch("servers.management._exec", side_effect=fake_exec):
+        """开通后自动调用 set_limits 写入资源限制。"""
+        with patch(
+            "servers.management._run_mgmt",
+            side_effect=[(True, "OK provision gina", ""), (True, "OK set_limits gina", "")],
+        ) as mock:
             ok, pwd, msg = provision_user(ubuntu_server, "gina")
         assert ok is True
-        assert any("limits.d/nrm-gina.conf" in c for c in commands)
+        assert mock.call_count == 2
+        assert mock.call_args_list[1].args[1][0] == "set_limits"
 
     def test_writes_all_limit_items(self, ubuntu_server):
         ubuntu_server.nproc_limit = 128
@@ -196,17 +195,17 @@ class TestApplyResourceLimits:
         ubuntu_server.fsize_limit = 0
         ubuntu_server.maxlogins_limit = 3
         ubuntu_server.save()
-        with patch("servers.management._exec", return_value=(True, "", "")) as mock:
+        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
             ok, msg = apply_resource_limits(ubuntu_server, "alice")
         assert ok is True
-        cmd = mock.call_args.args[1]
-        assert "alice hard nproc 128" in cmd
-        assert "alice hard nofile 2048" in cmd
-        assert "alice hard as 1048576" in cmd
-        assert "alice hard maxlogins 3" in cmd
+        args = mock.call_args.args[1]
+        assert "nproc=128" in args
+        assert "nofile=2048" in args
+        assert "as=1048576" in args
+        assert "maxlogins=3" in args
         # 0 值项不写入
-        assert "hard core" not in cmd
-        assert "hard fsize" not in cmd
+        assert not any(a.startswith("core=") for a in args)
+        assert not any(a.startswith("fsize=") for a in args)
 
     def test_zero_only_server_no_limits(self, ubuntu_server):
         ubuntu_server.nproc_limit = 0
@@ -216,7 +215,7 @@ class TestApplyResourceLimits:
         ubuntu_server.fsize_limit = 0
         ubuntu_server.maxlogins_limit = 0
         ubuntu_server.save()
-        with patch("servers.management._exec") as mock:
+        with patch("servers.management._run_mgmt") as mock:
             ok, msg = apply_resource_limits(ubuntu_server, "alice")
         assert ok is True
         assert "未配置" in msg

@@ -26,12 +26,16 @@ class UserProfile(models.Model):
 
 
 class Announcement(models.Model):
-    """用户公告：启用后写入目标机用户个人目录（nrm_notifications.md），
+    """用户公告（单例）：启用后写入目标机用户个人目录（nrm_notifications.md），
     并在用户登录时打印（.bashrc 追加 cat）。
+
+    系统仅保留一条公告：保存时自动清理其他记录。
     """
 
     title = models.CharField("标题", max_length=200, blank=True, default="")
-    content = models.TextField("内容", blank=True, help_text="将写入用户 home 目录的 nrm_notifications.md")
+    content = models.TextField("内容", blank=True, help_text="纯文本内容，写入服务器 motd 时使用")
+    # HTML 版本：公告编辑器保存的富文本（含颜色/高亮），motd 时渲染为终端 ANSI 彩色文本
+    html_content = models.TextField("HTML 内容", blank=True, help_text="编辑器生成的 HTML，用于 motd 高亮调色渲染")
     enabled = models.BooleanField("启用", default=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
@@ -44,6 +48,11 @@ class Announcement(models.Model):
     def __str__(self):
         return self.title or "（无标题公告）"
 
+    def save(self, *args, **kwargs):
+        # 单例：系统只保留一条公告，保存后清理其他记录
+        super().save(*args, **kwargs)
+        Announcement.objects.exclude(pk=self.pk).delete()
+
 
 class SystemConfig(models.Model):
     """系统配置（单行单例）：GitCode OAuth 等原环境变量配置转移至数据库。
@@ -51,6 +60,10 @@ class SystemConfig(models.Model):
     - 通过 get_singleton() 获取唯一实例（不存在则创建）
     """
 
+    gitcode_enabled = models.BooleanField("启用 GitCode 登录", default=True)
+    # 站点基准地址（含协议/域名/端口）：GitCode 回调与 webhook 审批链接统一使用，
+    # 留空时回退 settings.GITCODE_CALLBACK_BASE_URL
+    site_base_url = models.CharField("站点地址", max_length=255, blank=True, default="")
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 
     class Meta:
@@ -67,6 +80,20 @@ class SystemConfig(models.Model):
         if obj is None:
             obj = cls.objects.create()
         return obj
+
+    def get_site_base_url(self) -> str:
+        """站点基准地址（GitCode 回调 / webhook 审批链接统一使用）。
+
+        优先取数据库配置 site_base_url，留空时回退 settings.GITCODE_CALLBACK_BASE_URL。
+        均未配置时返回空串（调用方自行处理）。
+        """
+        from django.conf import settings
+
+        base = (self.site_base_url or "").strip().rstrip("/")
+        if base:
+            return base
+        fallback = getattr(settings, "GITCODE_CALLBACK_BASE_URL", "").strip().rstrip("/")
+        return fallback
 
 
 class EmailVerification(models.Model):

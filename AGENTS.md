@@ -23,7 +23,6 @@ accounts/          # 用户、认证、系统设置
   models.py        # SystemConfig、Announcement（用户公告）、EmailVerification
   views.py         # 注册/登录/个人中心/密码找回/设置页/解绑
   email_verify.py  # 邮箱验证码服务（生成/发送/校验）
-  username_gen.py  # 用户名建议（中文拼音 / 英文首字母规则）
   adapter.py       # allauth SocialAccountAdapter（首次登录走 signup 确认）
   providers/gitcode/  # allauth 自定义 GitCode provider
 applications/      # 申请工单（核心业务）
@@ -116,6 +115,10 @@ uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）
 4. **未来计划走 GitHub Issues**：设计方案、UX 改进、待办不写进仓库文档
 5. **中文代码支持**：保留现有中文注释与命名习惯；新代码用英文标识符
 6. **严禁破坏开发数据库**：验证/调试一律使用 pytest（隔离测试库）或只读检查；**禁止在 `manage.py shell -c` 中对开发库执行 `delete()`/`all().delete()`/清空配置类操作**（曾因此误删用户配置的 SMTP/GitCode 凭据，属 P0 事故）。**页面/接口验证也禁止用 shell 创建数据再删除**（哪怕"创建后清理"也会误删用户已有配置，同样 P0）——一律写成 pytest 临时测试（隔离库）或纯只读检查。确需操作真实数据时先备份 `db.sqlite3`
+7. **测试强制隔离（领导规定，严重事故）**：所有测试/验证/调试**必须单独启动测试服务器 + 独立数据库**，严禁在开发/生产服务器与开发库上执行任何测试动作（含创建、修改、删除数据、跑脚本）。曾因在开发库创建测试数据导致工单编号跳号（P0 严重事故）：
+   - 运行测试一律 `uv run pytest`（pytest-django 自动使用隔离测试库，`tests/conftest.py` 标记 `DJANGO_TESTING`）
+   - 禁止在开发库上 `manage.py shell -c` 执行任何写操作（create/update/delete）；确需验证真实数据时先备份 `db.sqlite3` 且操作前向用户确认
+   - 禁止用开发服务器跑测试/演示/验证脚本（如临时起 runserver 造数据）
 
 ## 常见陷阱速查
 

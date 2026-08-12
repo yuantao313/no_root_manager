@@ -7,34 +7,45 @@ from config.decorators import superuser_required
 
 from .forms import ServerForm
 from .management import (
+    clear_managed_users_cache,
+    clear_npu_state_cache,
     detect_npu_groups,
     ensure_nrm_group,
+    get_managed_users_cached,
+    get_npu_state_cached,
     list_system_users,
     lock_user,
     run_init_script,
-    sync_managed_users,
-    sync_user_usage,
     take_over_user,
     unlock_user,
 )
-from .models import ManagedUser, Server
+from .models import MachineUserBinding, Server
 from .ssh import test_server_connection
 
 
 def server_groups_api(request, pk):
-    """返回服务器的分组配置，供申请表单前端联动。
+    """返回服务器的分组配置与机器用户列表，供申请表单前端联动。
 
-    仅 NPU 服务器提供分组选择（NPU 卡组 npu + npuN）；
-    普通服务器无附加分组可选。
+    - extra_groups：NPU 卡组（npu + npuN），仅 NPU 服务器（读内存缓存，不 SSH 卡顿）
+    - users：目标机器可接管的用户列表（/etc/passwd uid≥1000），供转移类型下拉
     """
     server = get_object_or_404(Server, pk=pk)
-    extra = server.npu_groups_list() if server.is_npu else []
+    extra = get_npu_state_cached(server)["groups"] if server.is_npu else []
+    users = []
+    if server.credential:
+        try:
+            ok, users, _ = list_system_users(server)
+            if not ok:
+                users = []
+        except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
+            users = []
     return JsonResponse(
         {
             "id": server.pk,
             "default_groups": server.default_groups_list(),
             "extra_groups": extra,
             "is_npu": server.is_npu,
+            "users": users,
         },
         json_dumps_params={"ensure_ascii": False},
     )
@@ -111,34 +122,39 @@ def server_test(request, pk):
 
 @superuser_required
 def server_detail(request, pk):
-    """服务器详情（仅超级管理员），含受管用户列表与可接管用户候选。"""
+    """服务器详情（仅超级管理员），含受管用户列表与可接管用户候选。
+
+    受管用户实时扫描目标机并缓存到内存（不落库）。
+    """
     server = get_object_or_404(Server, pk=pk)
     available_users = []
+    managed_members, _ = [], ""
     if server.credential:
         try:
             ok, available_users, _ = list_system_users(server)
+            if not ok:
+                available_users = []
+            # 受管用户（内存缓存）
+            managed_members, _ = get_managed_users_cached(server)
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
+            managed_members = []
     return render(
         request,
         "servers/detail.html",
         {
             "server": server,
             "available_users": available_users,
+            "managed_users": managed_members,
+            # 手动接管时可选绑定的平台用户（下拉）
             "sys_users": User.objects.order_by("username"),
-            # 最近一次资源同步时间（全部受管用户中取最大）
-            "last_sync_at": (
-                server.managed_users.order_by("-usage_synced_at").values_list("usage_synced_at", flat=True).first()
-                if server.managed_users.exists()
-                else None
-            ),
         },
     )
 
 
 @superuser_required
 def server_sync_users(request, pk):
-    """同步目标机器状态（仅超级管理员）：nrm_managed 组成员 + 资源使用采集。"""
+    """刷新目标机器状态（仅超级管理员）：清空内存缓存并重新扫描受管用户。"""
     server = get_object_or_404(Server, pk=pk)
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法同步。")
@@ -147,14 +163,10 @@ def server_sync_users(request, pk):
     if not ok:
         messages.error(request, msg)
         return redirect("servers:detail", pk=pk)
-    ok, msg = sync_managed_users(server)
-    if not ok:
-        messages.error(request, msg)
-        return redirect("servers:detail", pk=pk)
-    messages.success(request, msg)
-    # 采集各用户资源使用（磁盘/内存/CPU）
-    ok2, msg2 = sync_user_usage(server)
-    messages.success(request, msg2) if ok2 else messages.error(request, msg2)
+    # 强制刷新内存缓存
+    clear_managed_users_cache(server)
+    members, scan_msg = get_managed_users_cached(server, force_refresh=True)
+    messages.success(request, f"已刷新：扫描到 {len(members)} 个受管用户（{scan_msg}）")
     return redirect("servers:detail", pk=pk)
 
 
@@ -162,7 +174,7 @@ def server_sync_users(request, pk):
 def server_takeover_user(request, pk):
     """将指定用户加入目标机器 nrm_managed 组（接管，仅超级管理员）。
 
-    可同时绑定一个 NRM 系统账号（机器受管用户 ↔ 系统用户一对一）。
+    可选绑定一个平台用户（机器受管用户 ↔ 系统用户归属，写入 MachineUserBinding）。
     """
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
@@ -171,16 +183,16 @@ def server_takeover_user(request, pk):
         return redirect("servers:detail", pk=pk)
     ok, msg = take_over_user(server, username)
     if ok:
-        # 接管成功：若指定了绑定用户，则写入 ManagedUser.user
+        # 可选绑定平台用户：归属关系落库（source=manual），唯一约束防重复
         bind_id = request.POST.get("bind_user_id", "").strip()
-        if bind_id:
-            mu = ManagedUser.objects.filter(server=server, username=username).first()
-            if mu:
-                try:
-                    mu.user_id = int(bind_id)
-                    mu.save(update_fields=["user"])
-                except (ValueError, TypeError):
-                    pass
+        MachineUserBinding.objects.update_or_create(
+            server=server,
+            username=username,
+            defaults={
+                "user_id": int(bind_id) if bind_id.isdigit() else None,
+                "source": "manual",
+            },
+        )
         messages.success(request, msg)
     else:
         messages.error(request, msg)
@@ -235,7 +247,10 @@ def server_configure_npu(request, pk):
         server.is_npu = True
         server.npu_groups = ",".join(groups)
         server.save(update_fields=["is_npu", "npu_groups"])
+        # 同步内存缓存，申请界面直接读缓存不卡顿
+        get_npu_state_cached(server, force_refresh=True)
         messages.success(request, f"NPU 检测完成并保存：{msg}")
     else:
+        clear_npu_state_cache(server)
         messages.error(request, f"NPU 检测失败：{msg}")
     return redirect("servers:detail", pk=pk)

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 
+from servers.fields import EncryptedTextField
 from servers.models import Server
 
 
@@ -10,6 +11,11 @@ class Application(models.Model):
     class ApplyType(models.TextChoices):
         CREATE = "create", "申请服务器账号"
         TRANSFER = "transfer", "转移已有账号为受管用户"
+        GROUP = "group", "申请用户组"
+        ADMIN = "admin", "申请平台管理员"
+
+    # 可申请的用户组（用户组类型可选加入；逗号分隔存储）
+    USER_GROUP_CHOICES = ["sudo", "docker", "HwHiAiUser"]
 
     class Status(models.TextChoices):
         PENDING = "pending", "待审批"
@@ -62,6 +68,14 @@ class Application(models.Model):
         default="",
         help_text="用户申请时勾选的可附加分组，逗号分隔",
     )
+    # 申请的用户组（sudo/docker/HwHiAiUser，逗号分隔；创建类型可选）
+    user_groups = models.CharField(
+        "申请用户组",
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="可申请加入的用户组：sudo、docker、HwHiAiUser（逗号分隔）",
+    )
 
     status = models.CharField(
         "状态",
@@ -72,6 +86,8 @@ class Application(models.Model):
     # 机器账号开通记录（审批通过后自动开通时填充）
     provisioned_at = models.DateTimeField("账号开通时间", null=True, blank=True)
     provision_note = models.TextField("开通结果", blank=True)
+    # 初始密码（加密存储）：邮件不可用时可从工单查看，首次登录强制修改
+    initial_password = EncryptedTextField("初始密码", blank=True)
     # sudo 权限授予结果（独立记录，避免与开通信息混在一起）
     sudo_note = models.TextField("sudo 授予结果", blank=True)
     reviewer = models.ForeignKey(
@@ -95,6 +111,14 @@ class Application(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_status_display()})"
+
+    def npu_groups_display(self) -> str:
+        """NPU 卡组展示值：过滤公共组 npu，只返回用户实际所选卡组。
+
+        公共组 npu 由后端授权时自动附带，不对用户/管理员暴露"用户组"概念。
+        """
+        groups = [g.strip() for g in (self.applied_groups or "").split(",") if g.strip()]
+        return ",".join(g for g in groups if g != "npu")
 
 
 class SudoGrant(models.Model):

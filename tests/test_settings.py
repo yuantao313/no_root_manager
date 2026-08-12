@@ -1,0 +1,152 @@
+"""系统设置页测试：GitCode/邮件/Webhook 功能总开关（切换即时生效）。"""
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+
+from accounts.models import SystemConfig
+from notifications.models import EmailConfig, WebhookConfig
+
+pytestmark = pytest.mark.django_db
+User = get_user_model()
+
+
+def _superuser():
+    return User.objects.create_user(username="admin", password="x12345!", is_staff=True, is_superuser=True)
+
+
+def _normal_user():
+    return User.objects.create_user(username="normal", password="x12345!")
+
+
+class TestToggleSwitch:
+    """开关接口：切换即时生效 + 权限控制。"""
+
+    def test_requires_superuser(self, client):
+        client.force_login(_normal_user())
+        resp = client.post(reverse("accounts:toggle_switch"), {"switch": "gitcode", "enabled": "0"})
+        # superuser_required 对普通用户重定向
+        assert resp.status_code in (302, 403)
+
+    def test_toggle_gitcode(self, client):
+        client.force_login(_superuser())
+        cfg = SystemConfig.get_singleton()
+        assert cfg.gitcode_enabled is True  # 默认开启
+        resp = client.post(reverse("accounts:toggle_switch"), {"switch": "gitcode", "enabled": "0"})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        cfg.refresh_from_db()
+        assert cfg.gitcode_enabled is False
+        # 再切回开启
+        client.post(reverse("accounts:toggle_switch"), {"switch": "gitcode", "enabled": "1"})
+        cfg.refresh_from_db()
+        assert cfg.gitcode_enabled is True
+
+    def test_toggle_email(self, client):
+        client.force_login(_superuser())
+        EmailConfig.objects.create(host="smtp.example.com", port=465, username="u", enabled=True)
+        resp = client.post(reverse("accounts:toggle_switch"), {"switch": "email", "enabled": "0"})
+        assert resp.json()["ok"] is True
+        assert EmailConfig.objects.get().enabled is False
+
+    def test_toggle_webhook(self, client):
+        client.force_login(_superuser())
+        WebhookConfig.objects.create(name="h", url="http://example.com/hook", enabled=True)
+        resp = client.post(reverse("accounts:toggle_switch"), {"switch": "webhook", "enabled": "0"})
+        assert resp.json()["ok"] is True
+        assert WebhookConfig.objects.get().enabled is False
+
+    def test_unknown_switch_rejected(self, client):
+        client.force_login(_superuser())
+        resp = client.post(reverse("accounts:toggle_switch"), {"switch": "bogus", "enabled": "1"})
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+
+    def test_get_method_rejected(self, client):
+        client.force_login(_superuser())
+        resp = client.get(reverse("accounts:toggle_switch"))
+        assert resp.status_code == 405
+
+
+class TestSiteBaseUrl:
+    """站点地址配置：数据库优先，留空回退 settings；设置页展示回调地址一致。"""
+
+    def test_db_value_preferred_over_settings(self):
+        cfg = SystemConfig.get_singleton()
+        cfg.site_base_url = "http://myhost:8888"
+        cfg.save()
+        assert cfg.get_site_base_url() == "http://myhost:8888"
+
+    def test_empty_falls_back_to_settings(self):
+        cfg = SystemConfig.get_singleton()
+        cfg.site_base_url = ""
+        cfg.save()
+        # settings.GITCODE_CALLBACK_BASE_URL = "http://192.168.9.216:18888"
+        assert cfg.get_site_base_url() == "http://192.168.9.216:18888"
+
+    def test_save_site_base_url_from_page(self, client):
+        client.force_login(_superuser())
+        resp = client.post(
+            reverse("accounts:settings"),
+            {"save_site_base_url": "1", "site_base_url": "http://nrm.example.com:8080/"},
+        )
+        assert resp.status_code == 302
+        cfg = SystemConfig.get_singleton()
+        assert cfg.site_base_url == "http://nrm.example.com:8080"  # 已去除尾部斜杠
+
+    def test_callback_url_uses_site_base_url(self, client):
+        client.force_login(_superuser())
+        cfg = SystemConfig.get_singleton()
+        cfg.site_base_url = "http://myhost:9999"
+        cfg.save()
+        html = client.get(reverse("accounts:settings")).content.decode()
+        assert "http://myhost:9999/accounts/allauth/gitcode/login/callback/" in html
+
+    def test_webhook_review_link_uses_site_base_url(self, client):
+        """webhook 审批链接使用系统设置的站点地址（不再用 Site.domain）。"""
+        from notifications.services import _review_link
+
+        cfg = SystemConfig.get_singleton()
+        cfg.site_base_url = "http://myhost:7777"
+        cfg.save()
+        link = _review_link({"id": 42})
+        assert link.startswith("http://myhost:7777/applications/42/")
+        assert "example.com" not in link
+
+
+class TestSettingsPageSwitches:
+    """设置页各 tab 内渲染开关，并按下开关状态禁用配置区。"""
+
+    def test_switches_rendered(self, client):
+        client.force_login(_superuser())
+        html = client.get(reverse("accounts:settings")).content.decode()
+        assert 'data-switch="gitcode"' in html
+        assert 'data-switch="email"' in html
+        assert 'data-switch="webhook"' in html
+        assert 'id="fieldset-gitcode"' in html
+        assert 'id="fieldset-email"' in html
+        assert 'id="fieldset-webhook"' in html
+        # 开关在 tab 内部（panel-heading 内）
+        assert 'data-switch="gitcode"' in html.split("tab-pane")[1]
+
+    def test_disabled_state_renders_disabled_fieldset(self, client):
+        """开关关闭时对应 fieldset 必须带 disabled（配置项变灰不可改）。"""
+        client.force_login(_superuser())
+        # 关闭 email/webhook 开关
+        client.post(reverse("accounts:toggle_switch"), {"switch": "email", "enabled": "0"})
+        client.post(reverse("accounts:toggle_switch"), {"switch": "webhook", "enabled": "0"})
+        html = client.get(reverse("accounts:settings")).content.decode()
+        assert 'id="fieldset-email" disabled' in html
+        assert 'id="fieldset-webhook" disabled' in html
+        # gitcode 默认开启，不应禁用
+        assert 'id="fieldset-gitcode" disabled' not in html
+
+    def test_enabled_state_renders_enabled_fieldset(self, client):
+        """开关开启时 fieldset 不带 disabled。"""
+        client.force_login(_superuser())
+        # 全部开关开启
+        for switch in ("gitcode", "email", "webhook"):
+            client.post(reverse("accounts:toggle_switch"), {"switch": switch, "enabled": "1"})
+        html = client.get(reverse("accounts:settings")).content.decode()
+        for f in ("gitcode", "email", "webhook"):
+            assert f'id="fieldset-{f}" >' in html or f'<fieldset id="fieldset-{f}">' in html

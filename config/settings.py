@@ -32,7 +32,17 @@ SECRET_KEY = os.environ.get(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["192.168.9.216"]
+
+# Django 6.1 启用 Origin 校验：经非默认端口（18888）访问时，
+# 请求头 Origin 必须匹配 CSRF_TRUSTED_ORIGINS，否则 403
+# "Origin checking failed - http://192.168.9.216:18888 does not match any trusted origins"
+CSRF_TRUSTED_ORIGINS = ["http://192.168.9.216:18888"]
+
+# GitCode OAuth 回调基准地址：固定回调 URL，避免随请求 host 漂移
+# 导致 GitCode 应用配置的回调地址与实际生成的 redirect_uri 不一致（回调不匹配）。
+# 修改域名/端口时需同步更新此处与 GitCode 应用管理页的回调配置。
+GITCODE_CALLBACK_BASE_URL = "http://192.168.9.216:18888"
 
 
 # Application definition
@@ -47,6 +57,8 @@ INSTALLED_APPS = [
     "django.contrib.sites",
     "crispy_forms",
     "crispy_bootstrap3",
+    "django_select2",
+    "widget_tweaks",
     "axes",
     "allauth",
     "allauth.account",
@@ -60,6 +72,13 @@ INSTALLED_APPS = [
 ]
 
 SITE_ID = 1
+
+# 缓存：django-select2 的 Heavy widget 需要缓存后端（存查询状态）
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}
 
 # 表单渲染：crispy-forms（Bootstrap 3 模板包）
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap3"
@@ -165,7 +184,9 @@ USE_TZ = True
 
 # 认证跳转
 LOGIN_URL = "accounts:login"
-LOGIN_REDIRECT_URL = "applications:list"
+# 登录后跳转"我的申请"（普通用户可访问）；原指向 applications:list（仅管理员），
+# 普通用户登录后会被 staff_required 弹回登录页形成循环
+LOGIN_REDIRECT_URL = "applications:my"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 
@@ -173,4 +194,8 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = "static/"
-# 前端资源已全部走 CDN，无本地 static 目录
+
+# 项目自研静态资源（app.css / app.js）放在根目录 static/ 下，
+# 不属于任何 app，需显式登记到 STATICFILES_DIRS，
+# 这样 DEBUG=True 时 staticfiles 应用才能找到并直接 serve。
+STATICFILES_DIRS = [BASE_DIR / "static"]

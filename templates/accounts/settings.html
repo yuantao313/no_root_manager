@@ -11,7 +11,6 @@
     <li role="presentation" class="active"><a href="#tab-gitcode" aria-controls="tab-gitcode" role="tab" data-toggle="tab">GitCode 登录</a></li>
     <li role="presentation"><a href="#tab-email" aria-controls="tab-email" role="tab" data-toggle="tab">邮件通知</a></li>
     <li role="presentation"><a href="#tab-webhook" aria-controls="tab-webhook" role="tab" data-toggle="tab">全局 Webhook</a></li>
-    <li role="presentation"><a href="#tab-binding" aria-controls="tab-binding" role="tab" data-toggle="tab">管理员与服务器</a></li>
     <li role="presentation"><a href="#tab-announcement" aria-controls="tab-announcement" role="tab" data-toggle="tab">用户公告</a></li>
 </ul>
 
@@ -19,8 +18,28 @@
     <!-- GitCode 配置 -->
     <div role="tabpanel" class="tab-pane active" id="tab-gitcode">
         <div class="panel panel-default">
-            <div class="panel-heading"><h3 class="panel-title">GitCode OAuth 配置</h3></div>
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    GitCode OAuth 配置
+                    <label class="pull-right feature-toggle-label" style="font-weight:normal;margin:0;">
+                        <input type="checkbox" class="feature-toggle" data-switch="gitcode"
+                               data-toggle-url="{% url 'accounts:toggle_switch' %}"
+                               {% if switch_gitcode %}checked{% endif %}>
+                        启用
+                    </label>
+                </h3>
+            </div>
             <div class="panel-body">
+                <fieldset id="fieldset-gitcode" {% if not switch_gitcode %}disabled{% endif %}>
+                <form method="post" style="margin-bottom:14px;">
+                    {% csrf_token %}
+                    <p class="text-muted" style="font-size:13px;margin-top:0;">
+                        站点基准地址（含协议/域名/端口）：GitCode 回调地址与 webhook 审批链接均基于它生成，
+                        需与 GitCode 应用管理页配置的回调地址保持一致。
+                    </p>
+                    <p><label>站点地址</label><input type="text" name="site_base_url" class="form-control" value="{{ syscfg.site_base_url|default:'' }}" placeholder="如 http://192.168.9.216:18888"></p>
+                    <button type="submit" name="save_site_base_url" class="btn btn-primary btn-sm">保存站点地址</button>
+                </form>
                 <p class="text-muted" style="font-size:13px;word-break:break-all;">
                     回调地址（请到 GitCode 应用管理页配置为完全一致的值）：<br>
                     <code>{{ gitcode_callback_url }}</code>
@@ -31,49 +50,82 @@
                     <p><label>Client Secret（留空表示不修改）</label><input type="password" name="gitcode_client_secret" class="form-control" placeholder="已配置时留空保持原值"></p>
                     <button type="submit" name="save_gitcode" class="btn btn-primary">保存</button>
                 </form>
+                </fieldset>
             </div>
         </div>
     </div>
 
-    <!-- 邮件配置 -->
+    <!-- 邮件通知：SMTP 与邮件 Webhook 两种发送方式整合一页，单选一种 -->
     <div role="tabpanel" class="tab-pane" id="tab-email">
         <div class="panel panel-default">
-            <div class="panel-heading"><h3 class="panel-title">SMTP 邮件配置</h3></div>
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    邮件通知
+                    <label class="pull-right feature-toggle-label" style="font-weight:normal;margin:0;">
+                        <input type="checkbox" class="feature-toggle" data-switch="email"
+                               data-toggle-url="{% url 'accounts:toggle_switch' %}"
+                               {% if switch_email %}checked{% endif %}>
+                        启用
+                    </label>
+                </h3>
+            </div>
             <div class="panel-body">
+                <fieldset id="fieldset-email" {% if not switch_email %}disabled{% endif %}>
                 <form method="post">
                     {% csrf_token %}
-                    <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
-                    <p><label>端口</label><input type="number" name="port" class="form-control" value="{{ email_cfg.port|default:465 }}"></p>
-                    <p><label>用户名</label><input type="text" name="username" class="form-control" value="{{ email_cfg.username|default:'' }}"></p>
-                    <p><label>密码/授权码（留空表示不修改）</label><input type="password" name="password" class="form-control"></p>
-                    <p><label>发件人地址</label><input type="text" name="from_email" class="form-control" value="{{ email_cfg.from_email|default:'' }}"></p>
-                    <p><label><input type="checkbox" name="use_ssl" {% if email_cfg.use_ssl %}checked{% endif %}> 使用 SSL 直连（465 端口）</label></p>
-                    <p><label><input type="checkbox" name="enabled" {% if email_cfg.enabled %}checked{% endif %}> 启用邮件通知</label></p>
-                    <p>
-                        <label>验证收件邮箱</label>
-                        <div class="input-group">
-                            <input type="email" name="verify_email" class="form-control" placeholder="验证码将发送到此邮箱" required>
-                            <span class="input-group-btn">
-                                <button type="submit" name="save_email" class="btn btn-primary" {% if cooldown_remaining %}disabled{% endif %}>
-                                    {% if cooldown_remaining %}已发送（{{ cooldown_remaining }} 秒后重试）{% else %}发送验证码{% endif %}
-                                </button>
-                            </span>
-                        </div>
+                    <p><label>发送方式</label></p>
+                    <label class="radio-inline">
+                        <input type="radio" name="send_via" value="smtp" data-sendvia="smtp"
+                               {% if email_cfg.send_via != 'webhook' %}checked{% endif %}> SMTP 直连
+                    </label>
+                    <label class="radio-inline">
+                        <input type="radio" name="send_via" value="webhook" data-sendvia="webhook"
+                               {% if email_cfg.send_via == 'webhook' %}checked{% endif %}> 邮件 Webhook
+                    </label>
+                    <p class="text-muted" style="font-size:13px;">
+                        邮件 Webhook 用于规避 SMTP 端口（25/465/587）被屏蔽，由外部端点代为发信；与"全局 Webhook"（通知事件）相互独立。
                     </p>
-                    <p>
-                        <label>验证码</label>
-                        <div class="input-group">
-                            <input type="text" name="code" class="form-control" placeholder="收到的验证码">
-                            <span class="input-group-btn">
-                                <button type="submit" name="verify_smtp_code" class="btn btn-success">验证</button>
-                            </span>
-                        </div>
-                    </p>
-                    <p>
-                        <button type="submit" name="save_email_final" class="btn btn-primary" {% if not smtp_verified %}disabled{% endif %}>保存配置</button>
-                        {% if smtp_verified %}<span class="text-success">✓ 验证通过，可保存</span>{% endif %}
-                    </p>
+                    <!-- SMTP 设置区：发送方式为 SMTP 时显示（隐藏时由 JS 禁用，required 不拦截提交） -->
+                    <fieldset id="smtp-settings" data-sendvia-panel="smtp">
+                        <p><label>SMTP 服务器</label><input type="text" name="host" class="form-control" value="{{ email_cfg.host|default:'' }}"></p>
+                        <p><label>端口</label><input type="number" name="port" class="form-control" value="{{ email_cfg.port|default:465 }}"></p>
+                        <p><label>用户名</label><input type="text" name="username" class="form-control" value="{{ email_cfg.username|default:'' }}"></p>
+                        <p><label>密码/授权码（留空表示不修改）</label><input type="password" name="password" class="form-control"></p>
+                        <p><label>发件人地址</label><input type="text" name="from_email" class="form-control" value="{{ email_cfg.from_email|default:'' }}"></p>
+                        <p><label><input type="checkbox" name="use_ssl" {% if email_cfg.use_ssl %}checked{% endif %}> 使用 SSL 直连（465 端口）</label></p>
+                        <p>
+                            <label>验证收件邮箱</label>
+                            <div class="input-group">
+                                <input type="email" name="verify_email" class="form-control" placeholder="验证码将发送到此邮箱" required>
+                                <span class="input-group-btn">
+                                    <button type="submit" name="save_email" class="btn btn-primary" {% if cooldown_remaining %}disabled{% endif %}>
+                                        {% if cooldown_remaining %}已发送（{{ cooldown_remaining }} 秒后重试）{% else %}发送验证码{% endif %}
+                                    </button>
+                                </span>
+                            </div>
+                        </p>
+                        <p>
+                            <label>验证码</label>
+                            <div class="input-group">
+                                <input type="text" name="code" class="form-control" placeholder="收到的验证码">
+                                <span class="input-group-btn">
+                                    <button type="submit" name="verify_smtp_code" class="btn btn-success">验证</button>
+                                </span>
+                            </div>
+                        </p>
+                        <p>
+                            <button type="submit" name="save_email_final" class="btn btn-primary" {% if not smtp_verified %}disabled{% endif %}>保存 SMTP 配置</button>
+                            {% if smtp_verified %}<span class="text-success">✓ 验证通过，可保存</span>{% endif %}
+                        </p>
+                    </fieldset>
+                    <!-- 邮件 Webhook 设置区：发送方式为 Webhook 时显示（隐藏时由 JS 禁用） -->
+                    <fieldset id="webhook-settings" data-sendvia-panel="webhook" style="display:none;">
+                        <p><label>邮件 Webhook URL</label><input type="text" name="mail_webhook_url" class="form-control" value="{{ email_cfg.mail_webhook_url|default:'' }}" placeholder="如 http://host/webhook/mail"></p>
+                        <p><label>Webhook Token（X-Webhook-Token 请求头，留空表示不修改）</label><input type="password" name="mail_webhook_token" class="form-control" value="{{ email_cfg.mail_webhook_token|default:'' }}" placeholder="长随机字符串"></p>
+                        <button type="submit" name="save_mail_webhook" class="btn btn-primary">保存 Webhook 配置</button>
+                    </fieldset>
                 </form>
+                </fieldset>
             </div>
         </div>
     </div>
@@ -81,85 +133,39 @@
     <!-- 全局 Webhook -->
     <div role="tabpanel" class="tab-pane" id="tab-webhook">
         <div class="panel panel-default">
-            <div class="panel-heading"><h3 class="panel-title">全局 Webhook</h3></div>
-            {% if hooks %}
-            <table class="table table-striped">
-                <thead><tr><th>名称</th><th>URL</th><th>状态</th><th>操作</th></tr></thead>
-                <tbody>
-                    {% for hook in hooks %}
-                    <tr>
-                        <td>{{ hook.name }}</td>
-                        <td style="word-break:break-all;">{{ hook.url }}</td>
-                        <td>{% if hook.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
-                        <td>
-                            <form method="post" style="display:inline;">
-                                {% csrf_token %}
-                                <input type="hidden" name="webhook_id" value="{{ hook.pk }}">
-                                <button type="submit" name="del_webhook" class="btn btn-danger btn-xs">删除</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="panel-body"><p class="text-muted">暂无全局 Webhook。</p></div>
-            {% endif %}
-            <div class="panel-body" style="border-top:1px solid #ddd;">
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    全局 Webhook
+                    <label class="pull-right feature-toggle-label" style="font-weight:normal;margin:0;">
+                        <input type="checkbox" class="feature-toggle" data-switch="webhook"
+                               data-toggle-url="{% url 'accounts:toggle_switch' %}"
+                               {% if switch_webhook %}checked{% endif %}>
+                        启用
+                    </label>
+                </h3>
+            </div>
+            <div class="panel-body">
+                <fieldset id="fieldset-webhook" {% if not switch_webhook %}disabled{% endif %}>
+                <p class="text-muted" style="font-size:13px;">
+                    申请事件推送 JSON 到指定 URL；系统仅保留一个全局 Webhook，保存即覆盖。
+                </p>
                 <form method="post">
                     {% csrf_token %}
-                    <p><label>名称</label><input type="text" name="name" class="form-control"></p>
-                    <p><label>URL</label><input type="text" name="url" class="form-control"></p>
-                    <p><label>密钥（可选）</label><input type="password" name="secret" class="form-control"></p>
-                    <p><label><input type="checkbox" name="enabled" checked> 启用</label></p>
-                    <button type="submit" name="add_webhook" class="btn btn-primary">添加</button>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- 管理员与服务器绑定 -->
-    <div role="tabpanel" class="tab-pane" id="tab-binding">
-        <div class="panel panel-default">
-            <div class="panel-heading"><h3 class="panel-title">普通管理员与服务器绑定</h3></div>
-            <div class="panel-body">
-                <form method="post" class="form-inline" style="margin-bottom:12px;">
-                    {% csrf_token %}
-                    <div class="form-group">
-                        <select name="admin_id" class="form-control">
-                            <option value="">选择普通管理员</option>
-                            {% for u in staff_users %}<option value="{{ u.pk }}">{{ u.username }}</option>{% endfor %}
+                    <p><label>平台</label>
+                        <select name="name" class="form-control">
+                            {% for value, label in webhook_platform_choices %}
+                            <option value="{{ value }}"{% if hooks.first.name == value %} selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
                         </select>
-                    </div>
-                    <div class="form-group">
-                        <select name="server_id" class="form-control">
-                            <option value="">选择服务器</option>
-                            {% for s in servers %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}
-                        </select>
-                    </div>
-                    <button type="submit" name="add_binding" class="btn btn-primary">添加绑定</button>
+                    </p>
+                    <p><label>URL</label><input type="text" name="url" class="form-control" value="{{ hooks.first.url|default:'' }}"></p>
+                    <p><label>密钥（可选，留空表示不修改）</label><input type="password" name="secret" class="form-control"></p>
+                    <button type="submit" name="add_webhook" class="btn btn-primary">保存</button>
+                    <button type="submit" name="test_webhook" class="btn btn-default">测试推送</button>
+                    <span class="text-muted" style="font-size:13px;">测试推送将向表单中的 URL 发送一条测试事件（不会保存配置）。</span>
                 </form>
+                </fieldset>
             </div>
-            {% if bindings %}
-            <table class="table table-striped">
-                <thead><tr><th>普通管理员</th><th>服务器</th><th>操作</th></tr></thead>
-                <tbody>
-                    {% for b in bindings %}
-                    <tr>
-                        <td>{{ b.admin.username }}</td>
-                        <td>{{ b.server.name }}</td>
-                        <td>
-                            <form method="post" style="display:inline;">
-                                {% csrf_token %}
-                                <input type="hidden" name="binding_id" value="{{ b.pk }}">
-                                <button type="submit" name="del_binding" class="btn btn-danger btn-xs">解除</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
         </div>
     </div>
 
@@ -167,37 +173,24 @@
     <div role="tabpanel" class="tab-pane" id="tab-announcement">
         <div class="panel panel-default">
             <div class="panel-heading"><h3 class="panel-title">用户公告</h3></div>
-            {% if announcements %}
-            <table class="table table-striped">
-                <thead><tr><th>标题</th><th>内容</th><th>状态</th><th>操作</th></tr></thead>
-                <tbody>
-                    {% for ann in announcements %}
-                    <tr>
-                        <td>{{ ann.title|default:"—" }}</td>
-                        <td style="word-break:break-all;max-width:320px;">{{ ann.content|truncatechars:80 }}</td>
-                        <td>{% if ann.enabled %}<span class="label label-success">启用</span>{% else %}<span class="label label-default">停用</span>{% endif %}</td>
-                        <td>
-                            <form method="post" style="display:inline;">
-                                {% csrf_token %}
-                                <input type="hidden" name="announcement_id" value="{{ ann.pk }}">
-                                <button type="submit" name="del_announcement" class="btn btn-danger btn-xs" onclick="return confirm('确定删除该公告吗？');">删除</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <div class="panel-body"><p class="text-muted">暂无公告。</p></div>
-            {% endif %}
-            <div class="panel-body" style="border-top:1px solid #ddd;">
-                <p class="text-muted" style="font-size:13px;">公告将写入目标服务器的 motd（用户 SSH 登录时显示），并在系统首页同步展示；在服务器详情页可批量推送。</p>
-                <form method="post">
+            <div class="panel-body">
+                <p class="text-muted" style="font-size:13px;">
+                    公告将写入目标服务器的 motd（用户 SSH 登录时显示，支持颜色高亮），并在系统首页同步展示；
+                    系统仅保留一条公告，保存即覆盖。
+                </p>
+                <form method="post" id="announcement-form">
                     {% csrf_token %}
-                    <p><label>标题</label><input type="text" name="title" class="form-control"></p>
-                    <p><label>内容</label><textarea name="content" class="form-control" rows="4" required></textarea></p>
-                    <p><label><input type="checkbox" name="enabled" checked> 启用</label></p>
-                    <button type="submit" name="add_announcement" class="btn btn-primary">添加公告</button>
+                    <p><label>标题</label><input type="text" name="title" class="form-control" value="{{ announcements.first.title|default:'' }}"></p>
+                    <p><label>内容（HTML 编辑器，可高亮调色）</label></p>
+                    <!-- 初始内容用隐藏 textarea 传递：Django 自动转义，含引号/尖括号也安全（不用 data-* 属性）。
+                         视图已预处理：html_content 为空时回退纯文本 content，JS 端把纯文本换行转 <br> 再载入编辑器 -->
+                    <textarea id="announcement-initial" style="display:none;">{{ announcement_initial }}</textarea>
+                    <div id="announcement-toolbar" style="border:1px solid #ccc;border-bottom:none;border-radius:4px 4px 0 0;background:#f9f9f9;"></div>
+                    <div id="announcement-editor" style="border:1px solid #ccc;border-radius:0 0 4px 4px;min-height:180px;"></div>
+                    <input type="hidden" name="html_content" id="announcement-html">
+                    <input type="hidden" name="content" id="announcement-text">
+                    <p style="margin-top:8px;"><label><input type="checkbox" name="enabled" {% if not announcements or announcements.first.enabled %}checked{% endif %}> 启用</label></p>
+                    <button type="submit" name="add_announcement" class="btn btn-primary">保存公告</button>
                 </form>
             </div>
         </div>

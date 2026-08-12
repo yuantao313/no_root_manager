@@ -15,7 +15,7 @@
         </div>
     </div>
     <div class="panel-body">
-        <dl>
+        <dl class="dl-horizontal">
             <dt>申请人</dt>
             <dd>{{ application.applicant_name }}{% if application.applicant %}（账号：{{ application.applicant.username }}）{% endif %}</dd>
             <dt>用户名</dt>
@@ -29,6 +29,13 @@
             {% if application.target_server %}
             <dt>目标服务器</dt>
             <dd><a href="{% url 'servers:detail' application.target_server.pk %}">{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）</a></dd>
+            {% endif %}
+            {% if application.target_server.is_npu and application.npu_groups_display %}
+            <dt>申请 NPU 卡组</dt>
+            <dd>
+                <span class="label label-info">{{ application.npu_groups_display }}</span>
+                <span class="text-muted" style="font-size:13px;">（NPU 服务器，用户申请的算力卡组，审批开通时自动授权）</span>
+            </dd>
             {% endif %}
             <dt>申请内容</dt>
             <dd>{{ application.description|linebreaks }}</dd>
@@ -45,6 +52,18 @@
             <strong>审批结果：</strong>{{ application.get_status_display }}
             （审批人：{{ application.reviewer.username }}，{{ application.reviewed_at|date:"Y-m-d H:i" }}）
             {% if application.review_comment %}<br>审批意见：{{ application.review_comment }}{% endif %}
+        </div>
+        {% endif %}
+
+        {% if application.initial_password %}
+        <div class="review-box alert alert-warning">
+            <strong>初始密码</strong>（首次登录必须修改）
+            <p style="margin:8px 0 0;">
+                账号 <code>{{ application.username }}</code> 的初始密码：<code>{{ application.initial_password }}</code><br>
+                <span class="text-muted" style="font-size:13px;">
+                    服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。
+                </span>
+            </p>
         </div>
         {% endif %}
 
@@ -90,7 +109,11 @@
         {% endif %}
 
         <div style="margin-top:16px;">
+            {% if user.is_staff %}
             <a href="{% url 'applications:list' %}" class="btn btn-default">返回列表</a>
+            {% else %}
+            <a href="{% url 'applications:my' %}" class="btn btn-default">返回我的申请</a>
+            {% endif %}
         </div>
     </div>
 </div>

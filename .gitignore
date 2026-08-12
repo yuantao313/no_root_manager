@@ -25,3 +25,4 @@ site/
 
 # AtomCode agent 本地状态（不入库）
 .atomcode/
+db.sqlite3.bak_*

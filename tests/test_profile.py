@@ -1,5 +1,7 @@
 """个人中心测试：资料直接编辑、内嵌 Webhook 管理（仅本人）。"""
 
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -96,24 +98,25 @@ class TestMyWebhooks:
         return User.objects.create_user(username="other", password="x12345!", is_staff=True, is_superuser=True)
 
     def test_list_only_own(self, client, staff, other):
-        WebhookConfig.objects.create(name="mine", url="http://example.com/mine", owner=staff)
-        WebhookConfig.objects.create(name="theirs", url="http://example.com/theirs", owner=other)
+        WebhookConfig.objects.create(name="feishu", url="http://example.com/mine", owner=staff)
+        WebhookConfig.objects.create(name="feishu", url="http://example.com/theirs", owner=other)
         client.force_login(staff)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
         assert resp.status_code == 200
         assert "我的 Webhook" in html
-        assert "mine" in html
-        assert "theirs" not in html
+        # 平台下拉展示飞书选项；他人的 webhook 不可见
+        assert "飞书" in html
+        assert "http://example.com/theirs" not in html
 
     def test_create_sets_owner(self, client, staff):
         client.force_login(staff)
         resp = client.post(
             reverse("accounts:profile"),
-            {"add_webhook": "1", "name": "hook1", "url": "http://example.com/hook", "enabled": "on"},
+            {"add_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "enabled": "on"},
         )
         assert resp.status_code == 302
-        hook = WebhookConfig.objects.get(name="hook1")
+        hook = WebhookConfig.objects.get(name="feishu")
         assert hook.owner == staff
 
     def test_normal_user_has_no_webhook_section(self, client):
@@ -135,3 +138,26 @@ class TestMyWebhooks:
         resp = client.post(reverse("notifications:delete", args=[hook.pk]))
         assert resp.status_code == 404  # 他人数据受保护
         assert WebhookConfig.objects.filter(pk=hook.pk).exists()
+
+    def test_test_webhook_success_message(self, client, staff):
+        """测试推送成功：提示成功且不保存配置。"""
+        client.force_login(staff)
+        with patch("accounts.views.send_webhook_to", return_value=(True, "推送成功（HTTP 200）")) as mock:
+            resp = client.post(
+                reverse("accounts:profile"),
+                {"test_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "secret": ""},
+            )
+        assert resp.status_code == 302
+        mock.assert_called_once_with("http://example.com/hook", "", platform="feishu")
+        assert not WebhookConfig.objects.filter(owner=staff).exists()  # 测试不落库
+
+    def test_test_webhook_failure_message(self, client, staff):
+        """测试推送失败：提示失败信息。"""
+        client.force_login(staff)
+        with patch("accounts.views.send_webhook_to", return_value=(False, "推送失败：connection refused")):
+            resp = client.post(
+                reverse("accounts:profile"),
+                {"test_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "secret": ""},
+            )
+        assert resp.status_code == 302
+        assert not WebhookConfig.objects.filter(owner=staff).exists()

@@ -23,7 +23,7 @@
 </div>
 <div class="panel panel-default">
     <div class="panel-body">
-        <dl>
+        <dl class="dl-horizontal">
             <dt>名称</dt>
             <dd>{{ server.name }}</dd>
             <dt>服务器地址</dt>
@@ -51,36 +51,29 @@
         <div class="row">
             <div class="col-xs-6"><h3 class="panel-title">受管用户（nrm_managed 组）</h3></div>
             <div class="col-xs-6 text-right">
-                {% if last_sync_at %}<span class="text-muted" style="font-size:13px;margin-right:10px;">上次同步：{{ last_sync_at|date:"Y-m-d H:i:s" }}</span>{% endif %}
-                <a href="{% url 'servers:sync_users' server.pk %}" class="btn btn-default btn-xs">同步</a>
+                <a href="{% url 'servers:sync_users' server.pk %}" class="btn btn-default btn-xs">刷新</a>
             </div>
         </div>
     </div>
     <div class="panel-body">
-        {% if server.managed_users.all %}
+        {% if managed_users %}
         <table class="table table-striped">
             <thead>
-                <tr><th>用户名</th><th>绑定账号</th><th>机器分组</th><th>磁盘</th><th>内存</th><th>CPU</th><th>采集时间</th><th>操作</th></tr>
+                <tr><th>用户名</th><th>操作</th></tr>
             </thead>
             <tbody>
-                {% for mu in server.managed_users.all %}
+                {% for name in managed_users %}
                 <tr>
-                    <td>{{ mu.username }}</td>
-                    <td>{% if mu.user %}<a href="{% url 'accounts:profile' %}">{{ mu.user.username }}</a>{% else %}<span class="text-muted">未绑定</span>{% endif %}</td>
-                    <td>{{ mu.groups|default:"—" }}</td>
-                    <td>{{ mu.disk_used|default:"—" }}</td>
-                    <td>{{ mu.mem_used|default:"—" }}</td>
-                    <td>{{ mu.cpu_used|default:"—" }}</td>
-                    <td>{% if mu.usage_synced_at %}{{ mu.usage_synced_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}</td>
+                    <td>{{ name }}</td>
                     <td>
-                        <form method="post" action="{% url 'servers:lock_user' server.pk %}" style="display:inline;">
+                        <form method="post" action="{% url 'servers:lock_user' server.pk %}" style="display:inline;" data-confirm="确定禁用用户 {{ name }} 吗？">
                             {% csrf_token %}
-                            <input type="hidden" name="username" value="{{ mu.username }}">
-                            <button type="submit" class="btn btn-warning btn-xs" onclick="return confirm('确定禁用用户 {{ mu.username }} 吗？');">禁用</button>
+                            <input type="hidden" name="username" value="{{ name }}">
+                            <button type="submit" class="btn btn-warning btn-xs">禁用</button>
                         </form>
                         <form method="post" action="{% url 'servers:unlock_user' server.pk %}" style="display:inline;">
                             {% csrf_token %}
-                            <input type="hidden" name="username" value="{{ mu.username }}">
+                            <input type="hidden" name="username" value="{{ name }}">
                             <button type="submit" class="btn btn-success btn-xs">启用</button>
                         </form>
                     </td>
@@ -89,13 +82,13 @@
             </tbody>
         </table>
         {% else %}
-        <p class="text-muted">暂无受管用户，可先同步或在下方接管。</p>
+        <p class="text-muted">暂无受管用户，可点击"刷新"扫描或在下方针接管。</p>
         {% endif %}
     </div>
 </div>
 
 <div class="panel panel-default">
-    <div class="panel-heading"><h3 class="panel-title">可接管用户（/home 下未受管）</h3></div>
+    <div class="panel-heading"><h3 class="panel-title">可接管用户（/etc/passwd 中未受管）</h3></div>
     <div class="panel-body">
         {% if available_users %}
         <table class="table table-striped">

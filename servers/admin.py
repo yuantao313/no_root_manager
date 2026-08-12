@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ManagedUser, Server
+from .models import Server
 
 
 @admin.register(Server)
@@ -38,10 +38,3 @@ class ServerAdmin(admin.ModelAdmin):
         ),
         ("时间", {"fields": ("created_at", "updated_at")}),
     )
-
-
-@admin.register(ManagedUser)
-class ManagedUserAdmin(admin.ModelAdmin):
-    list_display = ("username", "server", "groups", "synced_at")
-    search_fields = ("username", "server__name")
-    readonly_fields = ("synced_at",)

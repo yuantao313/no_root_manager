@@ -11,6 +11,8 @@ dependencies = [
     "django-allauth>=65.19.0",
     "django-axes>=8.3.1",
     "django-crispy-forms>=2.7",
+    "django-select2>=8.4.8",
+    "django-widget-tweaks>=1.5.1",
     "paramiko>=5.0.0",
     "pypinyin>=0.55.0",
 ]
