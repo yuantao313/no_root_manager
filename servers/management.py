@@ -1,6 +1,6 @@
 """目标机器用户接管与开通服务：所有受管用户加入 nrm_managed 组。
 
-常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权/资源限制）统一收敛到
+常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权）统一收敛到
 servers/scripts/nrm_mgmt.sh 脚本，经 SFTP 上传目标机后以 root 执行，
 不再在 Python 中散落字符串命令。
 """
@@ -289,7 +289,7 @@ def sync_user_usage(server):
 
 
 def provision_user(server, username, groups=None, with_home=True, force_pwd_change=True):
-    """在目标机器开通用户：建用户、加入分组、设置随机密码、写入资源限制。
+    """在目标机器开通用户：建用户、加入分组、设置随机密码。
 
     groups: 要加入的机器分组列表（含 nrm_managed）。
     with_home: 是否预建 home 目录。申请了目录迁移时应为 False，
@@ -320,61 +320,9 @@ def provision_user(server, username, groups=None, with_home=True, force_pwd_chan
     ]
     ok, out, err = _run_mgmt(server, args, stdin_data=f"{username}:{password}")
 
-    # 写入资源限制（ulimit），防止单个用户耗尽服务器资源
-    if ok and any(
-        [
-            server.nproc_limit,
-            server.nofile_limit,
-            server.as_limit,
-            server.core_limit,
-            server.fsize_limit,
-            server.maxlogins_limit,
-        ]
-    ):
-        ok, limit_err = apply_resource_limits(server, username)
-        if not ok:
-            return False, "", f"设置资源限制失败：{limit_err}"
-
     if not ok:
         return False, "", err or f"开通失败：{username}"
     return True, password, out or f"用户 {username} 已开通（分组：{group_args}）"
-
-
-# 资源限制项：字段名 -> limits.conf 的 item 名（hard 限制）
-RESOURCE_LIMIT_ITEMS = (
-    ("nproc_limit", "nproc"),
-    ("nofile_limit", "nofile"),
-    ("as_limit", "as"),
-    ("core_limit", "core"),
-    ("fsize_limit", "fsize"),
-    ("maxlogins_limit", "maxlogins"),
-)
-
-
-def apply_resource_limits(server, username):
-    """为用户在目标机器写入资源限制（/etc/security/limits.d/nrm-<user>.conf）。
-
-    使用 limits.d 独立文件而非直接改 limits.conf，便于删除用户时一并清理。
-    服务器上各限制字段为 0 时对应项不写入。
-    返回 (ok, msg)。
-    """
-    username = (username or "").strip()
-    if not username:
-        return False, "用户名为空"
-
-    items = []
-    for field, item in RESOURCE_LIMIT_ITEMS:
-        value = getattr(server, field, 0)
-        if value:
-            items.append(f"{item}={value}")
-    if not items:
-        return True, "未配置资源限制"
-
-    # 收敛到脚本 set_limits 子命令：脚本内写 /etc/security/limits.d/nrm-<user>.conf
-    ok, out, err = _run_mgmt(server, ["set_limits", username] + items)
-    if ok:
-        return True, out or f"已写入资源限制：{', '.join(items)}"
-    return False, err or "写入失败"
 
 
 # sudo 组名：Debian/Ubuntu 为 sudo，RHEL/CentOS 为 wheel，这里按 sudo 优先探测
@@ -594,7 +542,7 @@ def write_server_motd(server):
     motd_file = "/etc/motd.d/nrm_notifications"
     # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
     # 注意：不能用 `echo x > file`（重定向由当前 shell 执行，sudo 无法提权），
-    # 必须走 `printf | sudo -n tee` 让 tee 以 root 写文件（与资源限制写入一致）
+    # 必须走 `printf | sudo -n tee` 让 tee 以 root 写文件
     if content:
         ok, _, err = _exec(
             server,

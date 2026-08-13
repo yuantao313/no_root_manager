@@ -48,7 +48,7 @@ static/            # 自研 css/js（app.css / app.js）
 
 | 脚本 | 职责 | 执行时机 |
 |------|------|----------|
-| `nrm_mgmt.sh` | 日常用户管理（建用户/接管/锁定/sudo/NPU 授权/资源限制） | 各操作按子命令调用 |
+| `nrm_mgmt.sh` | 日常用户管理（建用户/接管/锁定/sudo/NPU 授权） | 各操作按子命令调用 |
 | `init_base.sh` | 基础初始化（受管组/motd 目录/工具链） | 服务器接入时 |
 | `init_ascend_npu.sh` | NPU 初始化（检测 davinci 卡、建 npu/npuN 卡组） | 仅 NPU 服务器接入时 |
 | `device_info.sh` | 设备信息采集（NPU 型号/内存、CPU、内存、硬盘），root 一次执行、结构化输出 | 设备信息查询（LRU 缓存） |
@@ -81,7 +81,7 @@ static/            # 自研 css/js（app.css / app.js）
 1. 登录用户提交申请：四种类型（**申请服务器账号 / 转移已有账号为受管用户 / 申请用户组 / 申请平台管理员**），填**申请理由**；身份/工号从账号自动带入
 2. 仅 **NPU 服务器**显示 NPU 卡组选择（npu + npuN，按钮展示 设备号+型号+内存G），同时展示 CPU/内存/硬盘；普通服务器无分组选项
 3. 管理员审批通过 → `_bg_provision` 后台在机器开通：
-   - `provision_user`：建用户 + 随机密码 + `chage -d 0` 强制首改密 + 资源限制（limits.d）
+   - `provision_user`：建用户 + 随机密码 + `chage -d 0` 强制首改密
    - NPU 授权：`usermod -aG npu,npuN`（勾选的卡组）；归属绑定 `MachineUserBinding`
    - 公告：写入目标机 motd（`/etc/motd.d/nrm_notifications`）+ 系统首页展示
    - 平台管理员类型：直接授予 sudo（不建账号，无审计表）

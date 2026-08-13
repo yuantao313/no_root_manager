@@ -2,7 +2,7 @@
 # NRM 目标机用户管理脚本（由 NRM 平台经 SFTP 上传到目标机后以 root 执行）。
 #
 # 设计原则：
-# - 所有常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权/资源限制）收敛到本脚本，
+# - 所有常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权）收敛到本脚本，
 #   不散落在 Python 代码的字符串命令里
 # - 子命令模式：nrm_mgmt.sh <子命令> [参数...]
 # - 每个子命令成功输出 "OK <子命令> ..."，失败以非零退出码 + stderr 提示
@@ -173,20 +173,6 @@ case "${1:-}" in
         echo "OK del_group $username group=$group"
         ;;
 
-    set_limits)
-        # set_limits <username> <item1=val1> <item2=val2> ...：写入 limits.d 独立文件
-        username="$2"; shift 2
-        [ -n "$username" ] || { log "用户名为空"; exit 2; }
-        conf="/etc/security/limits.d/nrm-$username.conf"
-        : > "$conf"
-        for kv in "$@"; do
-            item="${kv%%=*}"
-            val="${kv#*=}"
-            echo "$username hard $item $val" >> "$conf"
-        done
-        echo "OK set_limits $username -> $conf"
-        ;;
-
     ensure_group)
         # ensure_group <group>
         ensure_group "$2"
@@ -194,7 +180,7 @@ case "${1:-}" in
         ;;
 
     *)
-        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|revoke_sudo|grant_npu|set_limits|ensure_group|list_groups|add_group|del_group> [参数...]"
+        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|revoke_sudo|grant_npu|ensure_group|list_groups|add_group|del_group> [参数...]"
         exit 1
         ;;
 esac

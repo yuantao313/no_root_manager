@@ -138,37 +138,6 @@ class Server(models.Model):
         help_text="最近一次成功采集的设备信息（CPU/内存/硬盘/NPU），查询失败时回退展示",
     )
     device_info_updated_at = models.DateTimeField("设备信息更新时间", null=True, blank=True)
-    # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制；写入 limits.d）
-    nproc_limit = models.PositiveIntegerField(
-        "进程数限制 nproc",
-        default=128,
-        help_text="每个用户最大进程数，0 表示不限制",
-    )
-    nofile_limit = models.PositiveIntegerField(
-        "文件数限制 nofile",
-        default=2048,
-        help_text="每个用户最大打开文件数，0 表示不限制",
-    )
-    as_limit = models.PositiveIntegerField(
-        "虚拟内存限制 as(KB)",
-        default=0,
-        help_text="每个用户最大虚拟内存（KB），0 表示不限制",
-    )
-    core_limit = models.PositiveIntegerField(
-        "核心转储限制 core(KB)",
-        default=0,
-        help_text="核心转储文件大小（KB），建议 0 防占磁盘，0 表示不限制",
-    )
-    fsize_limit = models.PositiveIntegerField(
-        "文件大小限制 fsize(KB)",
-        default=0,
-        help_text="每个用户最大单文件大小（KB），0 表示不限制",
-    )
-    maxlogins_limit = models.PositiveIntegerField(
-        "最大登录数 maxlogins",
-        default=0,
-        help_text="每个用户最大同时登录会话数，0 表示不限制",
-    )
 
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)

@@ -9,7 +9,6 @@ from credentials.models import Credential
 from servers.management import (
     _random_password,
     _sudo_wrap,
-    apply_resource_limits,
     provision_user,
     take_over_user,
 )
@@ -96,13 +95,12 @@ class TestProvisionUser:
         """开通收敛到脚本 provision：分组含 nrm_managed，密码经 stdin 传递。"""
         with patch(
             "servers.management._run_mgmt",
-            side_effect=[(True, "OK provision carol", ""), (True, "OK set_limits carol", "")],
+            return_value=(True, "OK provision carol", ""),
         ) as mock:
             ok, pwd, msg = provision_user(ubuntu_server, "carol", groups=["dev"])
         assert ok is True
         assert len(pwd) == 16
-        # 第一次调用是 provision（后续 set_limits 是资源限制）
-        args = mock.call_args_list[0].args[1]
+        args = mock.call_args.args[1]
         # provision <user> <groups_csv> <with_home> <force_pwd>
         assert args[0] == "provision"
         assert args[1] == "carol"
@@ -110,107 +108,26 @@ class TestProvisionUser:
         assert args[3] == "1"  # with_home
         assert args[4] == "1"  # force_pwd_change
         # 密码经 stdin 传递（不进命令行参数）
-        stdin_data = mock.call_args_list[0].kwargs.get("stdin_data")
+        stdin_data = mock.call_args.kwargs.get("stdin_data")
         assert stdin_data and stdin_data.startswith("carol:")
 
     def test_without_home_flag(self, ubuntu_server):
         with patch(
             "servers.management._run_mgmt",
-            side_effect=[(True, "OK provision dave", ""), (True, "OK set_limits dave", "")],
+            return_value=(True, "OK provision dave", ""),
         ) as mock:
             provision_user(ubuntu_server, "dave", with_home=False)
-        args = mock.call_args_list[0].args[1]
+        args = mock.call_args.args[1]
         assert args[3] == "0"  # with_home=0
 
     def test_force_pwd_change_off(self, ubuntu_server):
         with patch(
             "servers.management._run_mgmt",
-            side_effect=[(True, "OK provision erin", ""), (True, "OK set_limits erin", "")],
+            return_value=(True, "OK provision erin", ""),
         ) as mock:
             provision_user(ubuntu_server, "erin", force_pwd_change=False)
-        args = mock.call_args_list[0].args[1]
+        args = mock.call_args.args[1]
         assert args[4] == "0"  # force_pwd_change=0
-
-
-class TestApplyResourceLimits:
-    def test_empty_username(self, ubuntu_server):
-        ok, msg = apply_resource_limits(ubuntu_server, "")
-        assert ok is False and "用户名为空" in msg
-
-    def test_no_limits_configured(self, ubuntu_server):
-        ubuntu_server.nproc_limit = 0
-        ubuntu_server.nofile_limit = 0
-        ubuntu_server.save()
-        with patch("servers.management._run_mgmt") as mock:
-            ok, msg = apply_resource_limits(ubuntu_server, "alice")
-        assert ok is True
-        assert "未配置" in msg
-        mock.assert_not_called()
-
-    def test_writes_limits_via_script(self, ubuntu_server):
-        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
-            ok, msg = apply_resource_limits(ubuntu_server, "alice")
-        assert ok is True
-        args = mock.call_args.args[1]
-        # set_limits <user> <item=value>...
-        assert args[0] == "set_limits"
-        assert args[1] == "alice"
-        assert "nproc=128" in args
-        assert "nofile=2048" in args
-
-    def test_zero_limit_skips_line(self, ubuntu_server):
-        ubuntu_server.nproc_limit = 0
-        ubuntu_server.save()
-        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
-            apply_resource_limits(ubuntu_server, "alice")
-        args = mock.call_args.args[1]
-        assert not any(a.startswith("nproc=") for a in args)
-        assert any(a.startswith("nofile=") for a in args)
-
-    def test_provision_writes_limits(self, ubuntu_server):
-        """开通后自动调用 set_limits 写入资源限制。"""
-        with patch(
-            "servers.management._run_mgmt",
-            side_effect=[(True, "OK provision gina", ""), (True, "OK set_limits gina", "")],
-        ) as mock:
-            ok, pwd, msg = provision_user(ubuntu_server, "gina")
-        assert ok is True
-        assert mock.call_count == 2
-        assert mock.call_args_list[1].args[1][0] == "set_limits"
-
-    def test_writes_all_limit_items(self, ubuntu_server):
-        ubuntu_server.nproc_limit = 128
-        ubuntu_server.nofile_limit = 2048
-        ubuntu_server.as_limit = 1048576
-        ubuntu_server.core_limit = 0
-        ubuntu_server.fsize_limit = 0
-        ubuntu_server.maxlogins_limit = 3
-        ubuntu_server.save()
-        with patch("servers.management._run_mgmt", return_value=(True, "OK set_limits alice", "")) as mock:
-            ok, msg = apply_resource_limits(ubuntu_server, "alice")
-        assert ok is True
-        args = mock.call_args.args[1]
-        assert "nproc=128" in args
-        assert "nofile=2048" in args
-        assert "as=1048576" in args
-        assert "maxlogins=3" in args
-        # 0 值项不写入
-        assert not any(a.startswith("core=") for a in args)
-        assert not any(a.startswith("fsize=") for a in args)
-
-    def test_zero_only_server_no_limits(self, ubuntu_server):
-        ubuntu_server.nproc_limit = 0
-        ubuntu_server.nofile_limit = 0
-        ubuntu_server.as_limit = 0
-        ubuntu_server.core_limit = 0
-        ubuntu_server.fsize_limit = 0
-        ubuntu_server.maxlogins_limit = 0
-        ubuntu_server.save()
-        with patch("servers.management._run_mgmt") as mock:
-            ok, msg = apply_resource_limits(ubuntu_server, "alice")
-        assert ok is True
-        assert "未配置" in msg
-        mock.assert_not_called()
 
 
 class TestManagedUsersBinding:

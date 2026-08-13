@@ -30,13 +30,8 @@ getent group nrm_managed        # 查看成员
 
 ```bash
 sudo userdel -r <username>                      # 删除用户及 home
-sudo rm -f /etc/security/limits.d/nrm-<username>.conf  # 清理资源限制文件
 sudo gpasswd -d <username> nrm_managed          # 若仍在组中则移出
 ```
-
-### 资源限制生效说明
-
-limits.d 文件在用户下次登录（PAM `pam_limits`）时生效，无需重启。
 
 ## 邮件配置验证
 
