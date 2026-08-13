@@ -81,7 +81,9 @@ PYEOF
 
 out=""
 for attempt in 1 2; do
-    out=$(query_npu 2>/dev/null)
+    # set -euo pipefail 下命令替换必须 || true：query_npu 超时返回 124 时不退出脚本，
+    # 而是走下方 NPU_ERROR 降级输出，避免整个采集因 set_device 卡死而失败
+    out=$(query_npu 2>/dev/null) || true
     if [ -n "$out" ]; then
         break
     fi
