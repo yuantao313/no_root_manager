@@ -15,14 +15,21 @@ set -euo pipefail
 log() { echo "[npu_info] $*" >&2; }
 
 # ---------- 探测可用的 python（含 acl）----------
-# CANN 环境脚本固定位置（用户确认：只有这一个可能），存在则加载；
-# 缺失不遍历猜测其他路径，找不到含 acl 的 python 直接报错。
-CANN_ENV="/usr/local/Ascend/cann/set_env.sh"
-if [ -f "$CANN_ENV" ]; then
-    # shellcheck disable=SC1090
-    # shellcheck disable=SC1091
-    source "$CANN_ENV" >/dev/null 2>&1 || true
-fi
+# CANN 环境脚本路径不固定（实测存在 cann / cann-9.1.0 / ascend-toolkit / toolbox 等），
+# 按常见安装位置逐个尝试，找到第一个可用即加载；都缺失则报错。
+CANN_ENV=""
+for env in /usr/local/Ascend/cann/set_env.sh \
+           /usr/local/Ascend/cann-*/set_env.sh \
+           /usr/local/Ascend/ascend-toolkit/set_env.sh \
+           /usr/local/Ascend/toolbox/set_env.sh; do
+    if [ -f "$env" ]; then
+        CANN_ENV="$env"
+        # shellcheck disable=SC1090
+        # shellcheck disable=SC1091
+        source "$env" >/dev/null 2>&1 || true
+        break
+    fi
+done
 
 py=""
 if command -v python3 >/dev/null 2>&1 && python3 -c "import acl" >/dev/null 2>&1; then
