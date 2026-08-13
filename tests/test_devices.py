@@ -183,3 +183,38 @@ def test_device_info_gpu_reserved(npu_server):
     with patch("servers.devices.run_script", side_effect=_fake_run_script):
         info = get_device_info(npu_server)
     assert "npu" in info and "gpu" in info
+
+
+def test_get_device_info_cached_no_ssh(npu_server):
+    """申请页只读模式：绝不触发 SSH（run_script 不被调用），优先返回数据库快照。"""
+    from servers.devices import clear_device_info_cache, get_device_info_cached
+
+    clear_device_info_cache()
+    # 先实时采集一次，快照落库
+    with patch("servers.devices.run_script", side_effect=_fake_run_script):
+        from servers.devices import get_device_info
+
+        get_device_info(npu_server)
+    npu_server.refresh_from_db()
+    assert npu_server.device_info_snapshot.get("cpu")
+    # 清内存缓存后走只读模式：应返回快照数据，且不再调用 run_script（不 SSH）
+    clear_device_info_cache()
+    with patch("servers.devices.run_script", side_effect=AssertionError("只读模式不应触发 SSH")) as m2:
+        info = get_device_info_cached(npu_server)
+    assert m2.call_count == 0
+    assert info["cpu"] == "HiSilicon Kunpeng 920 @2.6GHz 192核"
+    assert info["npu"][0]["soc_name"] == "Ascend 950 Pro"
+
+
+def test_get_device_info_cached_empty_no_ssh(npu_server):
+    """无缓存无快照：只读模式返回空设备信息，不报错、不 SSH。"""
+    from servers.devices import clear_device_info_cache, get_device_info_cached
+
+    clear_device_info_cache()
+    npu_server.device_info_snapshot = {}
+    npu_server.save(update_fields=["device_info_snapshot"])
+    with patch("servers.devices.run_script", side_effect=AssertionError("只读模式不应触发 SSH")):
+        info = get_device_info_cached(npu_server)
+    assert info["npu"] == []
+    assert info["cpu"] == ""
+    assert info["msg"] == ""

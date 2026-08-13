@@ -202,6 +202,7 @@ def get_device_info(server) -> dict:
     - 成功结果缓存 10 分钟（避免每次访问都 SSH），并落库 Server.device_info_snapshot
     - 失败结果（msg 非空）负缓存 60 秒：目标机不可达时页面不至于每次请求都卡 SSH 超时；
       且回退展示数据库快照（最近一次成功采集），页面不空白
+    - 本函数可能触发实时 SSH 采集（详情页/刷新按钮使用）
     GPU 预留：未来支持时在此启用 gpu_info.sh 分支。
     """
     from .models import Server
@@ -224,6 +225,38 @@ def get_device_info(server) -> dict:
     # 采集成功：落库快照供下次失败回退
     _save_snapshot(fresh, info)
     return info
+
+
+def get_device_info_cached(server) -> dict:
+    """只读设备信息（不触发 SSH）：内存缓存 → 数据库快照 → 空。
+
+    供申请页等"不允许实时 SSH"的场景使用：选服务器/渲染页面绝不连接目标机，
+    SSH 错误永不透出到申请页；设备信息在详情页手动刷新时才会实时采集并落库。
+    返回结构与 get_device_info 一致，msg 仅用于提示快照来源，不含底层错误。
+    """
+    from .models import Server
+
+    now = time.monotonic()
+    cached = _DEVICE_CACHE.get(server.pk)
+    if cached is not None:
+        ts, info = cached
+        ttl = _SUCCESS_TTL if not info.get("msg") else _FAIL_TTL
+        if now - ts < ttl:
+            return info
+    fresh = Server.objects.get(pk=server.pk)
+    snapshot = fresh.device_info_snapshot or {}
+    has_data = any([snapshot.get("cpu"), snapshot.get("memory"), snapshot.get("disk"), snapshot.get("npu")])
+    if has_data:
+        return {
+            "npu": snapshot.get("npu", []),
+            "gpu": snapshot.get("gpu", []),
+            "cpu": snapshot.get("cpu", ""),
+            "memory": snapshot.get("memory", ""),
+            "disk": snapshot.get("disk", ""),
+            "msg": "（显示最近一次成功采集的信息）",
+        }
+    # 无缓存也无快照：返回空设备信息，不报错（前端显示占位即可）
+    return {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": ""}
 
 
 def clear_device_info_cache(server=None):

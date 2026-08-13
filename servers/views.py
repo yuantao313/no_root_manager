@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from config.decorators import superuser_required
 
-from .devices import clear_device_info_cache, get_device_info
+from .devices import clear_device_info_cache, get_device_info, get_device_info_cached
 from .forms import ServerForm
 from .management import (
     clear_managed_users_cache,
@@ -45,7 +45,9 @@ def server_groups_api(request, pk):
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             users = []
     try:
-        device = get_device_info(server)
+        # 申请页只读模式：绝不实时 SSH（SSH 错误永不透出到申请页），
+        # 返回内存缓存/数据库快照；设备信息在详情页手动刷新时才实时采集
+        device = get_device_info_cached(server)
     except Exception:  # noqa: BLE001 —— 设备查询失败不影响分组接口
         device = {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": ""}
     return JsonResponse(
