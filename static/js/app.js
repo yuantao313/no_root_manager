@@ -224,6 +224,8 @@
 
         // 渲染卡组按钮：一行 4 个，选中变色（btn-primary），不渲染公共组 npu。
         // NPU 卡按钮文案：<设备号> <型号> (<内存G>G)，型号/内存来自 device.npu（device_api）。
+        // 健康状态（npu-smi info 的 Health 列）：OK 不特殊显示；Warning 黄色字；
+        // Alarm 红色字；Critical 按钮整体变红（仍可选，仅提示卡可能异常）。
         function renderGroups(groups, isNpu, device) {
             var wrap = document.getElementById("npu-field");
             if (!isNpu) { if (wrap) wrap.style.display = "none"; return; }
@@ -231,7 +233,7 @@
             // 公共组 npu 由后端授权时自动附带，前端不显示
             var cards = groups.filter(function (g) { return g !== "npu"; });
             npuCardCount = cards.length;
-            // 设备信息：NPU 卡按设备号匹配（npuN → 型号/内存）
+            // 设备信息：NPU 卡按设备号匹配（npuN → 型号/内存/健康状态）
             var npuInfo = {};
             (device && device.npu || []).forEach(function (c) {
                 npuInfo["npu" + c.index] = c;
@@ -244,17 +246,27 @@
             cards.forEach(function (g, i) {
                 var active = selected.indexOf(g) !== -1;
                 var info = npuInfo[g];
-                // 按钮文案：<设备号> <型号> <内存G>G（如 0 Ascend910B3 60G）
+                // 按钮文案：<设备号> <型号> <内存G>G（如 0 Ascend950PR 128G）
                 var label = info ? info.index + " " + info.soc_name + " " + info.mem_g + "G" : g;
+                var health = (info && info.health) || "";
+                var healthCls = "";   // 文字颜色（Warning/Alarm 时）
+                var critical = false; // Critical：按钮整体变红
+                var title = "卡组 " + g;
+                if (health === "Warning") { healthCls = "text-warning"; title += "（健康状态：Warning）"; }
+                else if (health === "Alarm") { healthCls = "text-danger"; title += "（健康状态：Alarm）"; }
+                else if (health === "Critical") { critical = true; title += "（健康状态：Critical，卡可能异常，请谨慎选择）"; }
+                // 选中时统一 btn-primary；Critical 卡未选中时为红色按钮
+                var btnCls = active ? " btn-primary" : (critical ? " btn-danger npu-card-critical" : " btn-default");
                 html += '<div class="col-xs-3" style="padding:2px;">' +
-                    '<button type="button" class="btn btn-block npu-card-btn' + (active ? " btn-primary" : " btn-default") +
-                    '" data-group="' + g + '" title="卡组 ' + g + '" style="font-size:13px;padding:6px 0;">' + label + "</button></div>";
+                    '<button type="button" class="btn btn-block npu-card-btn' + btnCls +
+                    '" data-group="' + g + '" title="' + title + '" style="font-size:13px;padding:6px 0;">' +
+                    (healthCls ? '<span class="' + healthCls + '">' + label + "</span>" : label) + "</button></div>";
             });
             html += "</div>";
             groupsUl.innerHTML = html;
         }
 
-        // 按钮点击：切换选中态并变色
+        // 按钮点击：切换选中态并变色（Critical 卡取消选中后恢复红色按钮）
         groupsUl.addEventListener("click", function (e) {
             var btn = e.target.closest ? e.target.closest(".npu-card-btn") : null;
             if (!btn) return;
@@ -263,10 +275,10 @@
             if (idx >= 0) {
                 selected.splice(idx, 1);
                 btn.classList.remove("btn-primary");
-                btn.classList.add("btn-default");
+                btn.classList.add(btn.classList.contains("npu-card-critical") ? "btn-danger" : "btn-default");
             } else {
                 selected.push(g);
-                btn.classList.remove("btn-default");
+                btn.classList.remove("btn-default", "btn-danger");
                 btn.classList.add("btn-primary");
             }
         });

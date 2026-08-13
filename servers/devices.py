@@ -7,13 +7,15 @@
 不再逐条 sudo，避免非 root SSH + 未配置 NOPASSWD sudo 时全部查询失败）：
 
 - ``host_info.sh``：CPU / 内存 / 硬盘（所有服务器都查）
-- ``npu_info.sh``：NPU 卡型号与内存（仅 NPU 服务器；先 source CANN 环境再查 acl）
+- ``npu_info.sh``：在目标机执行 ``npu-smi info`` 并把原始表格文本带回（仅 NPU 服务器），
+  由 ``servers/npu_smi.py`` 解析（型号/内存/健康状态）
 - ``gpu_info.sh``：GPU 卡信息（预留，暂不实现）
 
-各脚本输出 key=value 行、命名空间隔离（CPU_MODEL vs NPU_CARD vs GPU_CARD），
+各脚本输出命名空间隔离（CPU_MODEL vs GPU vs NPU_ERROR），
 本模块按脚本分别执行、分别解析、合并返回；任何单项失败不影响其他项。
 
-- NPU：型号 ``acl.get_soc_name()``，内存 ``acl.rt.get_mem_info(dev)[1]``（字节→GB）
+- NPU：``npu-smi info`` 设备表（NPU ID / Name / Health / 功耗 / 温度 / 利用率 / HBM 内存），
+  解析见 ``servers/npu_smi.py``
 - GPU：预留结构，暂不实现
 - CPU 型号优先 lscpu（鲲鹏 ARM 机 /proc/cpuinfo 无 model name）
 
@@ -30,6 +32,7 @@
 
 import time
 
+from .npu_smi import parse_npu_smi_info
 from .ssh import run_script
 
 # 设备信息缓存：server_pk -> (缓存时间戳, 结果)。
@@ -133,11 +136,12 @@ def _collect_device_info(server) -> dict:
     else:
         msg = err or "主机信息采集失败"
 
-    # NPU 卡：仅 NPU 服务器（脚本内自带 timeout 60 + 重试，这里给足执行时间）
+    # NPU 卡：仅 NPU 服务器（脚本跑 npu-smi info 原样带回，Python 侧解析设备表；
+    # 脚本内自带 timeout 60 + 重试，这里给足执行时间）
     if server.is_npu:
         ok, out, err = run_script(server, npu_script, timeout=150, connect_timeout=5)
         if ok:
-            npu, npu_err = _parse_cards(out, "NPU")
+            npu, npu_err = parse_npu_smi_info(out)
             msg = (msg + "；" if msg else "") + npu_err if npu_err else msg
         else:
             msg = (msg + "；" if msg else "") + (err or "NPU 信息采集失败")

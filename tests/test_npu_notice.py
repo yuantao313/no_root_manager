@@ -27,9 +27,19 @@ def server():
 def test_detect_npu_groups(server):
     from servers.management import detect_npu_groups
 
-    with patch("servers.management._exec", return_value=(True, "/dev/davinci0\n/dev/davinci1\n/dev/davinci2", "")):
+    # npu_info.sh 现在跑 `npu-smi info` 并把原始表格带回，detect_npu_groups 解析 NPU ID
+    out = """| NPU ID | Name        | Health |
+| 0      | Ascend950PR | OK     |
+|        |             | 0000:71:00.0 | 99 0/0 8824/131072 |
+| 1      | Ascend950PR | OK     |
+|        |             | 0000:61:00.0 | 99 0/0 8824/131072 |
+| 2      | Ascend950PR | OK     |
+|        |             | 0000:01:00.0 | 99 0/0 8824/131072 |
+"""
+    with patch("servers.management.run_script", return_value=(True, out, "")):
         ok, groups, msg = detect_npu_groups(server)
     assert ok and groups == ["npu", "npu0", "npu1", "npu2"]
+    assert "3 张 NPU 卡" in msg
 
 
 def test_grant_npu_access(server):

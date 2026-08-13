@@ -20,7 +20,8 @@ def npu_server():
     return Server.objects.create(name="npu机", host="10.0.0.1", port=22, credential=cred, is_npu=True)
 
 
-# host_info.sh 与 npu_info.sh 的典型输出（模拟真实机器：鲲鹏 CPU + 2 张 NPU 卡）
+# host_info.sh 与 npu_info.sh 的典型输出（模拟真实机器：鲲鹏 CPU + 2 张 NPU 卡）。
+# npu_info.sh 现在在目标机跑 `npu-smi info` 并把原始表格文本原样带回。
 _HOST_OUT = """CPU_VENDOR=HiSilicon
 CPU_MODEL=Kunpeng 920
 CPU_FREQ_MHZ=2600
@@ -28,8 +29,23 @@ CPU_CORES=192
 MEM_TOTAL=512G
 DISK_ROOT=916G（已用 120G）
 """
-_NPU_OUT = """NPU_CARD 0 128 Ascend 950 Pro
-NPU_CARD 1 64 Ascend 910B
+_NPU_OUT = """+-----------------------------------------------------------------+
+| npu-smi 25.7.rc1.7                               Version: 25.7.rc1.7 |
++--------+------------------+---------------+-------------------------+
+| NPU ID | Name             | Health        | Power(W)  Temp(C)  Huge  |
+|        |                  | Bus-Id        | NPU Util(%) Mem  HBM(MB) |
++========+==================+===============+=========================+
+| 0      | Ascend950PR      | OK            | 276.0     69     0 / 0   |
+|        |                  | 0000:71:00.0  | 99        0 / 0  8824 / 131072 |
++========+==================+===============+=========================+
+| 1      | Ascend950PR      | Alarm         | 279.1     74     0 / 0   |
+|        |                  | 0000:61:00.0  | 100       0 / 0  10769 / 131072 |
++========+==================+===============+=========================+
++----------------+---------------+-------------------------------------+
+| NPU ID         | Process id    | Process name        | Process memory |
++================+===============+=====================================+
+| 0              | 2066378       | pytest              | 360            |
++================+===============+=====================================+
 """
 
 
@@ -68,15 +84,10 @@ def test_parse_host_intel_hides_vendor(npu_server):
     assert cpu == "Intel(R) Xeon(R) Platinum 8480C @3.2GHz 32核"
 
 
-def test_parse_cards(npu_server):
+def test_parse_cards_gpu_reserved(npu_server):
+    """GPU 预留解析（_parse_cards 仅服务 GPU；NPU 走 parse_npu_smi_info）。"""
     from servers.devices import _parse_cards
 
-    cards, err = _parse_cards(_NPU_OUT, "NPU")
-    assert cards == [
-        {"index": 0, "soc_name": "Ascend 950 Pro", "mem_g": 128},
-        {"index": 1, "soc_name": "Ascend 910B", "mem_g": 64},
-    ]
-    assert err == ""
     cards, err = _parse_cards("GPU_ERROR=暂未实现", "GPU")
     assert cards == [] and "暂未实现" in err
 
@@ -91,8 +102,10 @@ def test_collect_device_info_npu(npu_server):
     assert any(s.endswith("host_info.sh") for s in scripts)
     assert any(s.endswith("npu_info.sh") for s in scripts)
     assert not any(s.endswith("gpu_info.sh") for s in scripts)  # GPU 预留不执行
-    assert info["npu"][0]["soc_name"] == "Ascend 950 Pro"
-    assert info["npu"][1]["mem_g"] == 64
+    assert info["npu"][0]["soc_name"] == "Ascend950PR"
+    assert info["npu"][0]["health"] == "OK"
+    assert info["npu"][1]["health"] == "Alarm"
+    assert info["npu"][1]["mem_g"] == 128
     assert info["gpu"] == []
     assert info["cpu"] == "HiSilicon Kunpeng 920 @2.6GHz 192核"
     assert info["memory"] == "512G"
@@ -203,7 +216,7 @@ def test_get_device_info_cached_no_ssh(npu_server):
         info = get_device_info_cached(npu_server)
     assert m2.call_count == 0
     assert info["cpu"] == "HiSilicon Kunpeng 920 @2.6GHz 192核"
-    assert info["npu"][0]["soc_name"] == "Ascend 950 Pro"
+    assert info["npu"][0]["soc_name"] == "Ascend950PR"
 
 
 def test_get_device_info_cached_empty_no_ssh(npu_server):

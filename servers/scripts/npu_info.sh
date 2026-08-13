@@ -1,96 +1,52 @@
 #!/usr/bin/env bash
-# NRM NPU 卡信息采集脚本：Ascend 设备型号与内存（仅 NPU 服务器，root 执行）。
+# NRM NPU 卡信息采集脚本：仅 NPU 服务器，root 执行。
 # 由 NRM 平台经 SFTP 上传后以 root 一次性执行（servers/devices.py）。
 #
-# 独立于主机信息（host_info.sh）与 GPU（gpu_info.sh），各设备类型互不干扰。
-# 分工：shell 负责扫描设备列表（ls /dev/davinci*），python 单进程循环查询
-# 所有卡的型号/内存（型号 acl.get_soc_name()，内存 acl.rt.get_mem_info(dev)[1] 字节→GB），
-# 避免每张卡起一个 python3（启动 + import acl 开销大）。
+# 职责：在目标机执行 `npu-smi info`，把原始表格文本原样输出，交给平台侧
+# Python 解析（servers/npu_smi.py：NPU ID / 型号 / Health / 功耗 / 温度 /
+# 利用率 / HBM 内存；detect_npu_groups 卡组检测也复用该输出）。
+# 不再依赖 python + acl 逐卡查询，也不再扫描 /dev/davinciN。
 #
-# 输出约定（NPU 命名空间，Python 侧解析）：
-#   NPU_CARD <设备号> <内存GB> <型号…>   （每卡一行；型号可能含空格，故放最后）
-#   NPU_ERROR=<说明>                       （可选，探测失败时）
+# 输出约定（平台侧解析）：
+#   npu-smi info 原始表格文本（stdout 直通）
+#   NPU_ERROR=<说明>   （可选，npu-smi 不可用 / 无输出时降级输出）
 set -euo pipefail
 
 log() { echo "[npu_info] $*" >&2; }
 
-# ---------- 探测可用的 python（含 acl）----------
-# CANN 环境脚本路径不固定（实测存在 cann / cann-9.1.0 / ascend-toolkit / toolbox 等），
-# 按常见安装位置逐个尝试，找到第一个可用即加载；都缺失则报错。
-CANN_ENV=""
-for env in /usr/local/Ascend/cann/set_env.sh \
-           /usr/local/Ascend/cann-*/set_env.sh \
-           /usr/local/Ascend/ascend-toolkit/set_env.sh \
-           /usr/local/Ascend/toolbox/set_env.sh; do
-    if [ -f "$env" ]; then
-        CANN_ENV="$env"
-        # shellcheck disable=SC1090
-        # shellcheck disable=SC1091
-        source "$env" >/dev/null 2>&1 || true
-        break
-    fi
-done
-
-py=""
-if command -v python3 >/dev/null 2>&1 && python3 -c "import acl" >/dev/null 2>&1; then
-    py="python3"
-elif command -v python >/dev/null 2>&1 && python -c "import acl" >/dev/null 2>&1; then
-    py="python"
+# ---------- 定位 npu-smi 可执行文件 ----------
+# 非登录 SSH shell 的 PATH 可能不含 CANN 目录，按常见安装位置逐个兜底。
+NPU_SMI=""
+if command -v npu-smi >/dev/null 2>&1; then
+    NPU_SMI="$(command -v npu-smi)"
+else
+    for cand in /usr/local/Ascend/driver/tools/npu-smi \
+                /usr/local/Ascend/toolbox/tools/npu-smi \
+                /usr/local/Ascend/ascend-toolkit/tools/npu-smi; do
+        if [ -x "$cand" ]; then
+            NPU_SMI="$cand"
+            break
+        fi
+    done
 fi
-
-if [ -z "$py" ]; then
-    echo "NPU_ERROR=未找到含 acl 库的 python（已尝试加载 $CANN_ENV）；请确认 Ascend 驱动与 CANN 已安装"
+if [ -z "$NPU_SMI" ]; then
+    echo "NPU_ERROR=未找到 npu-smi（Ascend 驱动未安装或不在 PATH）"
     exit 0
 fi
 
-# ---------- shell 扫描设备列表 ----------
-devs=$(ls -1 /dev/davinci[0-9]* 2>/dev/null || true)
-if [ -z "$devs" ]; then
-    echo "NPU_ERROR=未检测到 /dev/davinciN（Ascend 驱动未加载）"
-    exit 0
-fi
-# 提取设备号（如 davinci0 → 0），空格分隔传给 python
-idxs=""
-for dev in $devs; do
-    idx="${dev##*davinci}"
-    idxs="$idxs $idx"
-done
-
-# ---------- python 单进程循环查询所有卡（设备号经环境变量传入）----------
-# 驱动初始化/查询可能偶发慢（远程会话实测 set_device 卡住），
-# 用 timeout 60 包裹 + 失败重试一次，超时输出 NPU_ERROR 而不是整体卡死。
-query_npu() {
-    NPU_IDXS="$idxs" timeout 60 "$py" - <<'PYEOF'
-import os
-
-import acl
-
-indices = [int(i) for i in os.environ.get("NPU_IDXS", "").split() if i.isdigit()]
-for idx in indices:
-    try:
-        _ = acl.rt.set_device(idx)
-        soc = acl.get_soc_name()
-        _1, total, _2 = acl.rt.get_mem_info(0)
-        mem_gb = int(int(total) / 1024**3) if total else 0
-    except Exception:  # noqa: BLE001 —— 单卡失败不影响其他卡
-        print(f"NPU_CARD {idx} 0 未知")
-        continue
-    print(f"NPU_CARD {idx} {mem_gb} {soc or '未知'}")
-PYEOF
-}
-
+# ---------- 执行 npu-smi info（timeout 60 + 重试一次，防驱动响应慢卡死）----------
 out=""
 for attempt in 1 2; do
-    # set -euo pipefail 下命令替换必须 || true：query_npu 超时返回 124 时不退出脚本，
-    # 而是走下方 NPU_ERROR 降级输出，避免整个采集因 set_device 卡死而失败
-    out=$(query_npu 2>/dev/null) || true
+    # set -euo pipefail 下命令替换必须 || true：超时返回 124 时不退出脚本，
+    # 而是走下方 NPU_ERROR 降级输出，避免整个采集卡死
+    out=$("$NPU_SMI" info 2>/dev/null) || true
     if [ -n "$out" ]; then
         break
     fi
-    log "NPU 查询第 $attempt 次无结果，重试"
+    log "npu-smi info 第 $attempt 次无输出，重试"
 done
 if [ -z "$out" ]; then
-    echo "NPU_ERROR=NPU 查询超时（驱动响应慢），请稍后重试"
+    echo "NPU_ERROR=npu-smi info 无输出（驱动未加载或响应超时），请稍后重试"
     exit 0
 fi
 echo "$out"

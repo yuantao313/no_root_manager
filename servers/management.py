@@ -438,14 +438,23 @@ def run_init_script(server):
 
 
 def detect_npu_groups(server):
-    """检测目标机 NPU 卡组：返回 (ok, groups_list, msg)，groups 含公共组 npu + 卡组 npuN。"""
-    ok, out, err = _exec(server, "ls -1 /dev/davinci[0-9]* 2>/dev/null")
-    if not ok or not out:
-        return False, [], err or "未检测到 /dev/davinciN（Ascend 驱动未加载）"
-    ids = sorted(
-        {m.group(1) for line in out.split() if (m := re.search(r"davinci(\d+)$", line))},
-        key=int,
-    )
+    """检测目标机 NPU 卡组：返回 (ok, groups_list, msg)，groups 含公共组 npu + 卡组 npuN。
+
+    复用 npu_info.sh（目标机跑 ``npu-smi info`` 原样带回）解析 NPU ID，
+    与设备信息采集共用同一数据源，避免 ls /dev/davinciN 与 npu-smi 结果不一致。
+    """
+    from .npu_smi import parse_npu_smi_info
+    from .scripts import NPU_INFO_SCRIPT
+
+    ok, out, err = run_script(server, NPU_INFO_SCRIPT, timeout=150, connect_timeout=5)
+    if not ok:
+        return False, [], err or "NPU 检测失败（npu-smi info 执行失败）"
+    cards, npu_err = parse_npu_smi_info(out)
+    if npu_err:
+        return False, [], npu_err
+    if not cards:
+        return False, [], "未检测到 NPU 卡（npu-smi info 无设备输出）"
+    ids = sorted({c["index"] for c in cards})
     groups = ["npu"] + [f"npu{i}" for i in ids]
     return True, groups, f"检测到 {len(ids)} 张 NPU 卡：{ids}"
 
