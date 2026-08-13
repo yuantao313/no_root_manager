@@ -133,9 +133,9 @@ def _collect_device_info(server) -> dict:
     else:
         msg = err or "主机信息采集失败"
 
-    # NPU 卡：仅 NPU 服务器
+    # NPU 卡：仅 NPU 服务器（脚本内自带 timeout 60 + 重试，这里给足执行时间）
     if server.is_npu:
-        ok, out, err = run_script(server, npu_script, timeout=20, connect_timeout=5)
+        ok, out, err = run_script(server, npu_script, timeout=150, connect_timeout=5)
         if ok:
             npu, npu_err = _parse_cards(out, "NPU")
             msg = (msg + "；" if msg else "") + npu_err if npu_err else msg

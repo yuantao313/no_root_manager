@@ -57,7 +57,10 @@ for dev in $devs; do
 done
 
 # ---------- python 单进程循环查询所有卡（设备号经环境变量传入）----------
-NPU_IDXS="$idxs" "$py" - <<'PYEOF'
+# 驱动初始化/查询可能偶发慢（远程会话实测 set_device 卡住），
+# 用 timeout 60 包裹 + 失败重试一次，超时输出 NPU_ERROR 而不是整体卡死。
+query_npu() {
+    NPU_IDXS="$idxs" timeout 60 "$py" - <<'PYEOF'
 import os
 
 import acl
@@ -74,3 +77,18 @@ for idx in indices:
         continue
     print(f"NPU_CARD {idx} {mem_gb} {soc or '未知'}")
 PYEOF
+}
+
+out=""
+for attempt in 1 2; do
+    out=$(query_npu 2>/dev/null)
+    if [ -n "$out" ]; then
+        break
+    fi
+    log "NPU 查询第 $attempt 次无结果，重试"
+done
+if [ -z "$out" ]; then
+    echo "NPU_ERROR=NPU 查询超时（驱动响应慢），请稍后重试"
+    exit 0
+fi
+echo "$out"
