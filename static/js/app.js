@@ -259,7 +259,7 @@
                 var btnCls = active ? " btn-primary" : (critical ? " btn-danger npu-card-critical" : " btn-default");
                 html += '<div class="col-xs-3" style="padding:2px;">' +
                     '<button type="button" class="btn btn-block npu-card-btn' + btnCls +
-                    '" data-group="' + g + '" title="' + title + '" style="font-size:13px;padding:6px 0;">' +
+                    '" data-group="' + g + '" title="' + title + '" style="font-size:13px;padding:6px 0;font-weight:bold;">' +
                     (healthCls ? '<span class="' + healthCls + '">' + label + "</span>" : label) + "</button></div>";
             });
             html += "</div>";
@@ -290,7 +290,9 @@
             if (!serverId) {
                 var wrap = document.getElementById("npu-field");
                 if (wrap) wrap.style.display = "none";
-                renderDeviceInfo(null);
+                // 未选择服务器：隐藏设备信息条，不提示"获取信息失败"
+                var strip = document.getElementById("device-info-strip");
+                if (strip) strip.style.display = "none";
                 return;
             }
             // 加载中提示：fetch 期间先占位，拿到结果后由 renderDeviceInfo 覆盖
@@ -344,6 +346,13 @@
         var appForm = document.getElementById("application-form");
         if (appForm) {
             appForm.addEventListener("submit", function (e) {
+                // 未选择目标服务器：禁止提交（select2 隐藏原生 select 后 value 仍可读）
+                var serverId = serverSelect ? serverSelect.value : "";
+                if (!serverId) {
+                    e.preventDefault();
+                    window.alert("请先选择目标服务器。");
+                    return;
+                }
                 // NPU 按需选择校验：NPU 服务器未选或全选卡组时提示确认
                 if (npuCardCount > 0) {
                     var npuFieldEl = document.getElementById("npu-field");

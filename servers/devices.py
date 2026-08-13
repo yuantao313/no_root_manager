@@ -36,11 +36,11 @@ from .npu_smi import parse_npu_smi_info
 from .ssh import run_script
 
 # 设备信息缓存：server_pk -> (缓存时间戳, 结果)。
-# - 成功结果缓存 10 分钟（避免每次访问都 SSH）
+# - 成功结果缓存 30 分钟（避免每次访问都 SSH）
 # - 失败结果（msg 非空）负缓存 60 秒：目标机不可达时页面不至于每次请求都卡 SSH 超时，
 #   也不会像 lru_cache 那样把失败结果永久记住（CPU 空白/NPU 空不再"被缓存钉死"）
 _DEVICE_CACHE: dict[int, tuple[float, dict]] = {}
-_SUCCESS_TTL = 600.0  # 成功缓存 10 分钟
+_SUCCESS_TTL = 1800.0  # 成功缓存 30 分钟
 _FAIL_TTL = 60.0  # 失败负缓存 60 秒
 
 
@@ -203,7 +203,7 @@ def _fallback_to_snapshot(server, info: dict) -> dict:
 def get_device_info(server) -> dict:
     """统一入口：返回目标机设备信息（TTL 缓存 + 数据库快照回退）。
 
-    - 成功结果缓存 10 分钟（避免每次访问都 SSH），并落库 Server.device_info_snapshot
+    - 成功结果缓存 30 分钟（避免每次访问都 SSH），并落库 Server.device_info_snapshot
     - 失败结果（msg 非空）负缓存 60 秒：目标机不可达时页面不至于每次请求都卡 SSH 超时；
       且回退展示数据库快照（最近一次成功采集），页面不空白
     - 本函数可能触发实时 SSH 采集（详情页/刷新按钮使用）
