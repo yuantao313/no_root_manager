@@ -306,6 +306,36 @@ def application_detail(request, pk):
     return render(request, "applications/detail.html", {"application": application})
 
 
+@login_required
+def application_resend_mail(request, pk):
+    """重发开通凭据邮件（含初始密码）：申请人本人或管理员，仅已开通且有初始密码的工单。
+
+    邮件正文由 send_provision_credentials 生成（含用户名/初始密码/强制改密提示），
+    重发复用工单中加密存储的 initial_password，无需重新开通。
+    """
+    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
+    if request.user.is_superuser:
+        application = get_object_or_404(qs, pk=pk)
+    elif request.user.is_staff:
+        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
+    else:
+        # 普通用户：只能重发自己的工单（他人工单 404，防止越权）
+        application = get_object_or_404(qs, pk=pk, applicant=request.user)
+    if request.method != "POST":
+        return redirect("applications:detail", pk=pk)
+    if application.status != Application.Status.APPROVED or not application.provisioned_at:
+        messages.error(request, "仅已开通的申请可以重发邮件。")
+        return redirect("applications:detail", pk=pk)
+    if not application.initial_password:
+        messages.error(request, "该工单没有初始密码，无法重发凭据邮件。")
+        return redirect("applications:detail", pk=pk)
+    if send_provision_credentials(application, application.initial_password):
+        messages.success(request, f"开通邮件已重发至 {application.email}（含初始密码）。")
+    else:
+        messages.error(request, "邮件发送失败：SMTP 未配置或邮箱为空，请在工单中查看初始密码。")
+    return redirect("applications:detail", pk=pk)
+
+
 @staff_required
 def application_review(request, pk, action):
     """审批：action 为 approve（通过）或 reject（驳回），

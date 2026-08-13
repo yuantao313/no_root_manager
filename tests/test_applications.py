@@ -500,3 +500,81 @@ class TestNpuGroups:
             }
         )
         assert form.is_valid() is False
+
+
+class TestResendMail:
+    """重发开通凭据邮件：仅已开通且有初始密码的工单（申请人本人或管理员）。"""
+
+    @pytest.fixture
+    def opened_app(self, staff, server):
+        """已开通（approved + provisioned_at + initial_password）的工单（申请人为 staff）。"""
+        from django.utils import timezone
+
+        return Application.objects.create(
+            applicant_name="张三",
+            username="zhangsan",
+            email="zs@x.com",
+            applicant=staff,
+            target_server=server,
+            apply_type=Application.ApplyType.CREATE,
+            status=Application.Status.APPROVED,
+            provisioned_at=timezone.now(),
+            initial_password="Pass123",
+        )
+
+    def test_resend_mail_sends_credentials(self, client, staff, opened_app):
+        """管理员重发：以工单加密存储的初始密码为参数发送开通邮件。"""
+        client.force_login(staff)
+        with patch("applications.views.send_provision_credentials", return_value=True) as mock_send:
+            resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]), follow=True)
+        assert resp.status_code == 200
+        mock_send.assert_called_once()
+        app_arg, password_arg = mock_send.call_args.args
+        assert app_arg.pk == opened_app.pk
+        assert password_arg == "Pass123"  # EncryptedTextField 读取即明文
+        html = resp.content.decode()
+        assert "重发至" in html  # 成功消息
+
+    def test_resend_mail_owner_allowed(self, client, staff, normal, server, opened_app):
+        """申请人本人也可重发自己的工单。"""
+        opened_app.applicant = normal
+        opened_app.save(update_fields=["applicant"])
+        client.force_login(normal)
+        with patch("applications.views.send_provision_credentials", return_value=True) as mock_send:
+            resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]), follow=True)
+        assert resp.status_code == 200
+        mock_send.assert_called_once()
+
+    def test_resend_mail_denied_for_others(self, client, staff, normal, opened_app):
+        """非本人、非管理员重发他人工单 → 404（防止越权）。"""
+        client.force_login(normal)
+        resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]))
+        assert resp.status_code == 404
+
+    def test_resend_mail_only_approved(self, client, staff, opened_app):
+        """未开通（待审批）工单禁止重发。"""
+        opened_app.status = Application.Status.PENDING
+        opened_app.provisioned_at = None
+        opened_app.save(update_fields=["status", "provisioned_at"])
+        client.force_login(staff)
+        with patch("applications.views.send_provision_credentials") as mock_send:
+            resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]), follow=True)
+        mock_send.assert_not_called()
+        assert "仅已开通的申请可以重发邮件" in resp.content.decode()
+
+    def test_resend_mail_requires_password(self, client, staff, opened_app):
+        """已开通但无初始密码（转移/用户组类型）禁止重发。"""
+        opened_app.initial_password = ""
+        opened_app.save(update_fields=["initial_password"])
+        client.force_login(staff)
+        with patch("applications.views.send_provision_credentials") as mock_send:
+            resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]), follow=True)
+        mock_send.assert_not_called()
+        assert "无法重发凭据邮件" in resp.content.decode()
+
+    def test_resend_mail_failure_reports(self, client, staff, opened_app):
+        """发送失败（SMTP 未配置/邮箱为空）时给出错误提示。"""
+        client.force_login(staff)
+        with patch("applications.views.send_provision_credentials", return_value=False):
+            resp = client.post(reverse("applications:resend_mail", args=[opened_app.pk]), follow=True)
+        assert "邮件发送失败" in resp.content.decode()

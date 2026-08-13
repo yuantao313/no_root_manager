@@ -60,6 +60,13 @@
                     服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。
                 </span>
             </p>
+            {% if application.status == 'approved' and application.provisioned_at %}
+            <form method="post" action="{% url 'applications:resend_mail' application.pk %}" style="margin-top:8px;" data-confirm="确定向 {{ application.email|default:'申请人邮箱' }} 重发开通邮件（含初始密码）吗？">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-warning btn-sm">重发邮件</button>
+                <span class="text-muted" style="font-size:12px;">未收到邮件时，可重新发送开通凭据邮件。</span>
+            </form>
+            {% endif %}
         </div>
         {% endif %}
 
