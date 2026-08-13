@@ -1,10 +1,12 @@
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from config.decorators import superuser_required
 
+from .devices import clear_device_info_cache, get_device_info
 from .forms import ServerForm
 from .management import (
     clear_managed_users_cache,
@@ -24,10 +26,13 @@ from .ssh import test_server_connection
 
 
 def server_groups_api(request, pk):
-    """返回服务器的分组配置与机器用户列表，供申请表单前端联动。
+    """返回服务器的分组配置、设备信息与机器用户列表，供申请表单前端联动。
 
     - extra_groups：NPU 卡组（npu + npuN），仅 NPU 服务器（读内存缓存，不 SSH 卡顿）
+    - device：设备信息（CPU/内存/硬盘/NPU 卡型号），走 get_device_info 的 TTL 缓存
+      + 数据库快照回退，目标机不可达时仍展示最近一次成功采集的数据
     - users：目标机器可接管的用户列表（/etc/passwd uid≥1000），供转移类型下拉
+    单接口一次返回，前端一次 fetch 即可渲染卡组按钮与设备信息，避免多次请求。
     """
     server = get_object_or_404(Server, pk=pk)
     extra = get_npu_state_cached(server)["groups"] if server.is_npu else []
@@ -39,6 +44,10 @@ def server_groups_api(request, pk):
                 users = []
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             users = []
+    try:
+        device = get_device_info(server)
+    except Exception:  # noqa: BLE001 —— 设备查询失败不影响分组接口
+        device = {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": ""}
     return JsonResponse(
         {
             "id": server.pk,
@@ -46,6 +55,7 @@ def server_groups_api(request, pk):
             "extra_groups": extra,
             "is_npu": server.is_npu,
             "users": users,
+            "device": device,
         },
         json_dumps_params={"ensure_ascii": False},
     )
@@ -120,32 +130,56 @@ def server_test(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
+@login_required
+def server_device_api(request, pk):
+    """设备信息 API（登录用户）：供详情页与申请页前端异步 fetch 填充。
+
+    走 get_device_info 的 TTL 缓存；目标机不可达时回退数据库快照（页面不空白）。
+    设备信息仅含硬件信息（CPU/内存/硬盘/NPU 型号），不暴露凭据，登录用户可读。
+    """
+    server = get_object_or_404(Server, pk=pk)
+    try:
+        device = get_device_info(server)
+    except Exception:  # noqa: BLE001 —— 设备查询失败不影响页面
+        device = {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": "设备信息获取失败"}
+    return JsonResponse(device, json_dumps_params={"ensure_ascii": False})
+
+
 @superuser_required
 def server_detail(request, pk):
     """服务器详情（仅超级管理员），含受管用户列表与可接管用户候选。
 
-    受管用户实时扫描目标机并缓存到内存（不落库）。
+    受管用户实时扫描目标机并缓存到内存（不落库）；设备信息不再同步查询
+    （避免 SSH 阻塞页面渲染），由前端经 device_api 异步 fetch + 加载中提示填充。
     """
     server = get_object_or_404(Server, pk=pk)
     available_users = []
-    managed_members, _ = [], ""
+    managed_users = []
     if server.credential:
         try:
             ok, available_users, _ = list_system_users(server)
             if not ok:
                 available_users = []
-            # 受管用户（内存缓存）
+            # 受管用户（内存缓存）→ 关联归属平台用户（MachineUserBinding）
             managed_members, _ = get_managed_users_cached(server)
+            bindings = {
+                b.username: b.user
+                for b in MachineUserBinding.objects.filter(server=server, username__in=managed_members)
+            }
+            managed_users = [
+                {"username": u, "user": bindings.get(u)} for u in managed_members
+            ]
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
-            managed_members = []
+            managed_users = []
     return render(
         request,
         "servers/detail.html",
         {
             "server": server,
             "available_users": available_users,
-            "managed_users": managed_members,
+            # 受管用户：机器用户名 + 归属系统用户（dict 列表，模板按 item.username/item.user 渲染）
+            "managed_users": managed_users,
             # 手动接管时可选绑定的平台用户（下拉）
             "sys_users": User.objects.order_by("username"),
         },
@@ -154,7 +188,7 @@ def server_detail(request, pk):
 
 @superuser_required
 def server_sync_users(request, pk):
-    """刷新目标机器状态（仅超级管理员）：清空内存缓存并重新扫描受管用户。"""
+    """刷新目标机器状态（仅超级管理员）：清空受管用户与设备信息缓存并重新扫描。"""
     server = get_object_or_404(Server, pk=pk)
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法同步。")
@@ -163,8 +197,9 @@ def server_sync_users(request, pk):
     if not ok:
         messages.error(request, msg)
         return redirect("servers:detail", pk=pk)
-    # 强制刷新内存缓存
+    # 强制刷新内存缓存（受管用户 + 设备信息）
     clear_managed_users_cache(server)
+    clear_device_info_cache()
     members, scan_msg = get_managed_users_cached(server, force_refresh=True)
     messages.success(request, f"已刷新：扫描到 {len(members)} 个受管用户（{scan_msg}）")
     return redirect("servers:detail", pk=pk)

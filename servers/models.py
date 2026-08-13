@@ -59,9 +59,18 @@ class MachineUserBinding(models.Model):
         related_name="machine_user_bindings",
         verbose_name="归属平台用户",
     )
-    source = models.CharField("来源", max_length=20, default="transfer",
-                              choices=[("transfer", "转移接管"), ("manual", "手动接管"),
-                                       ("create", "创建开通"), ("admin", "平台管理员"), ("group", "用户组")])
+    source = models.CharField(
+        "来源",
+        max_length=20,
+        default="transfer",
+        choices=[
+            ("transfer", "转移接管"),
+            ("manual", "手动接管"),
+            ("create", "创建开通"),
+            ("admin", "平台管理员"),
+            ("group", "用户组"),
+        ],
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:
@@ -120,14 +129,15 @@ class Server(models.Model):
         default="",
         help_text="检测 /dev/davinciN 后生成，如 npu,npu0,npu1（逗号分隔）",
     )
-    # 初始化脚本：目标机远程 get 并运行（如 NPU 环境配置脚本 URL）
-    init_script = models.CharField(
-        "初始化脚本 URL",
-        max_length=500,
+    # 设备信息快照（最近一次成功查询结果落库）：目标机不可达时回退展示，避免页面空白。
+    # 结构同 servers/devices.py 的 get_device_info 返回：{cpu, memory, disk, npu, gpu}
+    device_info_snapshot = models.JSONField(
+        "设备信息快照",
         blank=True,
-        default="",
-        help_text="服务器接入时在目标机远程下载并执行的脚本地址（如 NPU 配置脚本）",
+        default=dict,
+        help_text="最近一次成功采集的设备信息（CPU/内存/硬盘/NPU），查询失败时回退展示",
     )
+    device_info_updated_at = models.DateTimeField("设备信息更新时间", null=True, blank=True)
     # 资源限制（防止单个用户耗尽服务器资源，0 表示不限制；写入 limits.d）
     nproc_limit = models.PositiveIntegerField(
         "进程数限制 nproc",

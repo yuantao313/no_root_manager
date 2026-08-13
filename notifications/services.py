@@ -173,11 +173,7 @@ def _format_mail_details(application) -> str:
 def notify_new_application(application) -> bool:
     """新申请提交时通知管理员（邮件正文包含完整申请详情）。"""
     subject = f"[NRM] 新申请待审批：{application.title or application.description[:30]}"
-    body = (
-        f"收到新的申请：\n\n"
-        f"{_format_mail_details(application)}\n\n"
-        f"请登录系统及时审批。"
-    )
+    body = f"收到新的申请：\n\n{_format_mail_details(application)}\n\n请登录系统及时审批。"
     return send_email(subject, body, admin_emails())
 
 
@@ -198,8 +194,8 @@ def notify_review_result(application) -> bool:
     return send_email(subject, body, [application.email])
 
 
-def send_provision_credentials(application, password, expire_date=None) -> bool:
-    """开通成功后将随机密码（及到期时间）发送给申请者。
+def send_provision_credentials(application, password) -> bool:
+    """开通成功后将随机密码发送给申请者。
 
     与工单同步通知：初始密码已写入申请工单（加密存储），
     即使邮件未开启/未送达，用户也可登录 NRM 在工单详情查看。
@@ -207,13 +203,12 @@ def send_provision_credentials(application, password, expire_date=None) -> bool:
     if not application.email or not password:
         return False
     subject = f"[NRM] 您的服务器账号已开通：{application.username}"
-    expire_text = f"\n账号到期时间：{expire_date}（到期后自动失效）" if expire_date else ""
     body = (
         f"您好，{application.applicant_name}：\n\n"
         f"您在 {application.target_server} 上的账号已开通。\n\n"
         f"用户名：{application.username}\n"
         f"初始密码：{password}\n"
-        f"服务器：{application.target_server}{expire_text}\n\n"
+        f"服务器：{application.target_server}\n\n"
         f"【重要】首次登录必须修改密码（服务器已强制设置）。\n\n"
         f"如未收到本邮件，可登录 NRM 系统，在「我的申请 → 申请详情」中查看初始密码。"
     )
@@ -313,7 +308,9 @@ def _post_webhook(
     部分平台（飞书等）业务失败时仍返回 HTTP 200，仅在响应体 code 字段
     表示错误——只认 HTTP 状态会误报成功。返回 (是否成功, 提示信息)。
     """
-    body = _build_webhook_body(platform, url, event, payload if payload is not None else {"message": "NRM Webhook 连通性测试"})
+    body = _build_webhook_body(
+        platform, url, event, payload if payload is not None else {"message": "NRM Webhook 连通性测试"}
+    )
     headers = {"Content-Type": "application/json"}
     if secret:
         headers["X-NRM-Signature"] = secret

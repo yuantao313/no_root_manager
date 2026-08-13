@@ -104,18 +104,27 @@ def _upload_script(client, local_script: str, remote_name: str) -> str:
         sftp.close()
 
 
-def run_script(server, local_script: str, args: list[str] | None = None, timeout=30, stdin_data: str | None = None):
+def run_script(
+    server,
+    local_script: str,
+    args: list[str] | None = None,
+    timeout=30,
+    stdin_data: str | None = None,
+    connect_timeout=8,
+):
     """将本地脚本上传到目标机并以 sudo 执行，返回 (ok, stdout, stderr)。
 
     - local_script：代码库内的脚本文件路径（如 servers/scripts/nrm_mgmt.sh）
     - args：传给脚本的子命令参数
     - stdin_data：可选，写入脚本 stdin（如 provision 的 user:password）
+    - connect_timeout：SSH 连接超时（秒）。页面渲染路径上的查询（如设备信息）
+      应传短超时，避免目标机不可达时拖死页面
     - 统一以 `sudo -n bash <远端脚本> <参数...>` 执行（SSH 用户为 root 时 sudo 直接放行）
     """
     args = args or []
     script_name = os.path.basename(local_script)
     try:
-        client = _connect(server)
+        client = _connect(server, timeout=connect_timeout)
     except Exception as e:  # noqa: BLE001 —— 连接失败需兜底返回原因
         return False, "", f"连接失败：{e}"
     try:

@@ -105,6 +105,8 @@ def list_nrm_members(server):
 def take_over_user(server, username):
     """将用户加入 nrm_managed 组（接管）。返回 (ok, msg)。
 
+    接管同时剥离特权/驱动专用组（HwHiAiUser/sudo/wheel/npu 卡组），
+    只保留普通组 + nrm_managed——普通用户要普通，需要特权走正式申请。
     脚本内置容错：用户不存在时明确报错，不再由 usermod 报"用户不存在"。
     """
     username = (username or "").strip()
@@ -282,11 +284,10 @@ def sync_user_usage(server):
     return True, f"资源采集完成：{collected}/{len(members)} 个用户"
 
 
-def provision_user(server, username, groups=None, expire_date=None, with_home=True, force_pwd_change=True):
+def provision_user(server, username, groups=None, with_home=True, force_pwd_change=True):
     """在目标机器开通用户：建用户、加入分组、设置随机密码、写入资源限制。
 
     groups: 要加入的机器分组列表（含 nrm_managed）。
-    expire_date: 可选，账号到期日期（YYYY-MM-DD），到期后自动失效。
     with_home: 是否预建 home 目录。申请了目录迁移时应为 False，
         让迁移流程把用户已有目录移到 /home/username。
     force_pwd_change: 是否强制首次登录修改密码（chage -d 0）。
@@ -310,7 +311,6 @@ def provision_user(server, username, groups=None, expire_date=None, with_home=Tr
         "provision",
         username,
         group_args,
-        expire_date or "-",
         "1" if with_home else "0",
         "1" if force_pwd_change else "0",
     ]
@@ -415,14 +415,26 @@ def revoke_sudo(server, username):
 
 
 def run_init_script(server):
-    """远程 get 初始化脚本并在目标机运行（curl -sL <url> | sudo bash）。返回 (ok, msg)。"""
-    url = (server.init_script or "").strip()
-    if not url:
-        return False, "未配置初始化脚本 URL"
-    ok, out, err = _exec(server, f"curl -sL '{url}' | sudo -n bash -s")
-    if ok:
-        return True, f"初始化脚本执行完成：{out[:200]}"
-    return False, f"初始化脚本执行失败：{err or out[:200]}"
+    """在目标机执行仓库内置初始化脚本（经 SFTP 上传后以 root 运行），返回 (ok, msg)。
+
+    初始化脚本独立维护于 servers/scripts/（与日常用户管理脚本 nrm_mgmt.sh 分工）：
+      - init_base.sh：基础准备（受管组 / motd 目录 / 工具链），所有服务器执行
+      - init_ascend_npu.sh：NPU 初始化（检测 davinci 卡并建卡组），仅 NPU 服务器执行
+    未来支持 GPU 时另建 init_gpu.sh，此处按服务器类型组合执行。
+    """
+    from .scripts import INIT_BASE_SCRIPT, INIT_NPU_SCRIPT  # 本函数内延迟导入避免循环
+
+    results = []
+    ok, out, err = run_script(server, INIT_BASE_SCRIPT, timeout=120)
+    if not ok:
+        return False, f"基础初始化失败：{err or out[:200]}"
+    results.append(out or "基础初始化完成")
+    if server.is_npu:
+        ok, out, err = run_script(server, INIT_NPU_SCRIPT, timeout=120)
+        if not ok:
+            return False, f"NPU 初始化失败：{err or out[:200]}"
+        results.append(out or "NPU 初始化完成")
+    return True, "；".join(results)
 
 
 def detect_npu_groups(server):
@@ -455,7 +467,7 @@ def grant_npu_access(server, username, groups):
 
 
 def usermod_add_group(server, username, group):
-    """将用户加入单个用户组（usermod -aG <group>，如 sudo/docker/HwHiAiUser）。返回 (ok, msg)。
+    """将用户加入单个用户组（usermod -aG <group>，如 sudo/docker）。返回 (ok, msg)。
 
     收敛到脚本 grant_sudo 子命令（其支持指定组名），
     用户不存在时由脚本明确报错。
@@ -471,197 +483,17 @@ def usermod_add_group(server, username, group):
 
 
 def _announcement_text():
-    """启用公告拼成的终端文本（优先用 HTML 渲染为 ANSI 彩色，无 HTML 时回退纯文本）。
+    """启用公告拼成的终端文本（markdown 子集 → ANSI 彩色）。
 
     用于写入服务器 motd：SSH 登录时终端解释 ANSI 转义码显示颜色/高亮。
     """
+    from accounts.markdown_convert import markdown_to_ansi
     from accounts.models import Announcement
 
     notices = [n for n in Announcement.objects.filter(enabled=True) if n.content.strip()]
     if not notices:
         return ""
-    parts = []
-    for n in notices:
-        parts.append(f"# {n.title}")
-        if n.html_content.strip():
-            parts.append(_html_to_ansi(n.html_content))
-        else:
-            parts.append(n.content)
-    return "\n\n".join(parts)
-
-
-# ANSI 颜色映射（HTML 颜色名/十六进制 → 终端 SGR 码）
-_ANSI_COLOR_MAP = {
-    "black": 30, "red": 31, "green": 32, "yellow": 33, "blue": 34,
-    "magenta": 35, "cyan": 36, "white": 37,
-    "darkred": 31, "darkgreen": 32, "darkyellow": 33, "darkblue": 34,
-    "gray": 37, "grey": 37, "orange": 33, "purple": 35, "pink": 35,
-}
-_ANSI_BG_MAP = {k: v + 10 for k, v in _ANSI_COLOR_MAP.items()}
-
-
-def _hex_to_ansi(hex_color: str) -> int | None:
-    """十六进制颜色 → 就近的 ANSI 16 色（256 色方案更复杂，取近似）。"""
-    try:
-        hex_color = hex_color.lstrip("#")
-        r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
-    except (ValueError, IndexError):
-        return None
-    # 亮色判断：取最接近的基本色
-    if r > 200 and g > 200 and b > 200:
-        return 37
-    if r < 80 and g < 80 and b < 80:
-        return 30
-    if r > g and r > b:
-        return 31 if r < 180 else 91  # 红 / 亮红
-    if g > r and g > b:
-        return 32 if g < 180 else 92
-    if b > r and b > g:
-        return 34 if b < 180 else 94
-    return 33  # 默认黄
-
-
-def _html_to_ansi(html: str) -> str:
-    """把公告 HTML 渲染为终端 ANSI 彩色文本（支持颜色/加粗/斜体/下划线/列表/标题）。
-
-    支持的标签与映射（其余标签剥离为纯文本）：
-      - <span style="color/bgColor: ..."> → 前景/背景色
-      - <b>/<strong>/<i>/<em>/<u>/<s> → 加粗/斜体/下划线/删除线
-      - <h1>~<h4> → 加粗彩色标题；<p>/<br>/<li> → 换行
-    不支持的样式降级为纯文本，保证 motd 始终可读。
-    """
-    import re
-
-    out = []
-    style_stack: list[tuple[bool, bool, bool, bool, int | None, int | None]] = []
-    # (bold, italic, underline, strike, fg, bg)
-
-    def _emit_reset():
-        if style_stack:
-            out.append("\x1b[0m")
-            style_stack.clear()
-
-    def _apply_style(bold=False, italic=False, underline=False, strike=False, fg=None, bg=None):
-        _emit_reset()
-        codes = []
-        if bold:
-            codes.append("1")
-        if italic:
-            codes.append("3")
-        if underline:
-            codes.append("4")
-        if strike:
-            codes.append("9")
-        if fg is not None:
-            codes.append(str(fg))
-        if bg is not None:
-            codes.append(str(bg))
-        if codes:
-            out.append("\x1b[" + ";".join(codes) + "m")
-            style_stack.append((bold, italic, underline, strike, fg, bg))
-
-    def _parse_color(val: str, bg=False):
-        val = (val or "").strip().lower()
-        if val in _ANSI_COLOR_MAP:
-            code = _ANSI_COLOR_MAP[val]
-            return code + 10 if bg else code  # 背景色 +10（SGR 40~47）
-        if val.startswith("#") and len(val) == 7:
-            code = _hex_to_ansi(val)
-            if code is not None:
-                return code + 10 if bg else code
-        return None
-
-    # 用正则做轻量解析：只识别 span 的 style，其余标签按映射处理
-    def _style_from_span(attrs):
-        style = ""
-        for k, v in attrs:
-            if k == "style":
-                style = v
-        fg = bg = None
-        m = re.search(r"color\s*:\s*([^;]+)", style)
-        if m:
-            fg = _parse_color(m.group(1))
-        m = re.search(r"background(?:-color)?\s*:\s*([^;]+)", style)
-        if m:
-            bg = _parse_color(m.group(1), bg=True)
-        return fg, bg
-
-    class _Parser:
-        def handle_starttag(self, tag, attrs):
-            t = tag.lower()
-            if t in ("b", "strong"):
-                _apply_style(bold=True)
-            elif t in ("i", "em"):
-                _apply_style(italic=True)
-            elif t == "u":
-                _apply_style(underline=True)
-            elif t in ("s", "del", "strike"):
-                _apply_style(strike=True)
-            elif t == "span":
-                fg, bg = _style_from_span(attrs)
-                if fg is not None or bg is not None:
-                    _apply_style(fg=fg, bg=bg)
-            elif t in ("h1", "h2", "h3", "h4"):
-                # 标题用不同深浅颜色区分层级：h1 最深（亮白），逐级变浅
-                _heading_fg = {"h1": 97, "h2": 93, "h3": 33, "h4": 37}[t]
-                out.append("\n")
-                _apply_style(bold=True, fg=_heading_fg)
-            elif t == "ul":
-                self._list_type = "ul"
-                out.append("\n")
-            elif t == "ol":
-                self._list_type = "ol"
-                self._li_count = 0
-                out.append("\n")
-            elif t == "li":
-                out.append("\n")
-                if getattr(self, "_list_type", None) == "ol":
-                    self._li_count = getattr(self, "_li_count", 0) + 1
-                    out.append(f"{self._li_count}. ")
-                else:
-                    out.append("• ")
-            elif t == "a":
-                self._link_href = ""
-                for k, v in attrs:
-                    if k == "href":
-                        self._link_href = v
-            elif t in ("p", "div"):
-                out.append("\n")
-            elif t == "br":
-                out.append("\n")
-
-        def handle_endtag(self, tag):
-            t = tag.lower()
-            if t in ("b", "strong", "i", "em", "u", "s", "del", "strike", "span",
-                     "h1", "h2", "h3", "h4", "p", "div"):
-                _emit_reset()
-            elif t == "ul":
-                self._list_type = None
-                out.append("\n")
-            elif t == "ol":
-                self._list_type = None
-                out.append("\n")
-            elif t == "li":
-                _emit_reset()
-            elif t == "a":
-                # 链接：文字（URL），让终端用户至少能看到地址
-                if getattr(self, "_link_href", ""):
-                    out.append(f"（{self._link_href}）")
-
-        def handle_data(self, data):
-            out.append(data)
-
-    from html.parser import HTMLParser
-
-    class _NoticeParser(_Parser, HTMLParser):
-        pass
-
-    _NoticeParser().feed(html)
-    _emit_reset()
-    text = "".join(out)
-    # 压缩多余空行（保留至多一个连续空行）
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return "\n\n".join(markdown_to_ansi(n.content) for n in notices)
 
 
 def write_server_motd(server):

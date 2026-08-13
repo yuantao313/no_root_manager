@@ -26,16 +26,19 @@ class UserProfile(models.Model):
 
 
 class Announcement(models.Model):
-    """用户公告（单例）：启用后写入目标机用户个人目录（nrm_notifications.md），
-    并在用户登录时打印（.bashrc 追加 cat）。
+    """用户公告（单例）：markdown 子集文本，保存后由后端转换器渲染。
 
+    - ``content`` 为 markdown 源码（# 标题 / **加粗** / *斜体* / {颜色} / [链接](url)）
+    - 系统首页公告栏用 ``markdown_to_html`` 渲染为 HTML
+    - 服务器 motd 用 ``markdown_to_ansi`` 渲染为终端 ANSI 彩色文本
     系统仅保留一条公告：保存时自动清理其他记录。
     """
 
-    title = models.CharField("标题", max_length=200, blank=True, default="")
-    content = models.TextField("内容", blank=True, help_text="纯文本内容，写入服务器 motd 时使用")
-    # HTML 版本：公告编辑器保存的富文本（含颜色/高亮），motd 时渲染为终端 ANSI 彩色文本
-    html_content = models.TextField("HTML 内容", blank=True, help_text="编辑器生成的 HTML，用于 motd 高亮调色渲染")
+    content = models.TextField(
+        "内容",
+        blank=True,
+        help_text="markdown 子集：支持 # 标题、**加粗**、*斜体*、{red}颜色{/red}、[链接](url)",
+    )
     enabled = models.BooleanField("启用", default=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
@@ -46,12 +49,19 @@ class Announcement(models.Model):
         verbose_name_plural = "用户公告"
 
     def __str__(self):
-        return self.title or "（无标题公告）"
+        return (self.content or "（空公告）")[:40]
 
     def save(self, *args, **kwargs):
         # 单例：系统只保留一条公告，保存后清理其他记录
         super().save(*args, **kwargs)
         Announcement.objects.exclude(pk=self.pk).delete()
+
+    @property
+    def content_html(self) -> str:
+        """markdown 子集 → HTML（首页公告栏渲染，模板 |safe 使用）。"""
+        from .markdown_convert import markdown_to_html
+
+        return markdown_to_html(self.content)
 
 
 class SystemConfig(models.Model):

@@ -1,0 +1,2 @@
+# 脚本必须 LF 行尾：CRLF 会让 Linux 目标机的 bash 报错跑不动
+*.sh text eol=lf

@@ -27,23 +27,55 @@ uv run python manage.py createsuperuser
 
 ## 配置
 
-### SECRET_KEY（必改）
+NRM 支持两种运行模式，由环境变量 `NRM_ENV` 控制：
 
-生产环境必须设置独立的 `SECRET_KEY`（环境变量 `NRM_SECRET_KEY` 覆盖默认值）：
+| 模式 | 触发条件 | 行为 |
+|------|----------|------|
+| 开发模式（默认） | `NRM_ENV` 未设置或为非 `prod` | `DEBUG=True`、任意域名可访问（`ALLOWED_HOSTS=*`）、CSRF 来源宽松、详细日志（含 SQL/请求/SSH 输出） |
+| 部署模式 | `NRM_ENV=prod` | 严格按 `.env.prod` 执行：`DEBUG`/域名/CSRF 缺失即报错，绝不裸奔 |
+
+- 开发模式读取根目录 `.env`，部署模式读取 `.env.prod`（均经 python-dotenv 加载）。
+- **优先用环境变量传递敏感配置**（systemd/容器/CI 注入）；`.env`/`.env.prod` 不会覆盖已注入的同名环境变量（`override=False`）。
+
+### 切换到部署模式
 
 ```bash
-export NRM_SECRET_KEY='一个足够长的随机字符串'
+export NRM_ENV=prod
 ```
 
-> 注意：SECRET_KEY 同时用于敏感字段加密（Fernet）。**变更 SECRET_KEY 会使历史密文无法解密**（凭据、SMTP 密码等需重新配置），上线后请保持不变。
+部署模式在 `manage.py check` / `runserver` / `gunicorn` 启动时校验必填配置，**缺失直接拒绝启动**：
 
-### 域名与回调
+- `NRM_SECRET_KEY`（必填，禁止沿用开发默认密钥）
+- `NRM_ALLOWED_HOSTS`（必填，逗号分隔的域名/IP 列表）
 
-设置 `ALLOWED_HOSTS` 为你的域名/IP：
+### 配置字段（.env / .env.prod）
 
-```python
-# config/settings.py
-ALLOWED_HOSTS = ["nrm.example.com"]
+| 字段 | 适用 | 说明 | 默认值 |
+|------|------|------|--------|
+| `NRM_ENV` | 全局 | `prod` 切部署模式，其余为开发 | `dev` |
+| `NRM_SECRET_KEY` | 部署必填 | 密钥；同时用于 Fernet 加密敏感字段 | 开发默认 |
+| `NRM_DEBUG` | 部署 | 是否开启 DEBUG（布尔） | `False` |
+| `NRM_ALLOWED_HOSTS` | 部署必填 | 允许访问的域名/IP，逗号分隔 | 无（缺失报错） |
+| `NRM_CSRF_TRUSTED_ORIGINS` | 部署 | CSRF 信任来源，逗号分隔 | 空 |
+| `NRM_GITCODE_CALLBACK_BASE_URL` | 全局 | GitCode OAuth 回调基准地址（无默认值，务必在 .env/.env.prod 中配置） | 空（由系统设置页的站点地址兜底） |
+| `NRM_SYNC_NPU` | 开发 | 设为 `1` 时开发模式也启动 NPU 状态同步（部署模式默认开启） | 关 |
+| `NRM_LOG_LEVEL` | 部署 | 日志级别（DEBUG/INFO/WARNING…） | `INFO` |
+| `NRM_LOG_FILE` | 部署可选 | 设置后追加滚动文件日志（10MB×5） | 无（仅控制台） |
+| `NRM_DB_PATH` | 全局 | 自定义 SQLite 路径 | 默认 `db.sqlite3` |
+
+> 注意：`NRM_SECRET_KEY` 同时用于敏感字段加密（Fernet）。**变更 SECRET_KEY 会使历史密文无法解密**（凭据、SMTP 密码等需重新配置），上线后请保持不变。
+
+### 部署模式示例（.env.prod）
+
+```bash
+NRM_ENV=prod
+NRM_SECRET_KEY='一个足够长的随机字符串'
+NRM_DEBUG=False
+NRM_ALLOWED_HOSTS=nrm.example.com,www.nrm.example.com,localhost
+NRM_CSRF_TRUSTED_ORIGINS=https://nrm.example.com
+NRM_GITCODE_CALLBACK_BASE_URL=https://nrm.example.com
+NRM_LOG_LEVEL=INFO
+NRM_LOG_FILE=/var/log/nrm/nrm.log
 ```
 
 ### GitCode 登录（可选）
@@ -62,12 +94,18 @@ ALLOWED_HOSTS = ["nrm.example.com"]
 ## 启动
 
 ```bash
+# 开发模式（默认）：直接启动即可，宽松 + 详细日志
+uv run python manage.py runserver 0.0.0.0:8000
+
+# 部署模式：先切环境再启动，严格按 .env.prod 执行
+export NRM_ENV=prod
 uv run python manage.py runserver 0.0.0.0:8000
 ```
 
 生产环境建议使用 gunicorn + 反向代理（Nginx）：
 
 ```bash
+export NRM_ENV=prod
 uv run gunicorn config.wsgi:application -b 127.0.0.1:8000 -w 2
 ```
 
@@ -93,7 +131,7 @@ uv run gunicorn config.wsgi:application -b 127.0.0.1:8000 -w 2
 cp db.sqlite3 db.sqlite3.bak.$(date +%Y%m%d%H%M%S)
 ```
 
-建议连同 `.env`（SECRET_KEY 等环境变量）一起备份——**只有数据库没有密钥无法解密敏感字段**。
+建议连同 `.env` / `.env.prod`（SECRET_KEY 等环境变量）一起备份——**只有数据库没有密钥无法解密敏感字段**。
 
 ### 恢复
 

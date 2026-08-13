@@ -34,7 +34,10 @@ class TestSendEmailWebhook:
 
     def _cfg(self, **kw):
         defaults = dict(
-            host="smtp.example.com", port=465, username="u", enabled=True,
+            host="smtp.example.com",
+            port=465,
+            username="u",
+            enabled=True,
             send_via=EmailConfig.SEND_VIA_WEBHOOK,
             mail_webhook_url="http://127.0.0.1:9/webhook/mail",
             mail_webhook_token="secret-token",
@@ -152,16 +155,17 @@ class TestNotify:
     def test_new_application_emails_admins_via_webhook(self, application):
         """工单申请通知：webhook 发送模式下收件人=管理员邮箱列表。"""
         EmailConfig.objects.create(
-            host="smtp.example.com", port=465, username="u", enabled=True,
+            host="smtp.example.com",
+            port=465,
+            username="u",
+            enabled=True,
             send_via=EmailConfig.SEND_VIA_WEBHOOK,
             mail_webhook_url="http://127.0.0.1:9/webhook/mail",
             mail_webhook_token="tok",
         )
         from django.contrib.auth import get_user_model
 
-        get_user_model().objects.create_user(
-            username="admin1", password="x12345!", is_staff=True, email="admin1@x.com"
-        )
+        get_user_model().objects.create_user(username="admin1", password="x12345!", is_staff=True, email="admin1@x.com")
         with patch("urllib.request.urlopen") as mock:
             mock.return_value.__enter__.return_value.status = 200
             ok = notify_new_application(application)

@@ -3,10 +3,10 @@
 {% block title %}我的申请 - NRM{% endblock %}
 {% block content %}
 {% if announcements %}
-<div class="alert alert-info" style="margin-bottom:16px;">
+<div class="alert alert-info announcement-box" style="margin-bottom:16px;">
     <strong>系统公告</strong>
     {% for ann in announcements %}
-    <div style="margin-top:6px;">{% if ann.title %}<strong>{{ ann.title }}</strong><br>{% endif %}{{ ann.content|linebreaksbr }}</div>
+    <div style="margin-top:6px;">{{ ann.content_html|safe }}</div>
     {% endfor %}
 </div>
 {% endif %}
@@ -33,19 +33,11 @@
                 <span class="helptext">{{ form.target_server.help_text }}</span>
                 {{ form.target_server.errors }}
             </p>
+            <!-- 设备信息（CPU/内存/硬盘）：选中服务器后由 app.js 经 groups_api 的 device 字段填充，所有类型都显示 -->
+            <div id="device-info-strip" data-field-for="all" style="margin-bottom:10px;display:none;"></div>
             <p data-field-for="all">
                 {{ form.description.label_tag }} {{ form.description|add_class:"form-control" }}
                 {{ form.description.errors }}
-            </p>
-            <p data-field-for="all">
-                {{ form.valid_until.label_tag }} {{ form.valid_until|add_class:"form-control" }}
-                <span class="helptext">{{ form.valid_until.help_text }}</span>
-                {{ form.valid_until.errors }}
-            </p>
-            <p data-field-for="all">
-                {{ form.needs_sudo }} {{ form.needs_sudo.label_tag }}
-                <span class="helptext">{{ form.needs_sudo.help_text }}</span>
-                {{ form.needs_sudo.errors }}
             </p>
             <!-- NPU 卡组：仅"申请服务器账号"类型显示；按钮由 app.js 渲染。
                  注意用 div 而非 p：p 内嵌 div 会被浏览器自动闭合 p，导致

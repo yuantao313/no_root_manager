@@ -10,37 +10,50 @@
 - 前端：Bootstrap 3.4（CDN）+ crispy-forms；自研 CSS/JS 在 `static/css/app.css`、`static/js/app.js`
 - SSH 执行：paramiko；密码/密钥加密：cryptography（Fernet）
 - 第三方登录：django-allauth（GitCode OAuth）；登录防爆破：django-axes
+- 运行模式：`NRM_ENV=dev|prod` 切换，配置从 `.env` / `.env.prod` 加载（python-dotenv）
 
 ## 模块结构
 
 ```
 config/            # Django 项目配置
-  settings.py      # 所有配置（含 AXES/allauth/CRISPY）
+  settings.py      # 所有配置（含 AXES/allauth/CRISPY、运行模式、NPU 启动同步开关）
   urls.py          # 根路由（/ 跳转登录或我的申请）
   decorators.py    # staff_required / superuser_required
-  views.py         # 根路由 index 视图
 accounts/          # 用户、认证、系统设置
-  models.py        # SystemConfig、Announcement（用户公告）、EmailVerification
+  models.py        # SystemConfig、Announcement（公告，markdown 单例）、EmailVerification
   views.py         # 注册/登录/个人中心/密码找回/设置页/解绑
   email_verify.py  # 邮箱验证码服务（生成/发送/校验）
+  markdown_convert.py  # 公告 markdown 子集转换器（→HTML 首页 / →ANSI motd）
   adapter.py       # allauth SocialAccountAdapter（首次登录走 signup 确认）
   providers/gitcode/  # allauth 自定义 GitCode provider
 applications/      # 申请工单（核心业务）
-  models.py        # Application、SudoGrant
+  models.py        # Application（申请单）
   views.py         # 申请/审批/开通/撤回联动
-  management/      # expire_sudo 管理命令
 servers/           # 目标机器管理
-  models.py        # Server（含 NPU 字段）、ManagedUser、ServerAdminBinding
-  management.py    # SSH 操作（provision/接管/sudo/NPU 检测授权/初始化脚本/公告 motd）
-  ssh.py           # paramiko 连接与命令执行
+  models.py        # Server（含 NPU 字段）、MachineUserBinding、ServerAdminBinding
+  management.py    # SSH 操作（provision/接管/锁定/授权/公告 motd）
+  devices.py       # 设备信息统一查询（NPU/CPU/内存/硬盘，LRU 缓存）
+  scripts/         # 目标机脚本（SFTP 上传 root 执行，见下）
+  ssh.py           # paramiko 连接与命令执行（run_script 上传执行）
   fields.py        # EncryptedTextField（Fernet 加密字段）
 credentials/       # 机器凭据（密码/私钥，加密存储）
 notifications/     # 通知（SMTP 邮件 + Webhook）
   services.py      # 发送逻辑（send_email / send_email_with_config）
-tests/             # pytest 测试（test_*.py，含 E2E 流程测试）
+tests/             # pytest 测试（test_*.py）
 templates/         # 全部 Bootstrap 3 模板
 static/            # 自研 css/js（app.css / app.js）
 ```
+
+### 目标机脚本（servers/scripts/，独立维护、仓库内置）
+
+| 脚本 | 职责 | 执行时机 |
+|------|------|----------|
+| `nrm_mgmt.sh` | 日常用户管理（建用户/接管/锁定/sudo/NPU 授权/资源限制） | 各操作按子命令调用 |
+| `init_base.sh` | 基础初始化（受管组/motd 目录/工具链） | 服务器接入时 |
+| `init_ascend_npu.sh` | NPU 初始化（检测 davinci 卡、建 npu/npuN 卡组） | 仅 NPU 服务器接入时 |
+| `device_info.sh` | 设备信息采集（NPU 型号/内存、CPU、内存、硬盘），root 一次执行、结构化输出 | 设备信息查询（LRU 缓存） |
+
+新增设备类型（如 GPU）：另建独立脚本（如 `init_gpu.sh`），按服务器类型组合执行；设备信息输出命名空间隔离（`NPU_CARD` vs `GPU_CARD`），互不干扰。
 
 ## 权限模型（三层）
 
@@ -58,21 +71,32 @@ static/            # 自研 css/js（app.css / app.js）
 
 - **账号登录**：注册（开放）、密码找回（Django ResetView + 自定义邮件）、登录限流（django-axes：15 分钟 5 次失败锁定 username+IP）
 - **GitCode OAuth**（django-allauth）：配置存 **SocialApp**（系统设置页维护，含回调地址展示）；首次登录必须走 signup 确认页（注册新账号或绑定已有账号）；业务门禁：
-  - GitCode 用户未设姓名不能提交申请（`applications/views.py` 的 SocialAccount 判断）
+  - GitCode 用户未设姓名不能提交申请
   - 无本地密码用户解绑前必须先设置密码（`gitcode_unbind` 视图）
-- **邮箱验证码**：用户改邮箱、SMTP 配置写库前验证（`accounts/email_verify.py`，10 分钟有效、错误 5 次作废；AJAX 预检 consume=False 不消耗，保存时真正消耗）
+- **邮箱验证码**：用户改邮箱、SMTP 配置写库前验证（10 分钟有效、错误 5 次作废；AJAX 预检 consume=False 不消耗，保存时真正消耗）
 
 ## 核心业务流
 
 ### 申请 → 审批 → 开通 → 撤回
-1. 登录用户提交申请：两种类型（**申请服务器账号**：目标用户名按姓名自动生成；**转移已有账号为受管用户**：填机器已有用户名），填写**申请理由**（无标题），身份/工号从账号自动带入
-2. 仅 **NPU 服务器**显示 NPU 卡组选择（npu + npuN），普通服务器无分组选项
-3. 管理员审批通过 → `_provision_on_approve` 在机器开通：
+1. 登录用户提交申请：四种类型（**申请服务器账号 / 转移已有账号为受管用户 / 申请用户组 / 申请平台管理员**），填**申请理由**；身份/工号从账号自动带入
+2. 仅 **NPU 服务器**显示 NPU 卡组选择（npu + npuN，按钮展示 设备号+型号+内存G），同时展示 CPU/内存/硬盘；普通服务器无分组选项
+3. 管理员审批通过 → `_bg_provision` 后台在机器开通：
    - `provision_user`：建用户 + 随机密码 + `chage -d 0` 强制首改密 + 资源限制（limits.d）
-   - NPU 授权：`usermod -aG npu,npuN`（勾选的卡组）
+   - NPU 授权：`usermod -aG npu,npuN`（勾选的卡组）；归属绑定 `MachineUserBinding`
    - 公告：写入目标机 motd（`/etc/motd.d/nrm_notifications`）+ 系统首页展示
-   - sudo 授予（`SudoGrant` 审计，当日 23:59:59 失效，`expire_sudo` 命令撤销）
+   - 平台管理员类型：直接授予 sudo（不建账号，无审计表）
 4. 申请人可**撤回**待审批申请（状态 withdrawn）
+
+### 系统公告（markdown）
+- 公告为**单例**：`content` 存 markdown 源码（`# 标题 / **加粗** / *斜体* / {red}颜色{/red} / [链接](url)`）
+- 首页公告栏用 `markdown_to_html` 渲染（HTML 仅受控标签，模板 `|safe`）；服务器 motd 用 `markdown_to_ansi`（h1 亮黄/h2 暗黄/h3 灰）
+- 设置页用 textarea + 快捷按钮插入控制符（非富文本编辑器）
+
+### 设备信息（servers/devices.py）
+- 所有设备信息查询统一走 `get_device_info(server)`：按 server.pk 做 **LRU 缓存**，避免每次访问 SSH 探测
+- 实际采集由 `device_info.sh` 在目标机 **root 一次性执行**（避免逐条 sudo + 非 root 免密问题），Python 侧解析 key=value 输出
+- NPU 型号 `acl.get_soc_name()`、内存 `acl.rt.get_mem_info(dev)[1]`；CPU 优先 lscpu（兼容鲲鹏无 model name）；GPU 预留未实现
+- 启动同步仅部署模式开启（`NPU_SYNC_ON_STARTUP`，开发模式靠首次访问懒加载；`NRM_SYNC_NPU=1` 可强制）
 
 ### SMTP 配置三步验证（写库前）
 1. 填配置 + 邮箱 → 发验证码（60 秒冷却，session 记录时间戳）
@@ -84,10 +108,12 @@ static/            # 自研 css/js（app.css / app.js）
 - **敏感字段加密**：`EncryptedTextField`（Fernet，密钥由 `SECRET_KEY` 派生）用于凭据密码/私钥、SMTP 密码
 - **SECRET_KEY 不可变更**：变更后历史密文无法解密（`InvalidSignature`），需数据迁移
 - **MAILERS 陷阱**：Django 6.1 的 MAILERS 接管邮件入口，`get_connection(backend)` 不可用；邮件发送必须直接实例化 `EmailBackend` 或走 `send_email_with_config`
-- **SSH 提权**：非 root 连接时特权命令自动加 `sudo -n`（`_sudo_wrap` 按管道分段，**不误拆 `||`**）
-- **HTML 禁止嵌套 form**：表单内不能再放 `<form>`（如个人中心解绑按钮），否则浏览器忽略内层表单
+- **SSH 提权**：非 root 连接时特权命令自动加 `sudo -n`（`_sudo_wrap` 按管道分段，**不误拆 `||`**）；目标机脚本统一经 SFTP 上传后 root 执行
+- **脚本必须 LF 行尾**：`.gitattributes` 锁定 `*.sh text eol=lf`，CRLF 会让 Linux 目标机 bash 报错
+- **HTML 禁止嵌套 form**：表单内不能再放 `<form>`，否则浏览器忽略内层表单
 - **session 序列化**：session 只能存 JSON 可序列化数据（datetime 需转时间戳存）
 - **前端静态化**：模板用 `data-*` 属性传 URL/变量给 `static/js/app.js`，JS 不写模板标签
+- **安全输出**：公告 markdown 转 HTML 只产生受控标签；链接协议白名单（http/https/mailto），危险协议只渲染文字
 
 ## 开发工作流
 
@@ -104,8 +130,7 @@ uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）
 
 - 新增功能需配套 pytest 用例（`tests/` 目录）
 - 静态检查用 **ruff**（不用 pyflakes），配置在 `pyproject.toml [tool.ruff]`
-- **测试/验证一律用 pytest 隔离库 + mock SSH/邮件，不连真实机器**（有 E2E 测试机 192.18.142.218，常规开发勿触发）
-- **E2E 专项**：`tests/test_e2e_flow.py`（申请→审批→开通→sudo→回收编排）、`tests/test_e2e_frontend.py`（前端操作级：注册→申请→审批→回看）——改动核心业务流后必须跑
+- **测试/验证一律用 pytest 隔离库 + mock SSH/邮件，不连真实机器**；改动核心业务流后跑 `tests/test_e2e_flow.py`
 
 ## 项目约定（重要）
 
@@ -114,11 +139,7 @@ uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）
 3. **分支策略**：日常提交仅本地保存；**开发分支 `dev` 可推送**（供预览/协作）；`main` 正式发布时统一推送并锁定（禁直接 push + CI 必过）
 4. **未来计划走 GitHub Issues**：设计方案、UX 改进、待办不写进仓库文档
 5. **中文代码支持**：保留现有中文注释与命名习惯；新代码用英文标识符
-6. **严禁破坏开发数据库**：验证/调试一律使用 pytest（隔离测试库）或只读检查；**禁止在 `manage.py shell -c` 中对开发库执行 `delete()`/`all().delete()`/清空配置类操作**（曾因此误删用户配置的 SMTP/GitCode 凭据，属 P0 事故）。**页面/接口验证也禁止用 shell 创建数据再删除**（哪怕"创建后清理"也会误删用户已有配置，同样 P0）——一律写成 pytest 临时测试（隔离库）或纯只读检查。确需操作真实数据时先备份 `db.sqlite3`
-7. **测试强制隔离（领导规定，严重事故）**：所有测试/验证/调试**必须单独启动测试服务器 + 独立数据库**，严禁在开发/生产服务器与开发库上执行任何测试动作（含创建、修改、删除数据、跑脚本）。曾因在开发库创建测试数据导致工单编号跳号（P0 严重事故）：
-   - 运行测试一律 `uv run pytest`（pytest-django 自动使用隔离测试库，`tests/conftest.py` 标记 `DJANGO_TESTING`）
-   - 禁止在开发库上 `manage.py shell -c` 执行任何写操作（create/update/delete）；确需验证真实数据时先备份 `db.sqlite3` 且操作前向用户确认
-   - 禁止用开发服务器跑测试/演示/验证脚本（如临时起 runserver 造数据）
+6. **严禁破坏开发数据库（P0 红线）**：验证/调试一律用 pytest 隔离库或只读检查。禁止在 `manage.py shell -c` 中对开发库执行任何写操作（create/update/delete）、禁止用开发服务器跑测试/演示脚本（曾因在开发库造数据导致工单编号跳号、误删用户配置的 SMTP/GitCode 凭据，属 P0 事故）。确需操作真实数据时先备份 `db.sqlite3` 且向用户确认
 
 ## 常见陷阱速查
 
@@ -128,6 +149,8 @@ uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）
 | `get_connection(backend) is not supported with MAILERS` | 走了 Django 邮件入口 | 直接实例化 EmailBackend |
 | 邮件发送 `Connection unexpectedly closed` | 465 端口用了 STARTTLS | 465 用 SSL（use_ssl=True），587/25 用 TLS |
 | 邮箱更换后邮箱没变 | 前端 `form.submit()` 不带按钮 name | 提交前手动追加 hidden `name="save_profile"` |
+| 目标机脚本报 `$'\r'` 错误 | 脚本被转成 CRLF | 用 LF 行尾（`.gitattributes` 已锁定 *.sh） |
+| 设备信息查不到 NPU/内存 | 逐条 sudo 失败或依赖缺失 | 走 `device_info.sh` 单脚本 root 执行 |
 | HTML 按钮无效 | 嵌套 `<form>` | 拆出独立表单 |
 | 登录被锁 | axes 15 分钟 5 次失败 | 清 `AccessAttempt` 或等冷却 |
 | 迁移交互式提问 EOFError | 非空字段无默认值 | 迁移加 `default` |

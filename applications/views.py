@@ -24,7 +24,7 @@ from servers.management import (
 from servers.models import MachineUserBinding, Server
 
 from .forms import ApplicationForm
-from .models import Application, SudoGrant
+from .models import Application
 
 
 def _bg_notify_new_application(application_pk):
@@ -102,9 +102,7 @@ def _bg_provision(application_pk):
                 ok = False
                 errors.append(f"{g}:{g_msg}")
         application.provision_note = (
-            f"已加入用户组：{','.join(group_list)}"
-            if ok
-            else f"加入用户组失败：{'；'.join(errors)}"
+            f"已加入用户组：{','.join(group_list)}" if ok else f"加入用户组失败：{'；'.join(errors)}"
         )
         if ok:
             application.provisioned_at = timezone.now()
@@ -126,14 +124,10 @@ def _bg_provision(application_pk):
     # 开通后写入目标机 motd 公告（SSH 登录显示）
     _ok_notice, _msg_notice = write_server_motd(server)
 
-    # 使用截止时间：到期后机器账号自动失效（usermod -e）
-    expire_date = application.valid_until.date() if application.valid_until else None
-
     ok, password, msg = provision_user(
         server,
         application.username,
         groups=groups,
-        expire_date=expire_date,
         with_home=True,
     )
     application.provision_note = msg
@@ -155,36 +149,9 @@ def _bg_provision(application_pk):
             npu_groups = applied if "npu" in applied else ["npu"] + applied
             grant_npu_access(server, application.username, npu_groups)
 
-        # 申请了 sudo 权限：授予并记录审计日志（当天有效）
-        if application.needs_sudo:
-            _grant_sudo_for_application(application)
-
         # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
-        send_provision_credentials(application, password, expire_date=expire_date)
+        send_provision_credentials(application, password)
     application.save()
-
-
-def _grant_sudo_for_application(application):
-    """授予 sudo 权限并记录 SudoGrant 审计日志（当日 23:59:59 失效）。
-
-    后台任务内调用（无 request）：granted_by 取审批人 application.reviewer。
-    """
-    server = application.target_server
-    ok, group, msg = grant_sudo(server, application.username)
-    # 当日 23:59:59 失效（次日需重新申请）
-    expires_at = timezone.localtime().replace(hour=23, minute=59, second=59, microsecond=0)
-    SudoGrant.objects.create(
-        application=application,
-        server=server,
-        username=application.username,
-        granted_by=application.reviewer,
-        expires_at=expires_at,
-        status=SudoGrant.Status.ACTIVE if ok else SudoGrant.Status.EXPIRED,
-        revoke_note=f"授予：{msg}" if ok else f"授予失败：{msg}",
-    )
-    # 结果写入独立的 sudo_note 字段，避免与开通信息（provision_note）混淆
-    application.sudo_note = msg
-    application.save(update_fields=["sudo_note"])
 
 
 @login_required
@@ -332,9 +299,7 @@ def application_detail(request, pk):
     if request.user.is_superuser:
         application = get_object_or_404(qs, pk=pk)
     elif request.user.is_staff:
-        application = get_object_or_404(
-            qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk
-        )
+        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
     else:
         # 普通用户：只能查看自己的工单（他人工单 404，防止越权）
         application = get_object_or_404(qs, pk=pk, applicant=request.user)
@@ -349,9 +314,7 @@ def application_review(request, pk, action):
     if request.user.is_superuser:
         application = get_object_or_404(qs, pk=pk)
     else:
-        application = get_object_or_404(
-            qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk
-        )
+        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
     if application.status != Application.Status.PENDING:
         messages.warning(request, "该申请已处理，不能重复审批。")
         return redirect("applications:detail", pk=pk)

@@ -17,11 +17,11 @@ class ServerAdmin(admin.ModelAdmin):
     )
     list_filter = ("port",)
     search_fields = ("name", "host", "credential__name", "credential__username")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "npu_groups")
     fieldsets = (
         (
             None,
-            {"fields": ("name", "host", "port", "credential", "default_group", "is_npu", "npu_groups", "init_script")},
+            {"fields": ("name", "host", "port", "credential", "default_group", "is_npu", "npu_groups")},
         ),
         (
             "资源限制（高级设置）",

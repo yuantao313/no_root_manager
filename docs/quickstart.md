@@ -38,13 +38,5 @@ uv run python manage.py runserver
 ```bash
 uv run python manage.py check              # Django 系统检查
 uv run pytest                              # 单元测试
-uv run python manage.py expire_sudo        # 撤销当日到期的 sudo 权限（建议 cron 每天执行）
 uv run mkdocs serve                        # 本地预览文档
-```
-
-## 定时任务建议
-
-```cron
-# 每天凌晨撤销昨日到期的 sudo 权限
-0 1 * * * cd /path/to/project && uv run python manage.py expire_sudo
 ```

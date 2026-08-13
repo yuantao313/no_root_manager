@@ -2,6 +2,7 @@
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 
 from accounts.models import SystemConfig
@@ -81,8 +82,9 @@ class TestSiteBaseUrl:
         cfg = SystemConfig.get_singleton()
         cfg.site_base_url = ""
         cfg.save()
-        # settings.GITCODE_CALLBACK_BASE_URL = "http://192.168.9.216:18888"
-        assert cfg.get_site_base_url() == "http://192.168.9.216:18888"
+        # settings.GITCODE_CALLBACK_BASE_URL 由环境变量提供（无硬编码默认值）
+        with override_settings(GITCODE_CALLBACK_BASE_URL="http://fallback.example.com:8000"):
+            assert cfg.get_site_base_url() == "http://fallback.example.com:8000"
 
     def test_save_site_base_url_from_page(self, client):
         client.force_login(_superuser())

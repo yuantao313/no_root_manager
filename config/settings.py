@@ -17,6 +17,38 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+# ---------------------------------------------------------------------------
+# 运行模式与配置文件加载
+#   NRM_ENV=prod  -> 部署模式（严格按 .env.prod 执行）
+#   其他（含未设置 / dev）-> 开发模式（宽松 + 详细日志）
+# 配置文件经 python-dotenv 加载；override=False：若运行环境已注入同名环境变量
+# （systemd/容器/CI），不会被 .env 文件覆盖，安全。未安装 python-dotenv 时
+# 退回纯环境变量模式。
+# ---------------------------------------------------------------------------
+NRM_ENV = os.environ.get("NRM_ENV", "dev").strip().lower()
+MODE = "deploy" if NRM_ENV == "prod" else "dev"
+
+try:
+    from dotenv import load_dotenv
+
+    _env_file = ".env.prod" if MODE == "deploy" else ".env"
+    if Path(_env_file).is_file():
+        load_dotenv(_env_file, override=False)
+except ImportError:
+    pass
+
+# 测试环境标记：servers 等 app 的 ready() 据此跳过启动期后台任务（如 NPU 状态同步）。
+# conftest.py 在测试进程设置环境变量 DJANGO_TESTING=1；此处转为 Django 设置供 app 读取
+# （此前仅设了环境变量、未定义对应设置，导致跳过逻辑从未生效）。
+DJANGO_TESTING = os.environ.get("DJANGO_TESTING", "") == "1"
+
+# NPU 状态启动同步：仅部署模式默认开启（预热内存缓存，避免申请页首次访问 SSH 卡顿）；
+# 开发模式默认关闭——启动即对全部 NPU 服务器 SSH 探测会干扰本地调测，
+# 开发态首次访问时由 get_npu_state_cached 懒加载，效果一致。
+# 如需在开发模式也启动同步：设置 NRM_SYNC_NPU=1。
+NPU_SYNC_ON_STARTUP = MODE == "deploy" or os.environ.get("NRM_SYNC_NPU", "").strip().lower() == "1"
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
@@ -24,25 +56,109 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 生产环境务必通过环境变量 NRM_SECRET_KEY 提供。
 # 注意：SECRET_KEY 也是凭据等敏感字段的 Fernet 加密密钥来源，
 # 变更后历史密文将无法解密（需数据迁移），开发默认值保持不变。
-SECRET_KEY = os.environ.get(
-    "NRM_SECRET_KEY",
-    "django-insecure-er9k0na5u*y-71#f$a3=nd*1+2od&-3b1-sb@x$xce5mq3y22f",
-)
+_SECRET_KEY = os.environ.get("NRM_SECRET_KEY")
+if MODE == "deploy" and not _SECRET_KEY:
+    # 部署模式严禁使用默认开发密钥
+    raise RuntimeError(
+        "部署模式(DEPLOY)要求通过环境变量 NRM_SECRET_KEY 提供密钥，禁止使用 settings.py 中的默认开发密钥。"
+    )
+SECRET_KEY = _SECRET_KEY or "django-insecure-er9k0na5u*y-71#f$a3=nd*1+2od&-3b1-sb@x$xce5mq3y22f"
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# ---------------------------------------------------------------------------
+# 运行模式行为
+#   开发模式(dev)  : DEBUG=True、ALLOWED_HOSTS=*（放行域名拦截）、
+#                    CSRF 来源宽松、日志详细（含 SQL/请求/SSH）
+#   部署模式(prod) : DEBUG 取 NRM_DEBUG、ALLOWED_HOSTS/CSRF 严格取自配置文件，
+#                    缺失即报错，不裸奔
+# ---------------------------------------------------------------------------
+if MODE == "dev":
+    DEBUG = True
+    # 开发模式：任意 host 均可访问，不做域名拦截
+    ALLOWED_HOSTS = ["*"]
+    # CSRF 来源宽松，避免本地/局域网调试被拦
+    CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
+    LOG_LEVEL = "DEBUG"
+else:  # deploy
+    DEBUG = os.environ.get("NRM_DEBUG", "False").strip().lower() == "true"
+    # 部署模式：ALLOWED_HOSTS 必须来自配置文件，缺失即报错
+    _allowed_hosts_raw = os.environ.get("NRM_ALLOWED_HOSTS", "")
+    if not _allowed_hosts_raw.strip():
+        raise RuntimeError(
+            "部署模式(DEPLOY)要求配置文件提供 NRM_ALLOWED_HOSTS，"
+            "请在 .env.prod 中设置，例如 NRM_ALLOWED_HOSTS=example.com,www.example.com"
+        )
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get("NRM_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+    LOG_LEVEL = os.environ.get("NRM_LOG_LEVEL", "INFO").strip().upper()
 
-ALLOWED_HOSTS = ["192.168.9.216"]
+# GitCode OAuth 回调基准地址：一律从环境变量（.env / .env.prod）读取，禁止硬编码。
+# 未配置时为空串，站点地址由数据库 SystemConfig.site_base_url 兜底。
+GITCODE_CALLBACK_BASE_URL = os.environ.get("NRM_GITCODE_CALLBACK_BASE_URL", "").strip()
 
-# Django 6.1 启用 Origin 校验：经非默认端口（18888）访问时，
-# 请求头 Origin 必须匹配 CSRF_TRUSTED_ORIGINS，否则 403
-# "Origin checking failed - http://192.168.9.216:18888 does not match any trusted origins"
-CSRF_TRUSTED_ORIGINS = ["http://192.168.9.216:18888"]
-
-# GitCode OAuth 回调基准地址：固定回调 URL，避免随请求 host 漂移
-# 导致 GitCode 应用配置的回调地址与实际生成的 redirect_uri 不一致（回调不匹配）。
-# 修改域名/端口时需同步更新此处与 GitCode 应用管理页的回调配置。
-GITCODE_CALLBACK_BASE_URL = "http://192.168.9.216:18888"
+# ---------------------------------------------------------------------------
+# 日志
+#   开发模式: 各级 DEBUG，打印 SQL(django.db.backends)、请求、SSH(paramiko) 等
+#   部署模式: 级别由 NRM_LOG_LEVEL 控制（默认 INFO）；
+#            配置文件提供 NRM_LOG_FILE 则追加滚动文件日志
+# ---------------------------------------------------------------------------
+_LOG_HANDLERS = ["console"]
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname:<8} {name} {module}:{lineno} | {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname:<8} {name} | {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose" if MODE == "dev" else "simple",
+            "level": LOG_LEVEL,
+        },
+    },
+    "root": {
+        "handlers": _LOG_HANDLERS,
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "django.db.backends": {
+            "handlers": _LOG_HANDLERS,
+            "level": "DEBUG" if MODE == "dev" else LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "axes": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "allauth": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "paramiko": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "servers": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "applications": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "accounts": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "credentials": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+        "notifications": {"handlers": _LOG_HANDLERS, "level": LOG_LEVEL, "propagate": False},
+    },
+}
+# 部署模式可选：配置文件提供 NRM_LOG_FILE 则追加滚动文件日志
+if MODE != "dev":
+    _log_file = os.environ.get("NRM_LOG_FILE")
+    if _log_file:
+        LOGGING["handlers"]["file"] = {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": _log_file,
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "verbose",
+            "level": LOG_LEVEL,
+        }
+        for _lg in LOGGING["loggers"].values():
+            _lg["handlers"] = ["console", "file"]
+        LOGGING["root"]["handlers"] = ["console", "file"]
 
 
 # Application definition

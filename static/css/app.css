@@ -27,3 +27,16 @@ dl dt { font-weight: 700; margin-top: 10px; color: #555; }
 dl dd { margin: 4px 0 0; }
 
 .review-box { margin-top: 16px; padding: 12px; background: #f9f9f9; border: 1px solid #eee; border-radius: 4px; font-size: 14px; }
+
+/* 系统公告栏（markdown 渲染后的标题尺寸收窄，避免 h1/h2/h3 过大） */
+.announcement-box h1 { font-size: 18px; margin: 8px 0 4px; }
+.announcement-box h2 { font-size: 16px; margin: 6px 0 4px; }
+.announcement-box h3 { font-size: 15px; margin: 4px 0 4px; }
+.announcement-box p { margin: 4px 0; font-size: 14px; }
+.announcement-box a { text-decoration: underline; }
+
+/* 详情页信息表格统一风格（机器信息 / 设备信息 / NPU 卡列表）：
+   同一套字号/间距/表头，两列 key-value 表标题列固定宽 */
+.info-table { margin-bottom: 0; font-size: 14px; }
+.info-table > tbody > tr > th:first-child { width: 120px; }
+.info-table > thead > tr > th { font-weight: 700; }

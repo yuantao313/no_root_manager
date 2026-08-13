@@ -1,4 +1,8 @@
-"""NPU 分组与公告功能测试（隔离库 + mock SSH，不连真实机器）。"""
+"""NPU 分组与公告功能测试（隔离库 + mock SSH，不连真实机器）。
+
+公告相关用例：markdown 子集 → HTML（首页）/ ANSI（motd）转换，
+转换器本身的细粒度用例见 test_markdown_convert.py。
+"""
 
 from unittest.mock import patch
 
@@ -60,113 +64,75 @@ def test_groups_api_returns_npu(server, client):
 def test_write_motd(server):
     from servers.management import write_server_motd
 
-    Announcement.objects.create(title="使用规范", content="禁止挖矿", enabled=True)
+    Announcement.objects.create(content="禁止挖矿", enabled=True)
     with patch("servers.management._exec", return_value=(True, "", "")) as m:
         ok2, _ = write_server_motd(server)
     cmds = [c.args[1] for c in m.call_args_list]
     assert ok2
     assert any("/etc/motd.d" in c for c in cmds)
-    assert not any("nrm_notifications.md" in c for c in cmds)
 
 
-def test_write_motd_uses_html_ansi(server):
-    """公告 HTML 内容渲染为 ANSI 彩色文本写入 motd（支持高亮调色）。"""
+def test_write_motd_uses_markdown_ansi(server):
+    """公告 markdown 渲染为 ANSI 彩色文本写入 motd（颜色/加粗高亮）。"""
     from servers.management import write_server_motd
 
-    Announcement.objects.create(
-        title="规范",
-        content="禁止挖矿",
-        html_content='<p>本周维护：<span style="color:red">禁止挖矿</span></p>',
-        enabled=True,
-    )
+    Announcement.objects.create(content="本周维护：{red}禁止挖矿{/red}，**全员注意**", enabled=True)
     with patch("servers.management._exec", return_value=(True, "", "")) as m:
         ok2, _ = write_server_motd(server)
     cmds = [c.args[1] for c in m.call_args_list]
     assert ok2
     motd_cmd = [c for c in cmds if "/etc/motd.d" in c][0]
-    assert "\x1b[" in motd_cmd  # ANSI 转义码随 motd 写入
-    assert "禁止挖矿" in motd_cmd
+    assert "\x1b[31m禁止挖矿\x1b[0m" in motd_cmd  # 颜色转义随 motd 写入
+    assert "\x1b[1m全员注意\x1b[0m" in motd_cmd  # 加粗
 
 
-def test_html_to_ansi_colors():
-    """HTML→ANSI：颜色/背景/加粗正确映射，普通文本保留。"""
-    from servers.management import _html_to_ansi
+def test_write_motd_no_announcement_clears(server):
+    """无启用公告：清除 motd 文件，不留残留。"""
+    from servers.management import write_server_motd
 
-    html = (
-        '<p>高亮：<span style="background-color:yellow">注意</span> '
-        '与 <span style="color:red">红色</span> 与 <b>加粗</b></p>'
-    )
-    out = _html_to_ansi(html)
-    assert ";43m" in out  # 黄色背景
-    assert "31m" in out  # 红色前景
-    assert "1m" in out  # 加粗
-    assert "注意" in out and "红色" in out and "加粗" in out
+    with patch("servers.management._exec", return_value=(True, "", "")) as m:
+        ok2, msg = write_server_motd(server)
+    cmds = [c.args[1] for c in m.call_args_list]
+    assert ok2
+    assert any(c.startswith("rm -f") and "/etc/motd.d" in c for c in cmds)
+    assert "清除" in msg
 
 
-def test_html_to_ansi_plain_text():
-    """无样式 HTML 降级为纯文本（不含转义码）。"""
-    from servers.management import _html_to_ansi
-
-    out = _html_to_ansi("<p>纯文本公告</p><p>第二行</p>")
-    assert "纯文本公告" in out and "第二行" in out
-    assert "\x1b[" not in out
-
-
-def test_html_to_ansi_lists():
-    """列表：ul 用 • 项目符号，ol 用递增序号。"""
-    from servers.management import _html_to_ansi
-
-    out = _html_to_ansi("<ul><li>项目A</li><li>项目B</li></ul><ol><li>第一步</li><li>第二步</li></ol>")
-    assert "• 项目A" in out and "• 项目B" in out
-    assert "1. 第一步" in out and "2. 第二步" in out
-
-
-def test_html_to_ansi_link():
-    """链接：输出 文字（URL），终端可见地址。"""
-    from servers.management import _html_to_ansi
-
-    out = _html_to_ansi('<p>详情见 <a href="https://example.com/doc">帮助文档</a></p>')
-    assert "帮助文档（https://example.com/doc）" in out
-
-
-def test_html_to_ansi_heading_shades():
-    """标题：h1~h4 用不同深浅颜色区分（亮白/亮黄/黄/亮灰）。"""
-    from servers.management import _html_to_ansi
-
-    out = _html_to_ansi("<h1>一级</h1><h2>二级</h2><h3>三级</h3><h4>四级</h4>")
-    assert "\x1b[1;97m一级\x1b[0m" in out  # h1 亮白（最深）
-    assert "\x1b[1;93m二级\x1b[0m" in out  # h2 亮黄
-    assert "\x1b[1;33m三级\x1b[0m" in out  # h3 黄
-    assert "\x1b[1;37m四级\x1b[0m" in out  # h4 亮灰（最浅）
-
-
-def test_announcement_save_keeps_html(client):
-    """公告保存：html_content 入库，设置页编辑器回显。"""
+def test_announcement_save_markdown(client):
+    """公告保存：markdown 源码入库，设置页编辑器回显。"""
     su = User.objects.create_user(username="su", password="x12345!", is_staff=True, is_superuser=True)
     client.force_login(su)
     resp = client.post(
         reverse("accounts:settings"),
         {
             "add_announcement": "1",
-            "title": "维护公告",
-            "html_content": '<p>维护 <span style="color:red">今晚</span> 开始</p>',
-            "content": "维护 今晚 开始",
+            "content": "维护：**今晚** {red}开始{/red}",
             "enabled": "on",
         },
     )
     assert resp.status_code == 302
     ann = Announcement.objects.first()
-    assert ann.title == "维护公告"
-    assert "color:red" in ann.html_content
-    assert ann.content == "维护 今晚 开始"
-    # 设置页回显已有 HTML
+    assert ann.content == "维护：**今晚** {red}开始{/red}"
+    assert "开始" in ann.content_html
+    assert "<strong>今晚</strong>" in ann.content_html
+    # 设置页回显已有 markdown 源码
     html = client.get(reverse("accounts:settings")).content.decode()
-    assert "color:red" in html
+    assert "维护：**今晚**" in html
 
 
-def test_homepage_shows_announcement(client, server):
+def test_homepage_shows_announcement_html(client, server):
+    """首页公告栏：markdown 渲染为 HTML 展示（含样式标签）。"""
     u = User.objects.create_user(username="u1", password="x12345!")
-    Announcement.objects.create(title="系统公告标题", content="欢迎使用 NRM", enabled=True)
+    Announcement.objects.create(content="欢迎使用 **NRM**", enabled=True)
     client.force_login(u)
     html = client.get(reverse("applications:my")).content.decode()
-    assert "系统公告标题" in html
+    assert "欢迎使用" in html
+    assert "<strong>NRM</strong>" in html
+
+
+def test_homepage_skips_disabled_announcement(client, server):
+    u = User.objects.create_user(username="u2", password="x12345!")
+    Announcement.objects.create(content="不展示", enabled=False)
+    client.force_login(u)
+    html = client.get(reverse("applications:my")).content.decode()
+    assert "不展示" not in html

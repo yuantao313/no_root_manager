@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.server_list, name="list"),
     path("new/", views.server_create, name="create"),
     path("api/groups/<int:pk>/", views.server_groups_api, name="groups_api"),
+    path("api/device/<int:pk>/", views.server_device_api, name="device_api"),
     path("<int:pk>/edit/", views.server_edit, name="edit"),
     path("<int:pk>/test/", views.server_test, name="test"),
     path("<int:pk>/sync-users/", views.server_sync_users, name="sync_users"),

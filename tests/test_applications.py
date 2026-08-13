@@ -6,7 +6,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
-from applications.models import Application, SudoGrant
+from applications.models import Application
 from credentials.models import Credential
 from servers.models import Server
 
@@ -137,8 +137,12 @@ class TestPermission:
     def test_normal_user_can_view_own_application(self, client, normal, server):
         """普通用户可查看自己的工单详情（不再被弹回登录页）。"""
         app = Application.objects.create(
-            applicant=normal, applicant_name="甲", username="a", email="a@x.com",
-            title="我的", target_server=server,
+            applicant=normal,
+            applicant_name="甲",
+            username="a",
+            email="a@x.com",
+            title="我的",
+            target_server=server,
         )
         client.force_login(normal)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
@@ -148,8 +152,12 @@ class TestPermission:
     def test_normal_user_cannot_view_others_application(self, client, normal, staff, server):
         """普通用户查看他人工单：404 防越权。"""
         app = Application.objects.create(
-            applicant=staff, applicant_name="乙", username="b", email="b@x.com",
-            title="别人的", target_server=server,
+            applicant=staff,
+            applicant_name="乙",
+            username="b",
+            email="b@x.com",
+            title="别人的",
+            target_server=server,
         )
         client.force_login(normal)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
@@ -338,50 +346,6 @@ class TestReviewProvision:
         assert resp.status_code == 302
         app.refresh_from_db()
         assert app.status == Application.Status.APPROVED
-
-    def test_sudo_grant_records_audit(self, client, staff, server):
-        app = Application.objects.create(
-            applicant_name="赵六",
-            username="zhao",
-            email="z@x.com",
-            employee_id="E4",
-            title="sudo",
-            target_server=server,
-            needs_sudo=True,
-        )
-        client.force_login(staff)
-        with (
-            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")),
-            patch("applications.views.grant_sudo", return_value=(True, "sudo", "已加入 sudo 组")),
-        ):
-            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
-        grant = SudoGrant.objects.filter(application=app).first()
-        assert grant is not None
-        assert grant.status == SudoGrant.Status.ACTIVE
-        assert grant.granted_by == staff
-        app.refresh_from_db()
-        # sudo 结果写入独立字段，不与开通信息混淆
-        assert app.sudo_note != ""
-        assert "已开通" not in app.sudo_note
-
-    def test_sudo_grant_failure_marked_expired(self, client, staff, server):
-        app = Application.objects.create(
-            applicant_name="钱七",
-            username="qian",
-            email="q@x.com",
-            employee_id="E5",
-            title="sudo失败",
-            target_server=server,
-            needs_sudo=True,
-        )
-        client.force_login(staff)
-        with (
-            patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")),
-            patch("applications.views.grant_sudo", return_value=(False, "", "无 sudo 组")),
-        ):
-            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
-        grant = SudoGrant.objects.filter(application=app).first()
-        assert grant.status == SudoGrant.Status.EXPIRED
 
 
 class TestNpuGroups:

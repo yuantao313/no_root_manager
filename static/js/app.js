@@ -135,6 +135,10 @@
 
     if (serverSelect) {
         var groupsApiUrl = serverSelect.dataset.groupsUrl || "/servers/api/groups/";
+        // URL 模板带占位 pk=0（如 /servers/api/groups/0/），替换成真实 serverId
+        function apiUrl(tpl, serverId) {
+            return tpl.replace("/0/", "/" + serverId + "/");
+        }
 
         // 按申请类型切换显示：
         //   create  → NPU 卡组；transfer → 机器用户下拉；group → 用户组；admin → 提示文案（不选 NPU）
@@ -159,7 +163,7 @@
                 delete transferSelect.dataset.select2init;
             }
             if (!serverId) return;
-            fetch(groupsApiUrl + serverId + "/")
+            fetch(apiUrl(groupsApiUrl, serverId))
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     var users = data.users || [];
@@ -187,15 +191,51 @@
 
         var selected = [];
         var npuCardCount = 0; // 当前服务器可选 NPU 卡组数（过滤公共组 npu 后），用于按需选择校验
+        var currentGroups = []; // 最近一次 groups_api 的卡组（NPU 按钮重渲染用）
+        var currentIsNpu = false;
 
-        // 渲染卡组按钮：一行 4 个，选中变色（btn-primary），不渲染公共组 npu
-        function renderGroups(groups, isNpu) {
+        // 渲染设备信息条（CPU/内存/硬盘），显示在目标服务器下方
+        function renderDeviceInfo(device) {
+            var strip = document.getElementById("device-info-strip");
+            if (!strip) return;
+            device = device || {};
+            var parts = [];
+            if (device.cpu) parts.push("CPU：" + device.cpu);
+            if (device.memory) parts.push("内存：" + device.memory);
+            if (device.disk) parts.push("硬盘：" + device.disk);
+            if (parts.length) {
+                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + parts.join("　|　") + "</span>";
+                strip.style.display = "";
+            } else {
+                // 查询失败或空：显示提示而非静默隐藏（避免看起来像"没加载"）
+                var msg = (device && device.msg) ? device.msg : "设备信息获取失败";
+                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + msg + "</span>";
+                strip.style.display = "";
+            }
+        }
+
+        // 设备信息加载中提示：fetch 前显示，renderDeviceInfo 会覆盖
+        function showDeviceLoading() {
+            var strip = document.getElementById("device-info-strip");
+            if (!strip) return;
+            strip.innerHTML = '<span class="text-muted" style="font-size:12px;">正在获取设备信息…</span>';
+            strip.style.display = "";
+        }
+
+        // 渲染卡组按钮：一行 4 个，选中变色（btn-primary），不渲染公共组 npu。
+        // NPU 卡按钮文案：<设备号> <型号> (<内存G>G)，型号/内存来自 device.npu（device_api）。
+        function renderGroups(groups, isNpu, device) {
             var wrap = document.getElementById("npu-field");
             if (!isNpu) { if (wrap) wrap.style.display = "none"; return; }
             if (wrap) wrap.style.display = "";
             // 公共组 npu 由后端授权时自动附带，前端不显示
             var cards = groups.filter(function (g) { return g !== "npu"; });
             npuCardCount = cards.length;
+            // 设备信息：NPU 卡按设备号匹配（npuN → 型号/内存）
+            var npuInfo = {};
+            (device && device.npu || []).forEach(function (c) {
+                npuInfo["npu" + c.index] = c;
+            });
             if (!cards.length) {
                 groupsUl.innerHTML = '<p class="text-muted" style="margin:4px 0;">该服务器无可用 NPU 卡组</p>';
                 return;
@@ -203,9 +243,12 @@
             var html = '<div class="row">';
             cards.forEach(function (g, i) {
                 var active = selected.indexOf(g) !== -1;
+                var info = npuInfo[g];
+                // 按钮文案：<设备号> <型号> <内存G>G（如 0 Ascend910B3 60G）
+                var label = info ? info.index + " " + info.soc_name + " " + info.mem_g + "G" : g;
                 html += '<div class="col-xs-3" style="padding:2px;">' +
                     '<button type="button" class="btn btn-block npu-card-btn' + (active ? " btn-primary" : " btn-default") +
-                    '" data-group="' + g + '" style="font-size:13px;padding:6px 0;">' + g + "</button></div>";
+                    '" data-group="' + g + '" title="卡组 ' + g + '" style="font-size:13px;padding:6px 0;">' + label + "</button></div>";
             });
             html += "</div>";
             groupsUl.innerHTML = html;
@@ -228,16 +271,28 @@
             }
         });
 
+        // 设备信息条（CPU/内存/硬盘）由 groups_api 的 device 字段一次返回渲染，
+        // 不再单独请求 device_api（详情页仍用 device_api 异步填充）。
+
         function loadGroups(serverId) {
             if (!serverId) {
                 var wrap = document.getElementById("npu-field");
                 if (wrap) wrap.style.display = "none";
+                renderDeviceInfo(null);
                 return;
             }
-            fetch(groupsApiUrl + serverId + "/")
+            // 加载中提示：fetch 期间先占位，拿到结果后由 renderDeviceInfo 覆盖
+            showDeviceLoading();
+            fetch(apiUrl(groupsApiUrl, serverId))
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
-                    renderGroups(data.extra_groups || [], data.is_npu);
+                    var device = data.device || {};
+                    currentGroups = data.extra_groups || [];
+                    currentIsNpu = !!data.is_npu;
+                    // 设备信息条（CPU/内存/硬盘）：所有服务器都显示
+                    renderDeviceInfo(device);
+                    // NPU 卡按钮：设备号+型号+内存G 一次渲染
+                    renderGroups(currentGroups, currentIsNpu, device);
                     // 非 NPU 服务器：隐藏整个卡组区（含 label）
                     if (!data.is_npu) {
                         var wrap = document.getElementById("npu-field");
@@ -247,6 +302,7 @@
                 .catch(function () {
                     var wrap = document.getElementById("npu-field");
                     if (wrap) wrap.style.display = "none";
+                    renderDeviceInfo(null);
                 });
         }
         serverSelect.addEventListener("change", function () {
@@ -453,65 +509,116 @@
         });
     }
 
+    /* ===== 服务器详情页：设备信息异步加载（device_api，加载中提示，不阻塞渲染） ===== */
+    var deviceBody = document.getElementById("device-info-body");
+    if (deviceBody) {
+        var deviceApiUrl = deviceBody.dataset.deviceUrl;
+        var deviceLoading = document.getElementById("device-loading");
+        var deviceContent = document.getElementById("device-info-content");
+        var deviceError = document.getElementById("device-error");
+        var npuList = document.getElementById("device-npu-list");
+
+        function renderNpuCards(cards) {
+            if (!npuList) return;
+            if (!cards || !cards.length) {
+                npuList.innerHTML = '<p class="text-muted" style="font-size:13px;">未检测到 NPU 卡（Ascend 驱动未加载或设备不可达）。</p>';
+                return;
+            }
+            var html = '<table class="table table-striped info-table">' +
+                "<thead><tr><th>设备号</th><th>型号</th><th>内存</th></tr></thead><tbody>";
+            cards.forEach(function (c) {
+                html += "<tr><td>" + c.index + "</td><td>" + c.soc_name + "</td><td>" + c.mem_g + "G</td></tr>";
+            });
+            html += "</tbody></table>";
+            npuList.innerHTML = html;
+        }
+
+        function loadDeviceInfo() {
+            // 显示加载中，隐藏内容区与错误
+            if (deviceLoading) deviceLoading.style.display = "";
+            if (deviceContent) deviceContent.style.display = "none";
+            if (deviceError) deviceError.style.display = "none";
+            if (!deviceApiUrl) {
+                if (deviceError) {
+                    deviceError.textContent = "设备信息接口不可用。";
+                    deviceError.style.display = "";
+                }
+                return;
+            }
+            fetch(deviceApiUrl)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (deviceLoading) deviceLoading.style.display = "none";
+                    if (data && data.msg) {
+                        // 查询失败（目标机不可达等）：提示 + 保留空值
+                        if (deviceError) {
+                            deviceError.textContent = data.msg;
+                            deviceError.style.display = "";
+                        }
+                    }
+                    if (deviceContent) {
+                        var cpu = document.getElementById("device-cpu");
+                        var memory = document.getElementById("device-memory");
+                        var disk = document.getElementById("device-disk");
+                        if (cpu) cpu.textContent = (data && data.cpu) || "未查询到";
+                        if (memory) memory.textContent = (data && data.memory) || "未查询到";
+                        if (disk) disk.textContent = (data && data.disk) || "未查询到";
+                        renderNpuCards(data && data.npu);
+                        deviceContent.style.display = "";
+                    }
+                })
+                .catch(function () {
+                    if (deviceLoading) deviceLoading.style.display = "none";
+                    if (deviceError) {
+                        deviceError.textContent = "设备信息获取失败，请稍后重试。";
+                        deviceError.style.display = "";
+                    }
+                });
+        }
+
+        loadDeviceInfo();
+        var deviceRefreshBtn = document.getElementById("device-refresh-btn");
+        if (deviceRefreshBtn) {
+            deviceRefreshBtn.addEventListener("click", loadDeviceInfo);
+        }
+    }
+
     /* ===== 消息提示自动消失（复用 Bootstrap alert，错误提示保留） ===== */
     if (window.jQuery) {
         window.jQuery(".alert-dismissible").not(".alert-danger").delay(3000).fadeOut(400);
     }
 
-    /* ===== 用户公告：HTML 编辑器（wangEditor v5，createEditor/createToolbar 工厂用法，
-       v5 UMD 无 Editor 类构造器，须用工厂函数 + 工具栏/编辑器双容器） ===== */
-    var annEditorEl = document.getElementById("announcement-editor");
-    var annToolbarEl = document.getElementById("announcement-toolbar");
+    /* ===== 用户公告：markdown 编辑器（textarea + 快捷按钮插入控制符，
+       按钮定义在模板 data-before/data-after/data-placeholder，JS 不写模板标签） ===== */
     var annForm = document.getElementById("announcement-form");
-    var annInitial = document.getElementById("announcement-initial");
-    if (annEditorEl && annToolbarEl && annForm && annInitial && window.wangEditor &&
-            typeof window.wangEditor.createEditor === "function" &&
-            typeof window.wangEditor.createToolbar === "function") {
-        // 现有记录内容从隐藏 textarea 读取（Django 已转义，回读即原文）；
-        // html_content 为空时模板已回退 content 纯文本，此处把纯文本换行转 <br> 再载入
-        var initial = annInitial.value || "";
-        if (initial && initial.indexOf("<") === -1) {
-            initial = initial.replace(/\r\n/g, "\n").replace(/\n/g, "<br>");
-        }
-        var editor = window.wangEditor.createEditor({
-            selector: "#announcement-editor",
-            html: initial,
-            config: {
-                placeholder: "输入公告内容，可选中文字设置颜色/加粗/高亮…",
-            },
-        });
-        // 回车改为软换行：wangEditor 默认 Enter 生成新 <p> 段落（+15px 间距），
-        // 视觉上"按一次回车变成两行"；覆写为段内软换行，回车只换一行
-        editor.insertBreak = function () {
-            editor.insertText("\n");
-        };
-        window.wangEditor.createToolbar({
-            editor: editor,
-            selector: "#announcement-toolbar",
-            config: {
-                toolbarKeys: [
-                    "headerSelect", "bold", "italic", "underline", "through",
-                    "color", "bgColor", "bulletedList", "numberedList", "quote",
-                    "insertLink", "undo", "redo",
-                ],
-            },
-        });
-        // 提交时：把编辑器 HTML 与纯文本写入隐藏字段
-        annForm.addEventListener("submit", function () {
-            var html = editor.getHtml() || "";
-            document.getElementById("announcement-html").value = html;
-            // 纯文本版：剥离标签但保留块级元素换行（textContent 会吞掉 <p> 间的换行）
-            var tmp = document.createElement("div");
-            tmp.innerHTML = html;
-            // 块级元素后补换行，保证纯文本（motd 回退用）保留段落结构
-            tmp.querySelectorAll("p,div,li,h1,h2,h3,h4,br").forEach(function (el) {
-                if (el.tagName === "BR") {
-                    el.replaceWith(document.createTextNode("\n"));
+    var annTextarea = document.getElementById("announcement-content");
+    if (annForm && annTextarea) {
+        annForm.querySelectorAll(".md-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var before = btn.getAttribute("data-before") || "";
+                var after = btn.getAttribute("data-after") || "";
+                var placeholder = btn.getAttribute("data-placeholder") || "文字";
+                var v = annTextarea.value;
+                var start = annTextarea.selectionStart;
+                var end = annTextarea.selectionEnd;
+                // 行首型按钮（data-before 以空格结尾，如 "# "）：插入到当前行首
+                if (before.charAt(before.length - 1) === " ") {
+                    var lineStart = v.lastIndexOf("\n", start - 1) + 1;
+                    annTextarea.value = v.slice(0, lineStart) + before + v.slice(lineStart);
+                    start = lineStart + before.length;
+                    end = start;
                 } else {
-                    el.appendChild(document.createTextNode("\n"));
+                    // 包裹型按钮：选中文字则包裹，未选中插入占位符并选中
+                    var selected = v.slice(start, end) || placeholder;
+                    annTextarea.value = v.slice(0, start) + before + selected + after + v.slice(end);
+                    start = start + before.length;
+                    end = start + selected.length;
+                }
+                annTextarea.focus();
+                if (annTextarea.setSelectionRange) {
+                    annTextarea.setSelectionRange(start, end);
                 }
             });
-            document.getElementById("announcement-text").value = (tmp.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
         });
     }
 })();

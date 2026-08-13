@@ -41,9 +41,9 @@ ensure_groups() {
 
 case "${1:-}" in
     provision)
-        # provision <username> <groups_csv> [expire_date|-] [with_home=1|0] [force_pwd_change=1|0]
+        # provision <username> <groups_csv> [with_home=1|0] [force_pwd_change=1|0]
         # 密码经 stdin 第一行传入：user:password
-        username="$2"; groups_csv="$3"; expire="${4:--}"; with_home="${5:-1}"; force_pwd="${6:-1}"
+        username="$2"; groups_csv="$3"; with_home="${4:-1}"; force_pwd="${5:-1}"
         [ -n "$username" ] || { log "用户名为空"; exit 2; }
         ensure_groups "$groups_csv"
         if id -u "$username" >/dev/null 2>&1; then
@@ -53,7 +53,6 @@ case "${1:-}" in
             [ "$with_home" = "1" ] && home_flag="-m"
             useradd $home_flag -s /bin/bash -G "$groups_csv" "$username"
         fi
-        [ "$expire" != "-" ] && usermod -e "$expire" "$username"
         read -r userpass || { log "未收到密码"; exit 4; }
         echo "$userpass" | chpasswd
         [ "$force_pwd" = "1" ] && chage -d 0 "$username"
@@ -61,11 +60,23 @@ case "${1:-}" in
         ;;
 
     takeover)
-        # takeover <username>：加入 nrm_managed 组（接管为受管用户）
+        # takeover <username>：接管为受管用户（加入 nrm_managed 组）。
+        # 同时剥离特权/驱动专用组（HwHiAiUser/sudo/wheel/npu 卡组），只保留
+        # 普通组 + nrm_managed——"普通用户要普通"，需要特权走正式申请流程。
         username="$2"
         [ -n "$username" ] || { log "用户名为空"; exit 2; }
         require_user "$username"
         ensure_group "$NRM_GROUP"
+        # 从固定特权/驱动组剥离（组不存在时 gpasswd 报错，忽略）
+        for g in HwHiAiUser sudo wheel; do
+            if getent group "$g" >/dev/null 2>&1; then
+                gpasswd -d "$username" "$g" >/dev/null 2>&1 || true
+            fi
+        done
+        # 剥离所有 NPU 卡组（npu、npuN），避免接管后残留算力访问权
+        for g in $(getent group 2>/dev/null | awk -F: '$1 ~ /^npu/ {print $1}'); do
+            gpasswd -d "$username" "$g" >/dev/null 2>&1 || true
+        done
         usermod -aG "$NRM_GROUP" "$username"
         echo "OK takeover $username"
         ;;

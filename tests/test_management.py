@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from django.urls import reverse
 
 from credentials.models import Credential
 from servers.management import (
@@ -102,13 +103,12 @@ class TestProvisionUser:
         assert len(pwd) == 16
         # 第一次调用是 provision（后续 set_limits 是资源限制）
         args = mock.call_args_list[0].args[1]
-        # provision <user> <groups_csv> <expire> <with_home> <force_pwd>
+        # provision <user> <groups_csv> <with_home> <force_pwd>
         assert args[0] == "provision"
         assert args[1] == "carol"
         assert "dev,nrm_managed" in args[2]
-        assert args[3] == "-"  # 无到期时间
-        assert args[4] == "1"  # with_home
-        assert args[5] == "1"  # force_pwd_change
+        assert args[3] == "1"  # with_home
+        assert args[4] == "1"  # force_pwd_change
         # 密码经 stdin 传递（不进命令行参数）
         stdin_data = mock.call_args_list[0].kwargs.get("stdin_data")
         assert stdin_data and stdin_data.startswith("carol:")
@@ -120,7 +120,7 @@ class TestProvisionUser:
         ) as mock:
             provision_user(ubuntu_server, "dave", with_home=False)
         args = mock.call_args_list[0].args[1]
-        assert args[4] == "0"  # with_home=0
+        assert args[3] == "0"  # with_home=0
 
     def test_force_pwd_change_off(self, ubuntu_server):
         with patch(
@@ -129,16 +129,7 @@ class TestProvisionUser:
         ) as mock:
             provision_user(ubuntu_server, "erin", force_pwd_change=False)
         args = mock.call_args_list[0].args[1]
-        assert args[5] == "0"  # force_pwd_change=0
-
-    def test_expire_date_passed(self, ubuntu_server):
-        with patch(
-            "servers.management._run_mgmt",
-            side_effect=[(True, "OK provision frank", ""), (True, "OK set_limits frank", "")],
-        ) as mock:
-            provision_user(ubuntu_server, "frank", expire_date="2026-12-31")
-        args = mock.call_args_list[0].args[1]
-        assert args[3] == "2026-12-31"
+        assert args[4] == "0"  # force_pwd_change=0
 
 
 class TestApplyResourceLimits:
@@ -220,3 +211,36 @@ class TestApplyResourceLimits:
         assert ok is True
         assert "未配置" in msg
         mock.assert_not_called()
+
+
+class TestManagedUsersBinding:
+    """受管用户列表：显示对应的系统用户（MachineUserBinding 归属）。"""
+
+    def test_managed_users_show_system_user(self, client, ubuntu_server, django_user_model):
+        from unittest.mock import patch
+
+        from servers.models import MachineUserBinding
+
+        su = django_user_model.objects.create_user(
+            username="su2", password="x12345!", is_staff=True, is_superuser=True
+        )
+        normal = django_user_model.objects.create_user(username="normal2", password="x12345!")
+        MachineUserBinding.objects.create(server=ubuntu_server, username="m_user_a", user=normal, source="create")
+        MachineUserBinding.objects.create(server=ubuntu_server, username="m_user_b", user=None, source="manual")
+        client.force_login(su)
+        with (
+            patch("servers.views.list_system_users", return_value=(True, [], "ok")),
+            patch(
+                "servers.views.get_managed_users_cached",
+                return_value=(["m_user_a", "m_user_b", "m_user_c"], "ok"),
+            ),
+        ):
+            resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
+        assert resp.status_code == 200
+        html = resp.content.decode()
+        assert "系统用户" in html  # 列头
+        # 已绑定用户：显示平台用户名链接；未绑定用户：显示"未绑定"
+        assert "normal2</a>" in html
+        assert "未绑定" in html
+        # 未绑定的机器用户也在列表中
+        assert "m_user_c" in html

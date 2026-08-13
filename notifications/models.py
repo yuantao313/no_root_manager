@@ -29,9 +29,7 @@ class EmailConfig(models.Model):
         "使用 SSL 直连", default=True, help_text="465 端口为 SSL 直连；587/25 端口请取消勾选（STARTTLS）"
     )
     # 发送方式（显式选择，不自动降级）
-    send_via = models.CharField(
-        "发送方式", max_length=10, choices=SEND_VIA_CHOICES, default=SEND_VIA_SMTP
-    )
+    send_via = models.CharField("发送方式", max_length=10, choices=SEND_VIA_CHOICES, default=SEND_VIA_SMTP)
     # 邮件 Webhook（发送方式为 webhook 时使用）：POST {to,subject,body} + X-Webhook-Token
     mail_webhook_url = EncryptedTextField("邮件 Webhook URL", blank=True, help_text="如 http://host/webhook/mail")
     mail_webhook_token = EncryptedTextField("邮件 Webhook Token", blank=True, help_text="请求头 X-Webhook-Token")

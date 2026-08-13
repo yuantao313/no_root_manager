@@ -37,7 +37,7 @@
                         站点基准地址（含协议/域名/端口）：GitCode 回调地址与 webhook 审批链接均基于它生成，
                         需与 GitCode 应用管理页配置的回调地址保持一致。
                     </p>
-                    <p><label>站点地址</label><input type="text" name="site_base_url" class="form-control" value="{{ syscfg.site_base_url|default:'' }}" placeholder="如 http://192.168.9.216:18888"></p>
+                    <p><label>站点地址</label><input type="text" name="site_base_url" class="form-control" value="{{ syscfg.site_base_url|default:'' }}" placeholder="如 http://your-host:18888"></p>
                     <button type="submit" name="save_site_base_url" class="btn btn-primary btn-sm">保存站点地址</button>
                 </form>
                 <p class="text-muted" style="font-size:13px;word-break:break-all;">
@@ -178,17 +178,32 @@
                     公告将写入目标服务器的 motd（用户 SSH 登录时显示，支持颜色高亮），并在系统首页同步展示；
                     系统仅保留一条公告，保存即覆盖。
                 </p>
+                <p class="text-muted" style="font-size:13px;margin-bottom:8px;">
+                    支持 markdown 子集：<code># 标题</code> <code>## 二级</code> <code>### 三级</code>
+                    <code>**加粗**</code> <code>*斜体*</code> <code>{red}红字{/red}</code>
+                    <code>[文字](https://网址)</code>。点击下方按钮快速插入。
+                </p>
                 <form method="post" id="announcement-form">
                     {% csrf_token %}
-                    <p><label>标题</label><input type="text" name="title" class="form-control" value="{{ announcements.first.title|default:'' }}"></p>
-                    <p><label>内容（HTML 编辑器，可高亮调色）</label></p>
-                    <!-- 初始内容用隐藏 textarea 传递：Django 自动转义，含引号/尖括号也安全（不用 data-* 属性）。
-                         视图已预处理：html_content 为空时回退纯文本 content，JS 端把纯文本换行转 <br> 再载入编辑器 -->
-                    <textarea id="announcement-initial" style="display:none;">{{ announcement_initial }}</textarea>
-                    <div id="announcement-toolbar" style="border:1px solid #ccc;border-bottom:none;border-radius:4px 4px 0 0;background:#f9f9f9;"></div>
-                    <div id="announcement-editor" style="border:1px solid #ccc;border-radius:0 0 4px 4px;min-height:180px;"></div>
-                    <input type="hidden" name="html_content" id="announcement-html">
-                    <input type="hidden" name="content" id="announcement-text">
+                    <div class="btn-group btn-group-sm" style="margin-bottom:6px;">
+                        <button type="button" class="btn btn-default md-btn" data-before="# " data-placeholder="一级标题">H1</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="## " data-placeholder="二级标题">H2</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="### " data-placeholder="三级标题">H3</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="**" data-after="**" data-placeholder="加粗文字">加粗</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="*" data-after="*" data-placeholder="斜体文字">斜体</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="[文字](https://" data-after=")" data-placeholder="文字">链接</button>
+                    </div>
+                    <div class="btn-group btn-group-sm" style="margin-bottom:6px;">
+                        <button type="button" class="btn btn-default md-btn" data-before="{red}" data-after="{/red}" data-placeholder="红字">红</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="{yellow}" data-after="{/yellow}" data-placeholder="黄字">黄</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="{green}" data-after="{/green}" data-placeholder="绿字">绿</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="{blue}" data-after="{/blue}" data-placeholder="蓝字">蓝</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="{purple}" data-after="{/purple}" data-placeholder="紫字">紫</button>
+                        <button type="button" class="btn btn-default md-btn" data-before="{gray}" data-after="{/gray}" data-placeholder="灰字">灰</button>
+                    </div>
+                    <textarea id="announcement-content" name="content" class="form-control" rows="8"
+                              style="font-family:Consolas,Menlo,monospace;"
+                              placeholder="输入公告内容（markdown 子集）…">{{ announcement_initial }}</textarea>
                     <p style="margin-top:8px;"><label><input type="checkbox" name="enabled" {% if not announcements or announcements.first.enabled %}checked{% endif %}> 启用</label></p>
                     <button type="submit" name="add_announcement" class="btn btn-primary">保存公告</button>
                 </form>

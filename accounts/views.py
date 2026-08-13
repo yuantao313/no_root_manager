@@ -215,31 +215,6 @@ def toggle_switch(request):
     return JsonResponse({"ok": True})
 
 
-def _html_to_plain(html: str) -> str:
-    """剥离 HTML 标签提取纯文本（公告无纯文本内容时的回退）。"""
-    if not html:
-        return ""
-    import re
-    from html.parser import HTMLParser
-
-    class _TextOnly(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.parts = []
-
-        def handle_data(self, data):
-            self.parts.append(data)
-
-        def handle_endtag(self, tag):
-            if tag in ("p", "div", "li", "br", "h1", "h2", "h3", "h4"):
-                self.parts.append("\n")
-
-    parser = _TextOnly()
-    parser.feed(html)
-    text = "".join(parser.parts)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
-
-
 class GitCodeSignupForm(SocialSignupForm):
     """GitCode 首次登录创建新账号：与注册一致，强制填写姓名/工号/用户名/密码/邮箱。
 
@@ -642,16 +617,13 @@ def settings(request):
                 hook.delete()
                 messages.success(request, "Webhook 已删除。")
         elif "add_announcement" in request.POST:
-            title = request.POST.get("title", "").strip()
+            # 公告内容为 markdown 子集（# 标题 / **加粗** / *斜体* / {颜色} / [链接](url)），
+            # 保存后由转换器分别渲染到首页公告栏（HTML）与服务器 motd（ANSI）
             content = request.POST.get("content", "").strip()
-            # 公告 HTML 版本（编辑器生成，用于 motd 高亮渲染）；无 HTML 时回退纯文本
-            html_content = request.POST.get("html_content", "").strip()
-            if content or html_content:
+            if content:
                 # 公告单例：有则更新，无则新建（save 内自动清理其他记录）
                 ann = Announcement.objects.first() or Announcement()
-                ann.title = title
-                ann.content = content or _html_to_plain(html_content)
-                ann.html_content = html_content
+                ann.content = content
                 ann.enabled = "enabled" in request.POST
                 ann.save()
                 # 默认自动推送公告到全部服务器 motd（无需手动）
@@ -668,13 +640,8 @@ def settings(request):
             "syscfg": syscfg,
             "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
             "announcements": Announcement.objects.all(),
-            # 公告编辑器初始内容：html_content 优先，为空回退纯文本 content
-            # （无公告时返回空串；模板内直接 .first.content 会抛 AttributeError，故视图预处理）
-            "announcement_initial": (
-                (lambda a: a.html_content or a.content)(Announcement.objects.first())
-                if Announcement.objects.first()
-                else ""
-            ),
+            # 公告编辑器初始内容：markdown 源码（模板内直接 .first.content 会抛 AttributeError，故视图预处理）
+            "announcement_initial": (Announcement.objects.first().content if Announcement.objects.first() else ""),
             # 固定回调地址（与 provider 登录实际使用的 redirect_uri 一致，见 GitCodeOAuth2Adapter.get_callback_url）
             "gitcode_callback_url": f"{syscfg.get_site_base_url()}{reverse('gitcode_callback')}",
             "email_cfg": email_cfg,

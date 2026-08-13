@@ -14,8 +14,9 @@ class Application(models.Model):
         GROUP = "group", "申请用户组"
         ADMIN = "admin", "申请平台管理员"
 
-    # 可申请的用户组（用户组类型可选加入；逗号分隔存储）
-    USER_GROUP_CHOICES = ["sudo", "docker", "HwHiAiUser"]
+    # 可申请的用户组（用户组类型可选加入；逗号分隔存储）。
+    # 仅普通用户组：不给普通用户开放 HwHiAiUser 等驱动专用组
+    USER_GROUP_CHOICES = ["sudo", "docker"]
 
     class Status(models.TextChoices):
         PENDING = "pending", "待审批"
@@ -46,10 +47,6 @@ class Application(models.Model):
     title = models.CharField("申请标题", max_length=100, blank=True, default="")
     # 申请内容（账号/权限的具体说明）
     description = models.TextField("申请内容", blank=True)
-    # 使用截止时间：到期后账号在目标机器自动失效
-    valid_until = models.DateTimeField("使用截止时间", null=True, blank=True, help_text="到期后账号自动停用，可不填")
-    # 申请 root/sudo 权限（当天有效，次日失效需重新申请）
-    needs_sudo = models.BooleanField("申请 root/sudo 权限", default=False, help_text="该权限当天有效，次日自动失效")
     # 目标服务器（从服务器表选择）
     target_server = models.ForeignKey(
         Server,
@@ -68,13 +65,13 @@ class Application(models.Model):
         default="",
         help_text="用户申请时勾选的可附加分组，逗号分隔",
     )
-    # 申请的用户组（sudo/docker/HwHiAiUser，逗号分隔；创建类型可选）
+    # 申请的用户组（sudo/docker，逗号分隔；创建类型可选）
     user_groups = models.CharField(
         "申请用户组",
         max_length=100,
         blank=True,
         default="",
-        help_text="可申请加入的用户组：sudo、docker、HwHiAiUser（逗号分隔）",
+        help_text="可申请加入的用户组：sudo、docker（逗号分隔）",
     )
 
     status = models.CharField(
@@ -88,8 +85,6 @@ class Application(models.Model):
     provision_note = models.TextField("开通结果", blank=True)
     # 初始密码（加密存储）：邮件不可用时可从工单查看，首次登录强制修改
     initial_password = EncryptedTextField("初始密码", blank=True)
-    # sudo 权限授予结果（独立记录，避免与开通信息混在一起）
-    sudo_note = models.TextField("sudo 授予结果", blank=True)
     reviewer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -119,51 +114,3 @@ class Application(models.Model):
         """
         groups = [g.strip() for g in (self.applied_groups or "").split(",") if g.strip()]
         return ",".join(g for g in groups if g != "npu")
-
-
-class SudoGrant(models.Model):
-    """root/sudo 权限授予记录（严格审计）：当天有效，次日自动失效。"""
-
-    class Status(models.TextChoices):
-        ACTIVE = "active", "生效中"
-        EXPIRED = "expired", "已失效"
-
-    application = models.ForeignKey(
-        Application,
-        on_delete=models.CASCADE,
-        related_name="sudo_grants",
-        verbose_name="关联申请",
-    )
-    server = models.ForeignKey(
-        Server,
-        on_delete=models.CASCADE,
-        related_name="sudo_grants",
-        verbose_name="目标服务器",
-    )
-    username = models.CharField("机器用户名", max_length=100)
-    granted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="granted_sudo",
-        verbose_name="授予人（审批人）",
-    )
-    granted_at = models.DateTimeField("授予时间", auto_now_add=True)
-    expires_at = models.DateTimeField("失效时间", help_text="当日 23:59:59 失效")
-    revoked_at = models.DateTimeField("实际失效时间", null=True, blank=True)
-    status = models.CharField(
-        "状态",
-        max_length=20,
-        choices=Status.choices,
-        default=Status.ACTIVE,
-    )
-    revoke_note = models.TextField("失效说明", blank=True)
-
-    class Meta:
-        ordering = ["-granted_at"]
-        verbose_name = "sudo 权限授予记录"
-        verbose_name_plural = "sudo 权限授予记录"
-
-    def __str__(self):
-        return f"{self.username}@{self.server.name} sudo（{self.get_status_display()}）"

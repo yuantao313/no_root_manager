@@ -33,8 +33,6 @@ class ServerForm(forms.ModelForm):
             "credential",
             "default_group",
             "is_npu",
-            "npu_groups",
-            "init_script",
             "nproc_limit",
             "nofile_limit",
             "as_limit",
@@ -53,7 +51,7 @@ class ServerForm(forms.ModelForm):
         }
         help_texts = {
             "default_group": "多个分组用英文逗号分隔，如：dev,ops",
-            "npu_groups": "NPU 卡组列表，用英文逗号分隔（如 npu,npu0,npu1）；也可保存后在详情页自动检测",
+            "is_npu": "勾选后，用户申请的分组选择转换为 NPU 算力卡组选择；NPU 卡组由系统自动检测（详情页可重新检测）",
             "nproc_limit": "每个用户最大进程数，0 表示不限制",
             "nofile_limit": "每个用户最大打开文件数，0 表示不限制",
             "as_limit": "每个用户最大虚拟内存（KB），0 表示不限制",

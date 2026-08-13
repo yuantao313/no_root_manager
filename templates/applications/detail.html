@@ -39,10 +39,6 @@
             {% endif %}
             <dt>申请内容</dt>
             <dd>{{ application.description|linebreaks }}</dd>
-            {% if application.valid_until %}
-            <dt>使用截止时间</dt>
-            <dd>{{ application.valid_until|date:"Y-m-d H:i" }}（到期后账号自动停用）</dd>
-            {% endif %}
             <dt>提交时间</dt>
             <dd>{{ application.created_at|date:"Y-m-d H:i" }}</dd>
         </dl>
@@ -64,31 +60,6 @@
                     服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。
                 </span>
             </p>
-        </div>
-        {% endif %}
-
-        {% if application.sudo_grants.all %}
-        <div class="review-box">
-            <strong>sudo 权限记录（审计）</strong>
-            <table class="table table-striped" style="margin-top:8px;font-size:13px;">
-                <thead>
-                    <tr><th>服务器</th><th>授予人</th><th>授予时间</th><th>失效时间</th><th>状态</th></tr>
-                </thead>
-                <tbody>
-                    {% for g in application.sudo_grants.all %}
-                    <tr>
-                        <td>{{ g.server.name }}</td>
-                        <td>{{ g.granted_by.username|default:"系统" }}</td>
-                        <td>{{ g.granted_at|date:"Y-m-d H:i" }}</td>
-                        <td>{{ g.expires_at|date:"Y-m-d H:i" }}</td>
-                        <td>
-                            {% if g.status == 'active' %}<span class="label label-success">{{ g.get_status_display }}</span>
-                            {% else %}<span class="label label-default">{{ g.get_status_display }}</span>{% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
         </div>
         {% endif %}
 
