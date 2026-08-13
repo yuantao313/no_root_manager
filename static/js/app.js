@@ -642,4 +642,37 @@
             });
         });
     }
+
+    /* ===== 服务器详情页：用户组按钮灯编辑（点击切换 → 保存按钮亮起） =====
+       模板约定：每行一个 data-group-form（含 hidden groups），组按钮带
+       data-group/data-active，nrm_managed 标识组由后端强制保留不参与收集。 */
+    document.querySelectorAll("[data-group-form]").forEach(function (form) {
+        var row = form.closest("tr");
+        var saveBtn = form.querySelector("[data-save-groups]");
+        if (!row || !saveBtn) return;
+        row.querySelectorAll(".group-toggle, .npu-toggle").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                // 切换灯状态：active=1 亮（btn-primary），active=0 灰（btn-default）
+                var active = btn.getAttribute("data-active") === "1";
+                if (active) {
+                    btn.setAttribute("data-active", "0");
+                    btn.classList.remove("btn-primary");
+                    btn.classList.add("btn-default");
+                } else {
+                    btn.setAttribute("data-active", "1");
+                    btn.classList.remove("btn-default");
+                    btn.classList.add("btn-primary");
+                }
+                saveBtn.disabled = false; // 保存按钮亮起
+            });
+        });
+        // 提交前收集该行所有亮着的组（逗号分隔写入 hidden groups）
+        form.addEventListener("submit", function () {
+            var groups = [];
+            row.querySelectorAll("[data-active='1']").forEach(function (b) {
+                groups.push(b.getAttribute("data-group"));
+            });
+            form.querySelector('input[name="groups"]').value = groups.join(",");
+        });
+    });
 })();

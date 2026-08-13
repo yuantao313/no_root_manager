@@ -23,6 +23,7 @@ from .management import (
     lock_user,
     remove_user_group,
     run_init_script,
+    sort_user_groups,
     take_over_user,
     unlock_user,
 )
@@ -179,10 +180,18 @@ def server_detail(request, pk):
             # 用户所属组（内存缓存批量查询，失败不影响列表展示，组信息可为空）
             try:
                 groups_map = get_user_groups_cached(server, managed_members)
+                npu_names = set(server.npu_groups_list())
                 for item in managed_users:
-                    item["groups"] = groups_map.get(item["username"], [])
+                    groups = groups_map.get(item["username"], [])
+                    priority, npu_in, others = sort_user_groups(item["username"], groups, npu_names)
+                    item["groups_priority"] = priority
+                    item["groups_npu"] = npu_in
+                    item["groups_other"] = others
             except Exception:  # noqa: BLE001 —— 组查询失败降级为空组展示
-                pass
+                for item in managed_users:
+                    item["groups_priority"] = []
+                    item["groups_npu"] = []
+                    item["groups_other"] = []
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
             managed_users = []
@@ -194,6 +203,8 @@ def server_detail(request, pk):
             "available_users": available_users,
             # 受管用户：机器用户名 + 归属系统用户（dict 列表，模板按 item.username/item.user 渲染）
             "managed_users": managed_users,
+            # NPU 卡组全量（按钮灯渲染用）：仅 NPU 服务器有值
+            "npu_group_names": server.npu_groups_list(),
             # 手动接管时可选绑定的平台用户（下拉）
             "sys_users": User.objects.order_by("username"),
         },
@@ -297,6 +308,42 @@ def server_remove_user_group(request, pk):
         messages.success(request, msg)
     else:
         messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_update_user_groups(request, pk):
+    """按目标组全集更新受管用户所属组（仅超级管理员）。
+
+    详情页按钮灯编辑后一次性提交目标组全集（逗号分隔）；后端对比当前组
+    计算加入/移出差异并批量执行，nrm_managed 标识组强制保留不可移除。
+    """
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    if request.method != "POST" or not username:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    target = {g.strip() for g in request.POST.get("groups", "").split(",") if g.strip()}
+    target.add(NRM_GROUP)  # 受管标识组强制保留
+    current = set(get_user_groups_cached(server, [username]).get(username, []))
+    to_add = target - current
+    to_remove = current - target
+    ok_all = True
+    for g in sorted(to_add):
+        ok, msg = add_user_group(server, username, g)
+        if not ok:
+            ok_all = False
+            messages.error(request, msg)
+    for g in sorted(to_remove):
+        if g == NRM_GROUP:
+            continue
+        ok, msg = remove_user_group(server, username, g)
+        if not ok:
+            ok_all = False
+            messages.error(request, msg)
+    clear_user_groups_cache(server)
+    if ok_all:
+        messages.success(request, f"已更新 {username} 的用户组配置。")
     return redirect("servers:detail", pk=pk)
 
 

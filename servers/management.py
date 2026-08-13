@@ -451,7 +451,7 @@ def list_user_groups(server, usernames):
     names = [u for u in (usernames or []) if u]
     if not names:
         return True, {}, "无用户"
-    ok, out, err = _run_mgmt(server, ["list_groups", ",".join(names)], timeout=60)
+    ok, out, err = _run_mgmt(server, ["list_groups", ",".join(names)])
     if not ok:
         return False, {}, err or "查询用户组失败"
     result = {}
@@ -461,6 +461,20 @@ def list_user_groups(server, usernames):
             groups = [g for g in parts[2].split(",") if g] if len(parts) > 2 else []
             result[parts[1]] = groups
     return True, result, f"已查询 {len(result)} 个用户"
+
+
+def sort_user_groups(username, groups, npu_group_names):
+    """用户组展示排序：排除用户本名组，nrm_managed 置顶、NPU 组其次、其他组按序。
+
+    username: 目标机用户名（Linux 默认同名私有组不展示）。
+    npu_group_names: 服务器 NPU 卡组集合（npu + npuN）。
+    返回 (priority, npu_groups, others) 三个列表。
+    """
+    groups = [g for g in (groups or []) if g and g != username]
+    priority = [g for g in groups if g == NRM_GROUP]
+    npu_in = sorted(g for g in groups if g in npu_group_names)
+    others = sorted(g for g in groups if g != NRM_GROUP and g not in npu_group_names)
+    return priority, npu_in, others
 
 
 def get_user_groups_cached(server, usernames, force_refresh=False):

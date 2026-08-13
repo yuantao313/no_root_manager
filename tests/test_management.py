@@ -186,6 +186,31 @@ class TestUserGroups:
         assert ok is True and groups_map == {}
         mock.assert_not_called()
 
+    def test_sort_user_groups(self, ubuntu_server):
+        """组展示排序：排除用户本名组，nrm_managed 置顶、NPU 组其次、其他组排序。"""
+        from servers.management import sort_user_groups
+
+        npu_names = {"npu", "npu0", "npu1"}
+        priority, npu_in, others = sort_user_groups("alice", ["alice", "nrm_managed", "docker", "sudo", "npu1", "npu0"], npu_names)
+        assert priority == ["nrm_managed"]
+        assert npu_in == ["npu0", "npu1"]
+        assert others == ["docker", "sudo"]
+        # 本名组被排除
+        assert "alice" not in priority + npu_in + others
+
+    def test_sort_user_groups_empty(self, ubuntu_server):
+        from servers.management import sort_user_groups
+
+        priority, npu_in, others = sort_user_groups("alice", [], set())
+        assert priority == [] and npu_in == [] and others == []
+
+    def test_sort_user_groups_nrm_only(self, ubuntu_server):
+        from servers.management import sort_user_groups
+
+        priority, npu_in, others = sort_user_groups("alice", ["nrm_managed"], set())
+        assert priority == ["nrm_managed"]
+        assert npu_in == [] and others == []
+
     def test_add_user_group_uses_script(self, ubuntu_server):
         from servers.management import add_user_group
 
@@ -293,8 +318,88 @@ class TestUserGroups:
         mock_clear.assert_called_once()
         assert "已从 docker 组移除" in resp.content.decode()
 
+    def test_update_user_groups_view_diff(self, client, ubuntu_server, django_user_model):
+        """批量切换接口：按目标组全集对比当前组，执行加入/移出差异。"""
+        su = django_user_model.objects.create_user(username="su7", password="x12345!", is_staff=True, is_superuser=True)
+        client.force_login(su)
+        with (
+            patch(
+                "servers.views.get_user_groups_cached",
+                return_value={"alice": ["nrm_managed", "docker"]},
+            ),
+            patch("servers.views.add_user_group", return_value=(True, "用户 alice 已加入 sudo 组")) as mock_add,
+            patch("servers.views.remove_user_group", return_value=(True, "用户 alice 已从 docker 组移除")) as mock_rm,
+            patch("servers.views.clear_user_groups_cache") as mock_clear,
+        ):
+            resp = client.post(
+                reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
+                {"username": "alice", "groups": "nrm_managed,sudo"},
+                follow=True,
+            )
+        assert resp.status_code == 200
+        # 差异：加入 sudo、移出 docker；nrm_managed 保持不变
+        mock_add.assert_called_once_with(ubuntu_server, "alice", "sudo")
+        mock_rm.assert_called_once_with(ubuntu_server, "alice", "docker")
+        mock_clear.assert_called_once()
+        assert "已更新 alice 的用户组配置" in resp.content.decode()
+
+    def test_update_user_groups_keeps_nrm_managed(self, client, ubuntu_server, django_user_model):
+        """前端即使未提交 nrm_managed，后端也强制保留标识组不移出。"""
+        su = django_user_model.objects.create_user(username="su8", password="x12345!", is_staff=True, is_superuser=True)
+        client.force_login(su)
+        with (
+            patch(
+                "servers.views.get_user_groups_cached",
+                return_value={"alice": ["nrm_managed", "docker"]},
+            ),
+            patch("servers.views.add_user_group", return_value=(True, "用户 alice 已加入 sudo 组")) as mock_add,
+            patch("servers.views.remove_user_group", return_value=(True, "用户 alice 已从 docker 组移除")) as mock_rm,
+            patch("servers.views.clear_user_groups_cache"),
+        ):
+            resp = client.post(
+                reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
+                {"username": "alice", "groups": "sudo"},  # 未包含 nrm_managed
+                follow=True,
+            )
+        assert resp.status_code == 200
+        # 移出列表 = docker（nrm_managed 被强制保留），加入列表 = sudo
+        mock_add.assert_called_once_with(ubuntu_server, "alice", "sudo")
+        mock_rm.assert_called_once_with(ubuntu_server, "alice", "docker")
+
+    def test_update_user_groups_requires_superuser(self, client, ubuntu_server, django_user_model):
+        """非超级管理员访问批量切换接口 → 重定向。"""
+        normal = django_user_model.objects.create_user(username="norm3", password="x12345!")
+        client.force_login(normal)
+        resp = client.post(
+            reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
+            {"username": "alice", "groups": "sudo"},
+        )
+        assert resp.status_code == 302
+
+    def test_update_user_groups_no_change(self, client, ubuntu_server, django_user_model):
+        """目标组与当前组一致：不调用 add/remove，只提示已更新。"""
+        su = django_user_model.objects.create_user(username="su9", password="x12345!", is_staff=True, is_superuser=True)
+        client.force_login(su)
+        with (
+            patch(
+                "servers.views.get_user_groups_cached",
+                return_value={"alice": ["nrm_managed"]},
+            ),
+            patch("servers.views.add_user_group") as mock_add,
+            patch("servers.views.remove_user_group") as mock_rm,
+            patch("servers.views.clear_user_groups_cache"),
+        ):
+            resp = client.post(
+                reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
+                {"username": "alice", "groups": "nrm_managed"},
+                follow=True,
+            )
+        assert resp.status_code == 200
+        mock_add.assert_not_called()
+        mock_rm.assert_not_called()
+
     def test_detail_shows_user_groups(self, client, ubuntu_server, django_user_model):
-        """详情页受管用户列表显示所属组（nrm_managed 无移除按钮，其他组有）。"""
+        """详情页受管用户列表显示所属组（按钮灯：nrm_managed 为不可编辑标识组，其他组可切换）。"""
         su = django_user_model.objects.create_user(username="su5", password="x12345!", is_staff=True, is_superuser=True)
         client.force_login(su)
         with (
@@ -308,10 +413,14 @@ class TestUserGroups:
             resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
         html = resp.content.decode()
         assert "用户组" in html  # 列头
-        assert ">sudo</span>" in html
-        assert ">docker</span>" in html
+        # 非 NPU 服务器不显示 NPU 卡组列
+        assert "NPU 卡组" not in html
+        # nrm_managed 为标识组 label，不渲染成可切换按钮
+        assert "nrm_managed" in html
+        assert 'data-group="nrm_managed"' not in html
+        # sudo/docker 渲染为按钮灯（data-active=1 表示在组中）
+        assert 'data-group="sudo"' in html
+        assert 'data-group="docker"' in html
+        # 每行有保存组按钮（默认 disabled，点击按钮灯后由 JS 亮起）
+        assert "data-save-groups" in html
         assert "加组" in html  # 加组按钮
-        # nrm_managed 不渲染移除按钮，sudo/docker 组有 × 移除表单
-        assert 'value="nrm_managed"' not in html
-        assert 'value="sudo"' in html
-        assert 'value="docker"' in html
