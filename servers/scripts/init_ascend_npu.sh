@@ -48,12 +48,10 @@ done
         idx="${dev##*davinci}"
         echo "KERNEL==\"davinci${idx}\", OWNER=\"root\", GROUP=\"npu${idx}\", MODE=\"0660\""
     done
-    # 公共管理设备（davinci_manager / davinci_svm / davinci_hdc 等非卡节点）归 npu 组
+    # 公共管理设备（davinci_manager / devmm_svm / hisi_hdc 等非卡节点）归 npu 组
     echo "KERNEL==\"davinci_manager\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
-    echo "KERNEL==\"davinci_svm\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
-    echo "KERNEL==\"davinci_hdc\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
-    # 兜底：未列出的 davinci 节点也至少归公共组（权限并集，不影响卡组隔离）
-    echo "KERNEL==\"davinci*\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
+    echo "KERNEL==\"devmm_svm\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
+    echo "KERNEL==\"hisi_hdc\", OWNER=\"root\", GROUP=\"npu\", MODE=\"0660\""
 } > "$RULE_FILE"
 log "已写入 $RULE_FILE"
 
@@ -67,7 +65,7 @@ for dev in $devs; do
     chgrp "npu${idx}" "$dev" 2>/dev/null || log "chgrp $dev 失败（跳过）"
     chmod 660 "$dev" 2>/dev/null || true
 done
-for mgmt in /dev/davinci_manager /dev/davinci_svm /dev/davinci_hdc; do
+for mgmt in /dev/davinci_manager /dev/devmm_svm /dev/hisi_hdc; do
     [ -e "$mgmt" ] && { chgrp npu "$mgmt" 2>/dev/null || true; chmod 660 "$mgmt" 2>/dev/null || true; }
 done
 
