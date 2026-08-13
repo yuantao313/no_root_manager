@@ -38,7 +38,7 @@ class ApplicationForm(forms.ModelForm):
         required=False,
         label="NPU 卡组（可选）",
         help_text="NPU 服务器可选择授权使用的算力卡组",
-        widget=forms.CheckboxSelectMultiple,
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "nrm-checkbox"}),
     )
     # 转移类型：目标机器已有用户名（由前端从机器读取，下拉选择）
     transfer_username = DynamicChoiceField(
@@ -54,7 +54,7 @@ class ApplicationForm(forms.ModelForm):
         label="申请用户组",
         help_text="申请加入所选用户组（可多选）",
         choices=[(g, g) for g in Application.USER_GROUP_CHOICES],
-        widget=forms.CheckboxSelectMultiple,
+        widget=forms.CheckboxSelectMultiple(attrs={"class": "nrm-checkbox"}),
     )
 
     class Meta:
