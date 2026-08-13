@@ -6,22 +6,36 @@
 - ``servers/devices.py``：设备信息（NPU 卡型号/内存/健康状态）
 - ``servers/management.py``：detect_npu_groups 卡组检测（NPU ID → npuN 组）
 
-npu-smi info 输出格式（每张卡两行，之后是进程表，本模块只解析设备表）::
+npu-smi info 输出格式因版本而异，实测两种布局（每张卡两行，之后是进程表，
+本模块只解析设备表）::
 
-    | NPU ID | Name ...    | Health | Power(W)  Temp(C)  Hugepages-Usage(page) |
-    |        | Bus-Id      | NPU Util(%) Memory-Usage(MB) HBM-Usage(MB)     |
-    | 0      | Ascend950PR | OK     | 276.0     69       0     / 0            |
-    |        | 0000:71:00.0| 99     0    / 0      8824  / 131072           |
+    25.x：| NPU ID | Name       | Health | Power(W) Temp(C) Hugepages-Usage(page) |
+          |        | Bus-Id     | NPU Util(%) Memory-Usage(MB) HBM-Usage(MB)     |
+          | 0      | Ascend950PR| OK     | 276.0     69      0 / 0             |
+          |        | 0000:71:00.0 | 99  0 / 0        8824 / 131072           |
 
-不同版本列名可能微调，解析按位置 + ``used / total`` 模式提取，缺失字段降级为默认值。
+    26.x：| NPU   Name      | Health | Power(W) Temp(C) Hugepages-Usage(page) |
+          | Chip            | Bus-Id | AICore(%) Memory-Usage(MB) HBM-Usage(MB) |
+          | 0     910B3     | OK     | 100.0     49      0 / 0             |
+          | 0               | 0000:C1:00.0 | 0  0 / 0  8676 / 65536       |
+
+差异点：26.x 的 NPU ID 与型号同格（``0     910B3``）、次行首列是 Chip 号
+（数字，非空）、利用率列名为 AICore(%)。解析策略不依赖列名/列位置：
+
+- **次行识别**：行内存在 PCI Bus-Id（``0000:xx:xx.x``）即视为次行
+- **主行识别**：首格以数字开头（25.x 纯 ID / 26.x ID+型号同格）
+- **Health 定位**：主行中按已知取值（OK/Warning/Alarm/Critical/Unknown）定位
+  健康列，其前为型号（25.x 单独列），其后为 Power/Temp 数据
 """
 
 import re
 
-# PCI Bus-Id 形如 0000:71:00.0（区分"第二行"，避免与表头/其他行混淆）
+# PCI Bus-Id 形如 0000:71:00.0（用于识别"次行"，兼容版本间列数差异）
 _BUS_ID_RE = re.compile(r"^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$")
 # "used / total" 内存对（Memory-Usage / HBM-Usage 均为该形式）
 _PAIR_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
+# npu-smi Health 列的已知取值（用于在主行中定位健康列，兼容 25.x/26.x 列位置差异）
+_HEALTH_VALUES = {"OK", "Warning", "Alarm", "Critical", "Unknown"}
 
 
 def _split_row(line: str) -> list[str]:
@@ -35,7 +49,14 @@ def _split_row(line: str) -> list[str]:
 
 
 def _parse_card_main(cells: list[str]) -> dict | None:
-    """解析卡的第一行：NPU ID / Name / Health / Power Temp Hugepages。"""
+    """解析卡的主行（NPU ID / 型号 / Health / Power Temp Hugepages）。
+
+    兼容两种布局：
+    - 25.x：``| ID | Name | Health | 数据 |``（ID 单独一格）
+    - 26.x：``| ID Name | Health | 数据 |``（ID 与型号同格）
+
+    通过定位 Health 取值列区分：Health 之前的列视为型号，之后的列解析功耗/温度。
+    """
     card = {
         "index": 0,
         "soc_name": "",
@@ -48,30 +69,40 @@ def _parse_card_main(cells: list[str]) -> dict | None:
         "mem_g": 0,
         "bus_id": "",
     }
-    try:
-        card["index"] = int(cells[0])
-    except (ValueError, IndexError):
+    first_tokens = cells[0].split()
+    if not first_tokens or not first_tokens[0].isdigit():
         return None
-    card["soc_name"] = cells[1] if len(cells) > 1 else ""
-    card["health"] = cells[2] if len(cells) > 2 else ""
-    if len(cells) > 3:
-        vals = cells[3].split()
-        # 期望：<Power(W)> <Temp(C)> <hugepages used/total>，按位置容错取数
-        if len(vals) >= 1:
-            try:
-                card["power_w"] = float(vals[0])
-            except ValueError:
-                pass
-        if len(vals) >= 2:
-            try:
-                card["temp_c"] = int(vals[1])
-            except ValueError:
-                pass
+    card["index"] = int(first_tokens[0])
+    # 型号候选：26.x 布局下与 ID 同格（"0     910B3" → "910B3"）
+    name_parts = first_tokens[1:]
+    # 定位 Health 列（25.x 在 cells[2]，26.x 在 cells[1]）
+    health_col = next((i for i, c in enumerate(cells[1:], start=1) if c in _HEALTH_VALUES), None)
+    if health_col is not None:
+        card["health"] = cells[health_col]
+        # Health 之前的列是型号（25.x 布局的单独 Name 列）
+        name_parts.extend(c for c in cells[1:health_col] if c)
+        # Health 之后是 Power/Temp/Hugepages 数据
+        if health_col + 1 < len(cells):
+            vals = cells[health_col + 1].split()
+            if len(vals) >= 1:
+                try:
+                    card["power_w"] = float(vals[0])
+                except ValueError:
+                    pass
+            if len(vals) >= 2:
+                try:
+                    card["temp_c"] = int(vals[1])
+                except ValueError:
+                    pass
+    else:
+        # 兜底：无 Health 列时，其余非 Bus-Id 列并入型号
+        name_parts.extend(c for c in cells[1:] if c and not _BUS_ID_RE.match(c))
+    card["soc_name"] = " ".join(p for p in name_parts if p).strip()
     return card
 
 
 def _merge_card_second(card: dict, cells: list[str], bus_col: int) -> None:
-    """合并卡的第二行：Bus-Id / NPU Util(%) / Memory-Usage / HBM-Usage。"""
+    """合并卡的次行：Bus-Id / 利用率(%) / Memory-Usage / HBM-Usage。"""
     card["bus_id"] = cells[bus_col]
     if len(cells) > bus_col + 1:
         vals = cells[bus_col + 1].split()
@@ -117,15 +148,16 @@ def parse_npu_smi_info(output: str) -> tuple[list[dict], str]:
         cells = _split_row(line)
         if not cells:
             continue
-        if cells[0].isdigit():
-            # 第一行：NPU ID 为数字 → 新卡
+        # 次行：行内含 PCI Bus-Id（25.x 首列为空 / 26.x 首列为 Chip 号）→ 补充当前卡
+        bus_col = next((i for i, c in enumerate(cells) if _BUS_ID_RE.match(c)), None)
+        if bus_col is not None:
+            if current is not None:
+                _merge_card_second(current, cells, bus_col)
+            continue
+        # 主行：首格以数字开头（25.x 纯 ID / 26.x "ID Name" 同格）→ 新卡
+        first_tokens = cells[0].split()
+        if first_tokens and first_tokens[0].isdigit():
             current = _parse_card_main(cells)
             if current is not None:
                 cards.append(current)
-        elif current is not None:
-            # 第二行：整行定位 Bus-Id 列（列前可能有空单元格，版本间列数微调），
-            # 找到则作为当前卡的补充信息（利用率 / 内存）
-            bus_col = next((i for i, c in enumerate(cells) if _BUS_ID_RE.match(c)), None)
-            if bus_col is not None:
-                _merge_card_second(current, cells, bus_col)
     return cards, error
