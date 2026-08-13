@@ -135,6 +135,44 @@ case "${1:-}" in
         echo "OK grant_npu $username groups=$groups_csv"
         ;;
 
+    list_groups)
+        # list_groups <username_csv>：批量输出用户所属组（一次 SSH 完成，详情页展示用）
+        # 输出约定：USER_GROUPS <username> <组1,组2,...>（每用户一行；不存在的用户标注）
+        users_csv="$2"
+        [ -n "$users_csv" ] || { log "参数错误"; exit 2; }
+        IFS=',' read -ra users <<< "$users_csv"
+        for u in "${users[@]}"; do
+            [ -n "$u" ] || continue
+            if id -u "$u" >/dev/null 2>&1; then
+                groups=$(id -nG "$u" | tr ' ' ',')
+                echo "USER_GROUPS $u ${groups:-无}"
+            else
+                echo "USER_GROUPS $u (用户不存在)"
+            fi
+        done
+        ;;
+
+    add_group)
+        # add_group <username> <group>：将用户加入指定用户组（组不存在自动创建）
+        username="$2"; group="$3"
+        [ -n "$username" ] && [ -n "$group" ] || { log "参数错误"; exit 2; }
+        require_user "$username"
+        ensure_group "$group"
+        usermod -aG "$group" "$username"
+        echo "OK add_group $username group=$group"
+        ;;
+
+    del_group)
+        # del_group <username> <group>：将用户从指定用户组移除（组不存在时忽略）
+        username="$2"; group="$3"
+        [ -n "$username" ] && [ -n "$group" ] || { log "参数错误"; exit 2; }
+        require_user "$username"
+        if getent group "$group" >/dev/null 2>&1; then
+            gpasswd -d "$username" "$group" >/dev/null 2>&1 || true
+        fi
+        echo "OK del_group $username group=$group"
+        ;;
+
     set_limits)
         # set_limits <username> <item1=val1> <item2=val2> ...：写入 limits.d 独立文件
         username="$2"; shift 2
@@ -156,7 +194,7 @@ case "${1:-}" in
         ;;
 
     *)
-        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|revoke_sudo|grant_npu|set_limits|ensure_group> [参数...]"
+        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|revoke_sudo|grant_npu|set_limits|ensure_group|list_groups|add_group|del_group> [参数...]"
         exit 1
         ;;
 esac

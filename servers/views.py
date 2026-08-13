@@ -9,14 +9,19 @@ from config.decorators import superuser_required
 from .devices import clear_device_info_cache, get_device_info, get_device_info_cached
 from .forms import ServerForm
 from .management import (
+    NRM_GROUP,
+    add_user_group,
     clear_managed_users_cache,
     clear_npu_state_cache,
+    clear_user_groups_cache,
     detect_npu_groups,
     ensure_nrm_group,
     get_managed_users_cached,
     get_npu_state_cached,
+    get_user_groups_cached,
     list_system_users,
     lock_user,
+    remove_user_group,
     run_init_script,
     take_over_user,
     unlock_user,
@@ -171,6 +176,13 @@ def server_detail(request, pk):
             managed_users = [
                 {"username": u, "user": bindings.get(u)} for u in managed_members
             ]
+            # 用户所属组（内存缓存批量查询，失败不影响列表展示，组信息可为空）
+            try:
+                groups_map = get_user_groups_cached(server, managed_members)
+                for item in managed_users:
+                    item["groups"] = groups_map.get(item["username"], [])
+            except Exception:  # noqa: BLE001 —— 组查询失败降级为空组展示
+                pass
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
             managed_users = []
@@ -246,6 +258,45 @@ def server_lock_user(request, pk):
         return redirect("servers:detail", pk=pk)
     ok, msg = lock_user(server, username)
     messages.success(request, msg) if ok else messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_add_user_group(request, pk):
+    """将受管用户加入指定用户组（usermod -aG，组不存在自动创建，仅超级管理员）。"""
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    group = request.POST.get("group", "").strip()
+    if request.method != "POST" or not username or not group:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    ok, msg = add_user_group(server, username, group)
+    if ok:
+        clear_user_groups_cache(server)
+        messages.success(request, msg)
+    else:
+        messages.error(request, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+def server_remove_user_group(request, pk):
+    """将受管用户从指定用户组移除（仅超级管理员；nrm_managed 标识组不可移除）。"""
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    group = request.POST.get("group", "").strip()
+    if request.method != "POST" or not username or not group:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    if group == NRM_GROUP:
+        messages.error(request, f"{NRM_GROUP} 是受管用户标识组，不能直接移除。")
+        return redirect("servers:detail", pk=pk)
+    ok, msg = remove_user_group(server, username, group)
+    if ok:
+        clear_user_groups_cache(server)
+        messages.success(request, msg)
+    else:
+        messages.error(request, msg)
     return redirect("servers:detail", pk=pk)
 
 

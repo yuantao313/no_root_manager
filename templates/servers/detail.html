@@ -91,7 +91,7 @@
         {% if managed_users %}
         <table class="table table-striped info-table">
             <thead>
-                <tr><th>机器用户名</th><th>系统用户</th><th>操作</th></tr>
+                <tr><th>机器用户名</th><th>系统用户</th><th>用户组</th><th>操作</th></tr>
             </thead>
             <tbody>
                 {% for item in managed_users %}
@@ -105,6 +105,29 @@
                         {% endif %}
                     </td>
                     <td>
+                        {% if item.groups %}
+                            {% for g in item.groups %}
+                            <span class="label label-default">{{ g }}</span>
+                            {% if g != "nrm_managed" %}
+                            <form method="post" action="{% url 'servers:remove_user_group' server.pk %}" style="display:inline;" data-confirm="确定将 {{ item.username }} 移出 {{ g }} 组吗？">
+                                {% csrf_token %}
+                                <input type="hidden" name="username" value="{{ item.username }}">
+                                <input type="hidden" name="group" value="{{ g }}">
+                                <button type="submit" class="btn btn-link btn-xs" title="移出 {{ g }} 组" style="padding:0 2px;text-decoration:none;">×</button>
+                            </form>
+                            {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="{% url 'servers:add_user_group' server.pk %}" class="form-inline" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="username" value="{{ item.username }}">
+                            <input type="text" name="group" placeholder="组名" class="form-control input-sm" style="width:90px;" required>
+                            <button type="submit" class="btn btn-primary btn-xs">加组</button>
+                        </form>
                         <form method="post" action="{% url 'servers:lock_user' server.pk %}" style="display:inline;" data-confirm="确定禁用用户 {{ item.username }} 吗？">
                             {% csrf_token %}
                             <input type="hidden" name="username" value="{{ item.username }}">

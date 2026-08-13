@@ -125,6 +125,10 @@ _MANAGED_USERS_CACHE: dict[int, tuple[list, str]] = {}
 # 添加服务器时与服务启动时同步，申请界面读取走缓存，避免每次 SSH 检测卡顿
 _NPU_STATE_CACHE: dict[int, dict] = {}
 
+# 用户组信息内存缓存：server_id -> {username: [groups]}
+# 详情页用户管理区展示所属组时批量查询，避免每用户一次 SSH
+_USER_GROUPS_CACHE: dict[int, dict[str, list[str]]] = {}
+
 
 def get_npu_state_cached(server, force_refresh=False):
     """读取服务器 NPU 状态（内存缓存，未命中或强制刷新时才 SSH 检测）。
@@ -489,6 +493,83 @@ def usermod_add_group(server, username, group):
     if ok:
         return True, out or f"用户 {username} 已加入 {group} 组"
     return False, err or f"加入用户组失败：{group}"
+
+
+def list_user_groups(server, usernames):
+    """批量查询目标机用户所属组。返回 (ok, {username: [groups]}, msg)。
+
+    一次 SSH 批量查询（脚本 list_groups 子命令），供详情页用户管理区展示。
+    """
+    names = [u for u in (usernames or []) if u]
+    if not names:
+        return True, {}, "无用户"
+    ok, out, err = _run_mgmt(server, ["list_groups", ",".join(names)], timeout=60)
+    if not ok:
+        return False, {}, err or "查询用户组失败"
+    result = {}
+    for line in out.splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) >= 2 and parts[0] == "USER_GROUPS":
+            groups = [g for g in parts[2].split(",") if g] if len(parts) > 2 else []
+            result[parts[1]] = groups
+    return True, result, f"已查询 {len(result)} 个用户"
+
+
+def get_user_groups_cached(server, usernames, force_refresh=False):
+    """读取目标机用户所属组（内存缓存，未命中或强制刷新时批量 SSH 查询）。
+
+    返回 {username: [groups]}；查询失败返回空 dict（详情页展示降级为空组）。
+    """
+    names = [u for u in (usernames or []) if u]
+    key = server.pk
+    if not force_refresh and key in _USER_GROUPS_CACHE:
+        cache = _USER_GROUPS_CACHE[key]
+        if all(u in cache for u in names):
+            return cache
+    ok, groups_map, _ = list_user_groups(server, names)
+    if ok:
+        _USER_GROUPS_CACHE[key] = groups_map
+        return groups_map
+    return {}
+
+
+def clear_user_groups_cache(server=None):
+    """清空用户组信息内存缓存（增删组后或刷新时调用）。"""
+    if server is None:
+        _USER_GROUPS_CACHE.clear()
+    else:
+        _USER_GROUPS_CACHE.pop(server.pk, None)
+
+
+def add_user_group(server, username, group):
+    """将用户加入指定用户组（usermod -aG，组不存在自动创建）。返回 (ok, msg)。"""
+    username = (username or "").strip()
+    group = (group or "").strip()
+    if not username or not group:
+        return False, "参数错误"
+    if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_\-]{0,31}", group):
+        return False, f"非法组名：{group}"
+    ok, out, err = _run_mgmt(server, ["add_group", username, group])
+    if ok:
+        return True, f"用户 {username} 已加入 {group} 组"
+    return False, err or f"加入用户组失败：{group}"
+
+
+def remove_user_group(server, username, group):
+    """将用户从指定用户组移除（gpasswd -d）。返回 (ok, msg)。
+
+    受管标识组 nrm_managed 禁止直接移除（用户是否受管由接管流程管理）。
+    """
+    username = (username or "").strip()
+    group = (group or "").strip()
+    if not username or not group:
+        return False, "参数错误"
+    if group == NRM_GROUP:
+        return False, f"{NRM_GROUP} 是受管用户标识组，不能直接移除"
+    ok, out, err = _run_mgmt(server, ["del_group", username, group])
+    if ok:
+        return True, f"用户 {username} 已从 {group} 组移除"
+    return False, err or f"移除用户组失败：{group}"
 
 
 def _announcement_text():
