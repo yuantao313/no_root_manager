@@ -75,8 +75,12 @@ if MODE == "dev":
     DEBUG = True
     # 开发模式：任意 host 均可访问，不做域名拦截
     ALLOWED_HOSTS = ["*"]
-    # CSRF 来源宽松，避免本地/局域网调试被拦
-    CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"]
+    # CSRF 来源：通配符 + 环境变量显式来源。
+    # 注意：Django 6.1 对裸 "http://*" 通配匹配有限（实测不匹配具体 Origin），
+    # 反代/生产入口必须显式加入实际来源（如 http://192.168.9.216:18888），
+    # 因此在 dev 模式同样读取 .env 的 NRM_CSRF_TRUSTED_ORIGINS 并追加。
+    _csrf_env = [o.strip() for o in os.environ.get("NRM_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+    CSRF_TRUSTED_ORIGINS = ["http://*", "https://*"] + _csrf_env
     LOG_LEVEL = "DEBUG"
 else:  # deploy
     DEBUG = os.environ.get("NRM_DEBUG", "False").strip().lower() == "true"
