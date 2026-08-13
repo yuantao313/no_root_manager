@@ -35,11 +35,21 @@ if [ -z "$NPU_SMI" ]; then
 fi
 
 # ---------- 执行 npu-smi info（timeout 60 + 重试一次，防驱动响应慢卡死）----------
+# npu-smi 读取设备/HBM 内存需要足够权限：root 直接执行；
+# 非 root（外层 sudo -n bash 提权不可用的场景）显式 sudo -n 提权。
+run_smi() {
+    if [ "$(id -u)" = "0" ]; then
+        timeout 60 "$NPU_SMI" info 2>/dev/null
+    else
+        timeout 60 sudo -n "$NPU_SMI" info 2>/dev/null
+    fi
+}
+
 out=""
 for attempt in 1 2; do
     # set -euo pipefail 下命令替换必须 || true：超时返回 124 时不退出脚本，
     # 而是走下方 NPU_ERROR 降级输出，避免整个采集卡死
-    out=$("$NPU_SMI" info 2>/dev/null) || true
+    out=$(run_smi) || true
     if [ -n "$out" ]; then
         break
     fi
