@@ -12,7 +12,8 @@ from django.urls import reverse
 
 from credentials.models import Credential
 from servers import ssh
-from servers.forms import ServerForm
+from servers.admin import ServerAdmin
+from servers.forms import SERVER_EDIT_FIELDS, ServerForm
 from servers.management import grant_sudo, usermod_add_group
 from servers.models import Server
 
@@ -118,6 +119,10 @@ class TestHostKeyPinning:
 
 
 class TestServerFingerprintForm:
+    def test_form_and_admin_share_editable_fields(self):
+        assert ServerForm.Meta.fields == SERVER_EDIT_FIELDS
+        assert ServerAdmin.fieldsets[0][1]["fields"] == SERVER_EDIT_FIELDS
+
     def _data(self, credential, **overrides):
         data = {
             "name": "server",

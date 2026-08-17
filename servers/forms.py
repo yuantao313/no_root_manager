@@ -5,6 +5,15 @@ from credentials.models import Credential
 from .models import ROOT_EQUIVALENT_GROUPS, Server
 from .ssh import normalize_host_key_fingerprint
 
+SERVER_EDIT_FIELDS = (
+    "name",
+    "host",
+    "port",
+    "ssh_host_key_fingerprint",
+    "credential",
+    "default_group",
+)
+
 
 class ServerForm(forms.ModelForm):
     credential = forms.ModelChoiceField(
@@ -17,14 +26,7 @@ class ServerForm(forms.ModelForm):
 
     class Meta:
         model = Server
-        fields = [
-            "name",
-            "host",
-            "port",
-            "ssh_host_key_fingerprint",
-            "credential",
-            "default_group",
-        ]
+        fields = SERVER_EDIT_FIELDS
         widgets = {
             "port": forms.NumberInput(attrs={"min": 1, "max": 65535}),
         }

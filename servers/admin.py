@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .forms import ServerForm
+from .forms import SERVER_EDIT_FIELDS, ServerForm
 from .models import Server
 
 
@@ -21,16 +21,7 @@ class ServerAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             None,
-            {
-                "fields": (
-                    "name",
-                    "host",
-                    "port",
-                    "ssh_host_key_fingerprint",
-                    "credential",
-                    "default_group",
-                )
-            },
+            {"fields": SERVER_EDIT_FIELDS},
         ),
         ("时间", {"fields": ("created_at", "updated_at")}),
     )
