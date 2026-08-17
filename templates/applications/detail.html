@@ -8,9 +8,7 @@
                 <h3 class="panel-title">申请详情（{{ application.get_apply_type_display }}）</h3>
             </div>
             <div class="col-xs-4 text-right">
-                {% if application.status == 'approved' %}<span class="label label-success">{{ application.get_status_display }}</span>
-                {% elif application.status == 'rejected' %}<span class="label label-danger">{{ application.get_status_display }}</span>
-                {% else %}<span class="label label-warning">{{ application.get_status_display }}</span>{% endif %}
+                {% include "applications/_status_label.html" %}
             </div>
         </div>
     </div>
@@ -54,20 +52,13 @@
                 </span>
             </p>
             {% if can_resend_initial_password %}
-            <form method="post" action="{% url 'applications:resend_mail' application.pk %}" style="margin-top:8px;" data-confirm="确定向 {{ application.email|default:'申请人邮箱' }} 重发开通邮件（含初始密码）吗？">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-warning btn-sm">重发邮件</button>
-                <span class="text-muted" style="font-size:12px;">未收到邮件时，可重新发送开通凭据邮件。</span>
-            </form>
+            {% include "applications/_resend_credentials_form.html" with button_class="btn btn-warning btn-sm" button_label="重发邮件" show_help=True %}
             {% endif %}
         </div>
         {% elif can_resend_initial_password %}
         <div class="review-box alert alert-info">
             <strong>初始凭据仅申请人本人可见。</strong>
-            <form method="post" action="{% url 'applications:resend_mail' application.pk %}" style="margin-top:8px;" data-confirm="确定向 {{ application.email|default:'申请人邮箱' }} 重发开通邮件（含初始密码）吗？">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-default btn-sm">向申请人重发凭据邮件</button>
-            </form>
+            {% include "applications/_resend_credentials_form.html" with button_class="btn btn-default btn-sm" button_label="向申请人重发凭据邮件" %}
         </div>
         {% endif %}
 

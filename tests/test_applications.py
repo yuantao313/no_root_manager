@@ -220,6 +220,46 @@ class TestApplicationForm:
         assert form.is_valid()
 
 
+class TestApplicationFilters:
+    def test_my_filters_keep_selected_values_and_reset_target(self, client, normal, server):
+        Application.objects.create(
+            applicant=normal,
+            username="normal",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            apply_type=Application.ApplyType.CREATE,
+        )
+        Application.objects.create(
+            applicant=normal,
+            username="other",
+            target_server=server,
+            status=Application.Status.REJECTED,
+            apply_type=Application.ApplyType.TRANSFER,
+        )
+        client.force_login(normal)
+
+        response = client.get(
+            reverse("applications:my"),
+            {"status": Application.Status.APPROVED, "apply_type": Application.ApplyType.CREATE},
+        )
+
+        assert list(response.context["applications"].values_list("username", flat=True)) == ["normal"]
+        html = response.content.decode()
+        assert 'value="approved" selected' in html
+        assert 'value="create" selected' in html
+        assert f'href="{reverse("applications:my")}"' in html
+
+    def test_admin_filter_keeps_selected_server_and_reset_target(self, client, staff, server):
+        Application.objects.create(applicant=staff, username="admin", target_server=server)
+        client.force_login(staff)
+
+        response = client.get(reverse("applications:list"), {"server": server.pk})
+
+        html = response.content.decode()
+        assert f'value="{server.pk}" selected' in html
+        assert f'href="{reverse("applications:list")}"' in html
+
+
 class TestRegister:
     def test_register_open_to_all(self, client):
         """用户与管理员地位平等：注册对所有用户开放，注册后自动登录。"""
@@ -471,6 +511,8 @@ class TestReviewProvision:
         assert "初始密码" in html
         assert "Pass123" in html
         assert "首次登录必须修改" in html
+        assert "重发邮件" in html
+        assert "label-success" in html
         assert "no-store" in resp.headers["Cache-Control"]
 
         client.force_login(staff)
@@ -478,6 +520,7 @@ class TestReviewProvision:
         html = resp.content.decode()
         assert "Pass123" not in html
         assert "初始凭据仅申请人本人可见" in html
+        assert "向申请人重发凭据邮件" in html
 
     def test_send_provision_credentials_body_has_force_change(self):
         """开通邮件正文包含密码与"首次必须改密"提示（与工单同步通知）。"""

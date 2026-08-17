@@ -1,0 +1,3 @@
+{% if application.status == 'approved' %}<span class="label label-success">{{ application.get_status_display }}</span>
+{% elif application.status == 'rejected' %}<span class="label label-danger">{{ application.get_status_display }}</span>
+{% else %}<span class="label label-warning">{{ application.get_status_display }}</span>{% endif %}
