@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from config.admin import configured_field
+
 from .forms import CredentialForm
 from .models import Credential
 
@@ -23,10 +25,5 @@ class CredentialAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
-    @admin.display(description="密码", boolean=True)
-    def has_password(self, obj):
-        return bool(obj.password)
-
-    @admin.display(description="私钥", boolean=True)
-    def has_private_key(self, obj):
-        return bool(obj.private_key)
+    has_password = configured_field("password", "密码")
+    has_private_key = configured_field("private_key", "私钥")

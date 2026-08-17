@@ -8,9 +8,8 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, update_session_auth_hash
 from django.contrib.auth.decorators import login_not_required, login_required
 from django.contrib.auth.forms import PasswordResetForm as BasePasswordResetForm
-from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
+from django.contrib.auth.forms import SetPasswordForm, SetPasswordMixin, UserCreationForm
 from django.contrib.auth.models import User
-from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.views import LoginView, PasswordResetView
 from django.contrib.sites.models import Site
 from django.core.validators import RegexValidator
@@ -31,6 +30,9 @@ from servers.management import push_notices
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
 from .models import Announcement, EmailVerification, SystemConfig, UserProfile
+
+_USERNAME_VALIDATOR = RegexValidator(r"^[A-Za-z0-9_]+\Z", "仅允许字母、数字、下划线")
+_USERNAME_HELP_TEXT = "仅限字母/数字/下划线，注册后不可修改，将作为服务器的登录用户名"
 
 
 def _save_employee_id(user, employee_id):
@@ -94,19 +96,9 @@ class NRMPasswordResetView(PasswordResetView):
     success_url = reverse_lazy("accounts:password_reset_done")
 
 
-class RegisterForm(UserCreationForm):
-    """注册表单：姓名/工号/邮箱/用户名/密码信息齐全（与 OAuth 补全页一致）。
+class IdentityFieldsForm(forms.Form):
+    """本地注册与 OAuth 注册共用的身份字段。"""
 
-    工号写入 UserProfile（申请单自动带入），姓名存 first_name。
-    """
-
-    username = forms.CharField(
-        label="用户名",
-        max_length=150,
-        validators=[RegexValidator(r"^[A-Za-z0-9_]+\Z", "仅允许字母、数字、下划线")],
-        help_text="仅限字母/数字/下划线，注册后不可修改，将作为服务器的登录用户名",
-        widget=forms.TextInput(attrs={"autocomplete": "username"}),
-    )
     first_name = forms.CharField(
         label="姓名",
         max_length=100,
@@ -116,6 +108,21 @@ class RegisterForm(UserCreationForm):
         label="工号",
         max_length=50,
         widget=forms.TextInput(attrs={"placeholder": "例如 a00123456"}),
+    )
+
+
+class RegisterForm(UserCreationForm, IdentityFieldsForm):
+    """注册表单：姓名/工号/邮箱/用户名/密码信息齐全（与 OAuth 补全页一致）。
+
+    工号写入 UserProfile（申请单自动带入），姓名存 first_name。
+    """
+
+    username = forms.CharField(
+        label="用户名",
+        max_length=150,
+        validators=[_USERNAME_VALIDATOR],
+        help_text=_USERNAME_HELP_TEXT,
+        widget=forms.TextInput(attrs={"autocomplete": "username"}),
     )
     email = forms.EmailField(
         label="邮箱",
@@ -230,33 +237,15 @@ def toggle_switch(request):
     return JsonResponse({"ok": True})
 
 
-class GitCodeSignupForm(SocialSignupForm):
+class GitCodeSignupForm(SetPasswordMixin, SocialSignupForm, IdentityFieldsForm):
     """GitCode 首次登录创建新账号：与注册一致，强制填写姓名/工号/用户名/密码/邮箱。
 
     - 邮箱从 OAuth 预填（SocialSignupForm 的 initial 机制），缺失时手动填写
     - 密码采用 password1/password2 双字段，复用 Django 密码强度校验（与注册一致）
     """
 
-    first_name = forms.CharField(
-        label="姓名",
-        max_length=100,
-        widget=forms.TextInput(attrs={"placeholder": "真实姓名（用于生成目标机用户名）"}),
-    )
-    employee_id = forms.CharField(
-        label="工号",
-        max_length=50,
-        widget=forms.TextInput(attrs={"placeholder": "例如 a00123456"}),
-    )
-    password1 = forms.CharField(
-        label="密码",
-        strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
-    )
-    password2 = forms.CharField(
-        label="确认密码",
-        strip=False,
-        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
-    )
+    password1, password2 = SetPasswordMixin.create_password_fields("密码", "确认密码")
+    error_messages = {"password_mismatch": "两次输入的密码不一致。"}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -268,8 +257,8 @@ class GitCodeSignupForm(SocialSignupForm):
         self.fields["email"].required = True
         self.fields["email"].label = "邮箱"
         self.fields["username"].label = "用户名"
-        self.fields["username"].help_text = "仅限字母/数字/下划线，注册后不可修改，将作为服务器的登录用户名"
-        self.fields["username"].validators = [RegexValidator(r"^[A-Za-z0-9_]+\Z", "仅允许字母、数字、下划线")]
+        self.fields["username"].help_text = _USERNAME_HELP_TEXT
+        self.fields["username"].validators = [_USERNAME_VALIDATOR]
         # 字段顺序：姓名 → 工号 → 用户名 → 邮箱 → 密码 → 确认密码
         order = ["first_name", "employee_id", "username", "email", "password1", "password2"]
         self.fields = {key: self.fields[key] for key in order if key in self.fields}
@@ -284,22 +273,10 @@ class GitCodeSignupForm(SocialSignupForm):
         if employee_id:
             _save_employee_id(user, employee_id)
 
-    def clean_password2(self):
-        password1 = self.cleaned_data.get("password1")
-        password2 = self.cleaned_data.get("password2")
-        if password1 and password2 and password1 != password2:
-            raise forms.ValidationError("两次输入的密码不一致。")
-        return password2
-
     def _post_clean(self):
         super()._post_clean()
-        # 与注册一致：应用 AUTH_PASSWORD_VALIDATORS 密码强度校验
-        password1 = self.cleaned_data.get("password1")
-        if password1:
-            try:
-                validate_password(password1)
-            except forms.ValidationError as error:
-                self.add_error("password1", error)
+        self.validate_passwords()
+        self.validate_password_for_user(None, "password1")
 
 
 class GitCodeLoginView(LoginView):

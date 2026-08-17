@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from config.admin import configured_field
+
 from .models import EmailConfig, WebhookConfig
 
 
@@ -29,17 +31,9 @@ class EmailConfigAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
-    @admin.display(description="已配置 SMTP 密码", boolean=True)
-    def has_password(self, obj):
-        return bool(obj and obj.password)
-
-    @admin.display(description="已配置邮件 Webhook URL", boolean=True)
-    def has_mail_webhook_url(self, obj):
-        return bool(obj and obj.mail_webhook_url)
-
-    @admin.display(description="已配置邮件 Webhook Token", boolean=True)
-    def has_mail_webhook_token(self, obj):
-        return bool(obj and obj.mail_webhook_token)
+    has_password = configured_field("password", "已配置 SMTP 密码")
+    has_mail_webhook_url = configured_field("mail_webhook_url", "已配置邮件 Webhook URL")
+    has_mail_webhook_token = configured_field("mail_webhook_token", "已配置邮件 Webhook Token")
 
 
 @admin.register(WebhookConfig)
@@ -49,10 +43,5 @@ class WebhookConfigAdmin(admin.ModelAdmin):
     readonly_fields = ("has_url", "has_secret", "created_at", "updated_at")
     fields = ("name", "owner", "enabled", "has_url", "has_secret", "created_at", "updated_at")
 
-    @admin.display(description="已配置 URL", boolean=True)
-    def has_url(self, obj):
-        return bool(obj and obj.url)
-
-    @admin.display(description="已配置密钥", boolean=True)
-    def has_secret(self, obj):
-        return bool(obj and obj.secret)
+    has_url = configured_field("url", "已配置 URL")
+    has_secret = configured_field("secret", "已配置密钥")

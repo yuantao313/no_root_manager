@@ -24,22 +24,26 @@ def generate_code() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
 
+def _issue_code(email, purpose, user=None) -> str:
+    """作废同场景旧验证码并签发新验证码。"""
+    code = generate_code()
+    EmailVerification.objects.filter(email=email, purpose=purpose, user=user).update(used=True)
+    EmailVerification.objects.create(
+        email=email,
+        code=code,
+        purpose=purpose,
+        user=user,
+        expires_at=timezone.now() + timedelta(minutes=CODE_LIFETIME_MINUTES),
+    )
+    return code
+
+
 def send_user_email_code(email, user) -> bool:
     """向用户邮箱发送验证码（用户修改邮箱场景）。
 
     返回是否发送成功；发送前会使同邮箱+同用途的旧验证码全部作废。
     """
-    code = generate_code()
-    EmailVerification.objects.filter(email=email, purpose=EmailVerification.PURPOSE_USER_EMAIL, user=user).update(
-        used=True
-    )
-    EmailVerification.objects.create(
-        email=email,
-        code=code,
-        purpose=EmailVerification.PURPOSE_USER_EMAIL,
-        user=user,
-        expires_at=timezone.now() + timedelta(minutes=CODE_LIFETIME_MINUTES),
-    )
+    code = _issue_code(email, EmailVerification.PURPOSE_USER_EMAIL, user)
     return send_email(
         "NRM 邮箱验证码",
         f"您的邮箱验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效，请勿泄露）。",
@@ -53,17 +57,7 @@ def send_smtp_code(email, send_fn) -> bool:
     send_fn(subject, body, to_list)：使用"待验证的 SMTP 配置"发送，
     从而在配置写入数据库前即可确认可用性。
     """
-    code = generate_code()
-    EmailVerification.objects.filter(
-        email=email, purpose=EmailVerification.PURPOSE_SMTP_CONFIG, user__isnull=True
-    ).update(used=True)
-    EmailVerification.objects.create(
-        email=email,
-        code=code,
-        purpose=EmailVerification.PURPOSE_SMTP_CONFIG,
-        user=None,
-        expires_at=timezone.now() + timedelta(minutes=CODE_LIFETIME_MINUTES),
-    )
+    code = _issue_code(email, EmailVerification.PURPOSE_SMTP_CONFIG)
     return send_fn(
         "NRM SMTP 配置验证",
         f"您的验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效）。收到本邮件说明当前 SMTP 配置可以正常发信。",
@@ -81,9 +75,9 @@ def verify_code(email, code, purpose, user=None, consume=True) -> tuple[bool, st
     """
     code = (code or "").strip()
     records = EmailVerification.objects.filter(email=email, purpose=purpose, user=user).order_by("-created_at")
-    if not records.exists():
-        return False, "请先获取验证码。"
     rec = records.first()
+    if rec is None:
+        return False, "请先获取验证码。"
     if rec.used:
         return False, "该验证码已使用，请重新获取。"
     if rec.attempts >= MAX_ATTEMPTS:
