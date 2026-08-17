@@ -34,7 +34,7 @@ def _bg_notify(application_pk, reviewed=False):
 
 
 @transaction.atomic
-def _record_provision(application, ok, note, source, password=""):
+def _record_provision(application, ok, note, password=""):
     """统一记录开通结果；成功时建立机器用户归属绑定。"""
     application.provision_note = note
     update_fields = ["provision_note", "updated_at"]
@@ -47,7 +47,7 @@ def _record_provision(application, ok, note, source, password=""):
         MachineUserBinding.objects.update_or_create(
             server=application.target_server,
             username=application.username,
-            defaults={"user": application.applicant, "source": source},
+            defaults={"user": application.applicant, "source": application.apply_type},
         )
     application.save(update_fields=update_fields)
 
@@ -61,36 +61,35 @@ def _bg_provision(application_pk):
     application = Application.objects.select_related(
         "applicant", "reviewer", "target_server", "target_server__credential"
     ).get(pk=application_pk)
+    if application.status != Application.Status.APPROVED or application.provisioned_at:
+        return
     if not application.target_server or not application.target_server.credential:
-        application.provision_note = "未开通：未关联目标服务器或凭据"
-        application.save(update_fields=["provision_note"])
+        _record_provision(application, False, "未开通：未关联目标服务器或凭据")
         return
 
     server = application.target_server
     if application.requires_superuser_approval and not (application.reviewer and application.reviewer.is_superuser):
-        application.provisioned_at = None
-        application.provision_note = "开通失败：该申请包含 root 级权限，但审批人不是超级管理员。"
-        application.save(update_fields=["provisioned_at", "provision_note"])
+        _record_provision(application, False, "开通失败：该申请包含 root 级权限，但审批人不是超级管理员。")
         return
 
     # 转移类型：将目标机器已有用户接管为受管用户（用户信息实时扫描，不落库）
     if application.apply_type == Application.ApplyType.TRANSFER:
         ok, msg = take_over_user(server, application.username)
-        _record_provision(application, ok, f"已接管：{msg}" if ok else f"接管失败：{msg}", "transfer")
+        _record_provision(application, ok, f"已接管：{msg}" if ok else f"接管失败：{msg}")
         return
 
     # 平台管理员类型：不开新账号，直接授予所选服务器的 sudo 权限（username=登录用户名）
     if application.apply_type == Application.ApplyType.ADMIN:
         ok, group, msg = grant_sudo(server, application.username)
         note = f"已授予 sudo（{group}）：{msg}" if ok else f"授予 sudo 失败：{msg}"
-        _record_provision(application, ok, note, "admin")
+        _record_provision(application, ok, note)
         return
 
     # 申请用户组类型：不建号不转移，把登录用户加入所选用户组（usermod -aG）
     if application.apply_type == Application.ApplyType.GROUP:
         group_list = [g.strip() for g in (application.user_groups or "").split(",") if g.strip()]
         if not group_list:
-            _record_provision(application, False, "未选择用户组", "group")
+            _record_provision(application, False, "未选择用户组")
             return
         ok = True
         errors = []
@@ -100,13 +99,17 @@ def _bg_provision(application_pk):
                 ok = False
                 errors.append(f"{g}:{g_msg}")
         note = f"已加入用户组：{','.join(group_list)}" if ok else f"加入用户组失败：{'；'.join(errors)}"
-        _record_provision(application, ok, note, "group")
+        _record_provision(application, ok, note)
+        return
+
+    if application.apply_type != Application.ApplyType.CREATE:
+        _record_provision(application, False, f"不支持的申请类型：{application.apply_type}")
         return
 
     # 创建类型：开通新账号
     groups = list(server.default_groups_list())
     # 开通后写入目标机 motd 公告（SSH 登录显示）
-    _ok_notice, _msg_notice = write_server_motd(server)
+    write_server_motd(server)
 
     ok, password, msg = provision_user(
         server,
@@ -114,7 +117,7 @@ def _bg_provision(application_pk):
         groups=groups,
         with_home=True,
     )
-    _record_provision(application, ok, msg, "create", password)
+    _record_provision(application, ok, msg, password)
     if ok:
         # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
         send_provision_credentials(application, password)

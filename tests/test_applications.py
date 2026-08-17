@@ -362,9 +362,75 @@ class TestReviewProvision:
             patch.object(Application, "save", side_effect=RuntimeError("write failed")),
             pytest.raises(RuntimeError, match="write failed"),
         ):
-            _record_provision(app, True, "已开通", "create")
+            _record_provision(app, True, "已开通")
 
         assert not MachineUserBinding.objects.filter(server=server, username="atomic-user").exists()
+
+    def test_background_provision_skips_non_approved_and_completed(self, server, normal):
+        from applications.views import _bg_provision
+
+        rejected = Application.objects.create(
+            applicant=normal,
+            username="rejected-user",
+            target_server=server,
+            status=Application.Status.REJECTED,
+        )
+        completed = Application.objects.create(
+            applicant=normal,
+            username="completed-user",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            provisioned_at=timezone.now(),
+        )
+
+        with patch("applications.views.provision_user") as provision:
+            _bg_provision(rejected.pk)
+            _bg_provision(completed.pk)
+
+        provision.assert_not_called()
+
+    def test_unknown_apply_type_never_falls_back_to_create(self, staff, server, normal):
+        from applications.views import _bg_provision
+
+        application = Application.objects.create(
+            applicant=normal,
+            reviewer=staff,
+            username="unknown-user",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            apply_type="unknown",
+        )
+
+        with (
+            patch("applications.views.write_server_motd") as write_motd,
+            patch("applications.views.provision_user") as provision,
+        ):
+            _bg_provision(application.pk)
+
+        application.refresh_from_db()
+        assert application.provisioned_at is None
+        assert application.provision_note == "不支持的申请类型：unknown"
+        write_motd.assert_not_called()
+        provision.assert_not_called()
+
+    def test_missing_credential_failure_uses_shared_result_recording(self, normal):
+        from applications.views import _bg_provision
+
+        server = Server.objects.create(name="no-credential", host="10.0.0.9")
+        application = Application.objects.create(
+            applicant=normal,
+            username="no-credential-user",
+            target_server=server,
+            status=Application.Status.APPROVED,
+        )
+        previous = timezone.now() - timedelta(days=1)
+        Application.objects.filter(pk=application.pk).update(updated_at=previous)
+
+        _bg_provision(application.pk)
+
+        application.refresh_from_db()
+        assert application.provision_note == "未开通：未关联目标服务器或凭据"
+        assert application.updated_at > previous
 
     def test_approve_provisions(self, client, staff, server):
         app = Application.objects.create(
