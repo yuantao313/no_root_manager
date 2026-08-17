@@ -177,6 +177,20 @@ class TestMyWebhooks:
         hook = WebhookConfig.objects.get(name="feishu")
         assert hook.owner == staff
 
+    def test_edit_preserves_secret_when_blank(self, client, staff):
+        hook = WebhookConfig.objects.create(name="feishu", url="https://example.com/old", secret="keep-me", owner=staff)
+        client.force_login(staff)
+
+        client.post(
+            reverse("accounts:profile"),
+            {"add_webhook": "1", "name": "generic", "url": "", "secret": "", "enabled": "on"},
+        )
+
+        hook.refresh_from_db()
+        assert hook.name == "generic"
+        assert hook.url == "https://example.com/old"
+        assert hook.secret == "keep-me"
+
     def test_normal_user_has_no_webhook_section(self, client):
         user = User.objects.create_user(username="normal", password="x12345!")
         client.force_login(user)

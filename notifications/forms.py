@@ -58,3 +58,7 @@ class WebhookForm(forms.ModelForm):
             return validate_webhook_url(value)
         except UnsafeWebhookURL as exc:
             raise forms.ValidationError(str(exc)) from exc
+
+    def clean_secret(self):
+        value = (self.cleaned_data.get("secret") or "").strip()
+        return self.instance.secret if not value and self.instance.pk else value

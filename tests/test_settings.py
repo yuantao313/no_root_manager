@@ -169,6 +169,18 @@ class TestSMTPSettings:
         send_code.assert_not_called()
         assert "pending_smtp" not in client.session
 
+    def test_new_invalid_config_revokes_previous_verification(self, client):
+        client.force_login(_superuser())
+        session = client.session
+        session["pending_smtp"] = {"host": "old.example.com"}
+        session["smtp_verified"] = True
+        session.save()
+
+        client.post(reverse("accounts:settings"), self._data(port="invalid"))
+
+        assert "pending_smtp" not in client.session
+        assert "smtp_verified" not in client.session
+
     def test_blank_password_reuses_saved_value_only_for_verification(self, client):
         client.force_login(_superuser())
         EmailConfig.objects.create(host="old", username="old", password="stored-secret")

@@ -12,6 +12,7 @@ from django.contrib.auth.forms import SetPasswordForm, UserCreationForm
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.views import LoginView, PasswordResetView
+from django.contrib.sites.models import Site
 from django.core.validators import RegexValidator
 from django.db import transaction
 from django.http import JsonResponse
@@ -356,23 +357,20 @@ def verify_email_code_ajax(request):
 
 def _save_webhook(form, hook, owner):
     """用统一表单保存个人或全局 Webhook，空密钥保留原值。"""
-    previous_secret = hook.secret if hook else ""
     previous_enabled = hook.enabled if hook else True
     if not form.is_valid():
         return None
-    hook = hook or WebhookConfig(owner=owner)
-    hook.name = form.cleaned_data["name"]
-    hook.url = form.cleaned_data["url"]
-    if form.cleaned_data.get("secret"):
-        hook.secret = form.cleaned_data["secret"]
-    else:
-        hook.secret = previous_secret
-    if owner is not None:
-        hook.enabled = form.cleaned_data["enabled"]
-    else:
+    hook = form.save(commit=False)
+    hook.owner = owner
+    if owner is None:
         hook.enabled = previous_enabled
     hook.save()
     return hook
+
+
+def _clear_pending_smtp(request):
+    for key in ("pending_smtp", "smtp_verified"):
+        request.session.pop(key, None)
 
 
 def _test_webhook(request, hook):
@@ -463,7 +461,7 @@ def settings(request):
             new_url = request.POST.get("mail_webhook_url", "").strip()
             new_token = request.POST.get("mail_webhook_token", "").strip()
             if send_via in dict(EmailConfig.SEND_VIA_CHOICES):
-                email_cfg = EmailConfig.objects.first() or EmailConfig()
+                email_cfg = email_cfg or EmailConfig()
                 effective_url = new_url or email_cfg.mail_webhook_url
                 if send_via == EmailConfig.SEND_VIA_WEBHOOK:
                     try:
@@ -492,8 +490,6 @@ def settings(request):
                 if new_secret:
                     app.secret = new_secret
                 app.save()
-                from django.contrib.sites.models import Site
-
                 app.sites.add(Site.objects.get_current())
                 messages.success(request, "GitCode 配置已保存。")
             else:
@@ -503,12 +499,12 @@ def settings(request):
             if cooldown_remaining > 0:
                 messages.error(request, f"发送过于频繁，请 {cooldown_remaining} 秒后再试。")
                 return redirect("accounts:settings")
+            _clear_pending_smtp(request)
             smtp_form = SMTPConfigForm(request.POST)
             if smtp_form.is_valid():
                 # 暂存待验证配置到 session（密码仅存于会话，验证通过后入库）
                 pending = smtp_form.cleaned_data
                 request.session["pending_smtp"] = pending
-                request.session["smtp_verified"] = False  # 重新发码使已验证失效
                 # 密码留空时复用已保存值进行验证，但 pending 仍保留空值，最终保存不覆盖。
                 password = pending["password"] or (email_cfg.password if email_cfg else "")
                 sender = partial(
@@ -527,7 +523,7 @@ def settings(request):
                     messages.success(request, f"验证码已发送至 {pending['verify_email']}，请查收并点击“验证”。")
                 else:
                     messages.error(request, "验证码发送失败：当前 SMTP 配置不可用（请检查服务器/端口/认证），未保存。")
-                    request.session.pop("pending_smtp", None)
+                    _clear_pending_smtp(request)
             else:
                 messages.error(request, next(iter(smtp_form.errors.values()))[0])
             return redirect("accounts:settings")
@@ -556,7 +552,7 @@ def settings(request):
             if not request.session.get("smtp_verified"):
                 messages.error(request, "请先验证验证码，验证通过后才能保存。")
                 return redirect("accounts:settings")
-            email_cfg = EmailConfig.objects.first() or EmailConfig()
+            email_cfg = email_cfg or EmailConfig()
             for field in ("host", "port", "username", "from_email", "use_ssl"):
                 setattr(email_cfg, field, pending[field])
             if pending.get("password"):
@@ -564,8 +560,7 @@ def settings(request):
             # 发送方式与页面单选联动（SMTP 保存时固定为 smtp）
             email_cfg.send_via = EmailConfig.SEND_VIA_SMTP
             email_cfg.save()
-            request.session.pop("pending_smtp", None)
-            request.session.pop("smtp_verified", None)
+            _clear_pending_smtp(request)
             messages.success(request, "SMTP 配置已通过验证并保存。")
         elif "add_webhook" in request.POST:
             webhook_form = WebhookForm(request.POST, instance=hook)
