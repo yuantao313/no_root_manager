@@ -1,5 +1,8 @@
 from django import forms
 
+from config.forms import PreserveStoredFieldsMixin
+from config.widgets import WriteOnlyWidgetMixin
+
 from .models import WebhookConfig
 from .security import UnsafeWebhookURL, validate_webhook_url
 
@@ -16,15 +19,14 @@ class SMTPConfigForm(forms.Form):
     verify_email = forms.EmailField(label="验证收件邮箱")
 
 
-class WriteOnlyURLInput(forms.URLInput):
+class WriteOnlyURLInput(WriteOnlyWidgetMixin, forms.URLInput):
     """Webhook URL 常自带访问令牌，任何重渲染都不回填 HTML。"""
 
-    def format_value(self, value):  # noqa: ARG002
-        return ""
 
-
-class WebhookForm(forms.ModelForm):
+class WebhookForm(PreserveStoredFieldsMixin, forms.ModelForm):
     """个人 Webhook 表单（owner 由视图填充）。"""
+
+    preserved_fields = ("url", "secret")
 
     class Meta:
         model = WebhookConfig
@@ -51,7 +53,7 @@ class WebhookForm(forms.ModelForm):
     def clean_url(self):
         value = (self.cleaned_data.get("url") or "").strip()
         if not value and self.instance and self.instance.pk:
-            return self.instance.url
+            return self.preserved_value("url")
         if not value:
             raise forms.ValidationError("请填写 Webhook URL。")
         try:
@@ -60,5 +62,4 @@ class WebhookForm(forms.ModelForm):
             raise forms.ValidationError(str(exc)) from exc
 
     def clean_secret(self):
-        value = (self.cleaned_data.get("secret") or "").strip()
-        return self.instance.secret if not value and self.instance.pk else value
+        return self.preserved_value("secret")

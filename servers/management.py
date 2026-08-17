@@ -134,26 +134,26 @@ def clear_managed_users_cache(server):
     cache.delete(_MANAGED_USERS_CACHE_KEY.format(server.pk))
 
 
-def lock_user(server, username):
-    """禁用目标机器用户（passwd -l）。返回 (ok, msg)。"""
+def _set_user_locked(server, username, locked):
+    """设置目标机器用户锁定状态，供启用/禁用公开操作复用。"""
     username = (username or "").strip()
     if not username:
         return False, "用户名为空"
-    ok, out, err = _run_mgmt(server, ["lock", username])
+    action, state = ("lock", "禁用") if locked else ("unlock", "启用")
+    ok, _, err = _run_mgmt(server, [action, username])
     if ok:
-        return True, f"用户 {username} 已禁用"
-    return False, err or f"禁用失败：{username}"
+        return True, f"用户 {username} 已{state}"
+    return False, err or f"{state}失败：{username}"
+
+
+def lock_user(server, username):
+    """禁用目标机器用户（passwd -l）。返回 (ok, msg)。"""
+    return _set_user_locked(server, username, True)
 
 
 def unlock_user(server, username):
     """启用目标机器用户（passwd -u）。返回 (ok, msg)。"""
-    username = (username or "").strip()
-    if not username:
-        return False, "用户名为空"
-    ok, out, err = _run_mgmt(server, ["unlock", username])
-    if ok:
-        return True, f"用户 {username} 已启用"
-    return False, err or f"启用失败：{username}"
+    return _set_user_locked(server, username, False)
 
 
 def list_system_users(server):

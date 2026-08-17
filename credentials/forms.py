@@ -1,16 +1,18 @@
 from django import forms
 
+from config.forms import PreserveStoredFieldsMixin
+from config.widgets import WriteOnlyWidgetMixin
+
 from .models import Credential
 
 
-class WriteOnlyTextarea(forms.Textarea):
+class WriteOnlyTextarea(WriteOnlyWidgetMixin, forms.Textarea):
     """接收多行秘密，但任何重渲染都不把原值写回 HTML。"""
 
-    def format_value(self, value):  # noqa: ARG002
-        return ""
 
+class CredentialForm(PreserveStoredFieldsMixin, forms.ModelForm):
+    preserved_fields = ("password", "private_key")
 
-class CredentialForm(forms.ModelForm):
     class Meta:
         model = Credential
         fields = ["name", "username", "password", "private_key", "remark"]
@@ -20,16 +22,11 @@ class CredentialForm(forms.ModelForm):
             "remark": forms.Textarea(attrs={"rows": 3}),
         }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._stored_password = self.instance.password if self.instance.pk else ""
-        self._stored_private_key = self.instance.private_key if self.instance.pk else ""
-
     def clean_password(self):
-        return self.cleaned_data.get("password") or self._stored_password
+        return self.preserved_value("password")
 
     def clean_private_key(self):
-        return self.cleaned_data.get("private_key") or self._stored_private_key
+        return self.preserved_value("private_key")
 
     def clean(self):
         cleaned = super().clean()

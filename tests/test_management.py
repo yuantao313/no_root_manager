@@ -75,6 +75,30 @@ class TestTakeOver:
         assert args == ["takeover", "ghost"]
 
 
+class TestUserLock:
+    @pytest.mark.parametrize(
+        ("handler_name", "command", "state"),
+        [("lock_user", "lock", "禁用"), ("unlock_user", "unlock", "启用")],
+    )
+    def test_paired_operations_share_contract(self, ubuntu_server, handler_name, command, state):
+        from servers import management
+
+        with patch("servers.management._run_mgmt", return_value=(True, "ok", "")) as run:
+            ok, message = getattr(management, handler_name)(ubuntu_server, " alice ")
+
+        assert ok is True
+        assert message == f"用户 alice 已{state}"
+        run.assert_called_once_with(ubuntu_server, [command, "alice"])
+
+    @pytest.mark.parametrize("handler_name", ["lock_user", "unlock_user"])
+    def test_empty_username_is_rejected(self, ubuntu_server, handler_name):
+        from servers import management
+
+        with patch("servers.management._run_mgmt") as run:
+            assert getattr(management, handler_name)(ubuntu_server, " ") == (False, "用户名为空")
+        run.assert_not_called()
+
+
 class TestProvisionUser:
     def test_empty_username(self, ubuntu_server):
         ok, pwd, msg = provision_user(ubuntu_server, "")
