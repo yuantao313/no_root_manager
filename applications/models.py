@@ -6,6 +6,25 @@ from servers.fields import EncryptedTextField
 from servers.models import ROOT_EQUIVALENT_GROUPS, Server
 
 
+class ApplicationQuerySet(models.QuerySet):
+    """集中定义工单的查看与审批权限范围。"""
+
+    def reviewable_by(self, user):
+        if user.is_superuser:
+            return self
+        if not user.is_staff:
+            return self.none()
+        return self.filter(target_server__admin_bindings__admin=user)
+
+    def visible_to(self, user):
+        if user.is_superuser:
+            return self
+        if not user.is_staff:
+            return self.filter(applicant=user)
+        reviewable = self.reviewable_by(user).values("pk")
+        return self.filter(Q(applicant=user) | Q(pk__in=reviewable))
+
+
 class Application(models.Model):
     """申请单：用户提交账号/权限申请，管理员审批。"""
 
@@ -90,6 +109,8 @@ class Application(models.Model):
 
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    objects = ApplicationQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at"]

@@ -1,5 +1,6 @@
 """申请流程测试：登录提交、权限控制、审批开通（mock SSH）、sudo 审计。"""
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -9,7 +10,7 @@ from django.utils import timezone
 
 from applications.models import Application
 from credentials.models import Credential
-from servers.models import Server
+from servers.models import Server, ServerAdminBinding
 
 pytestmark = pytest.mark.django_db
 
@@ -170,6 +171,59 @@ class TestPermission:
         client.force_login(normal)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
         assert resp.status_code == 404
+
+    def test_staff_scope_is_shared_by_list_detail_and_review(self, client, normal, server):
+        reviewer = User.objects.create_user(username="reviewer", password="x", is_staff=True)
+        other_server = Server.objects.create(
+            name="hidden-server",
+            host="10.0.0.2",
+            credential=server.credential,
+            ssh_host_key_fingerprint=TEST_HOST_FINGERPRINT,
+        )
+        ServerAdminBinding.objects.create(server=server, admin=reviewer)
+        bound = Application.objects.create(
+            applicant=normal, username="bound", target_server=server, description="绑定工单"
+        )
+        hidden = Application.objects.create(
+            applicant=normal, username="hidden", target_server=other_server, description="越权工单"
+        )
+        own = Application.objects.create(
+            applicant=reviewer, username="own", target_server=other_server, description="本人未绑定工单"
+        )
+
+        assert set(Application.objects.reviewable_by(reviewer)) == {bound}
+        assert set(Application.objects.visible_to(reviewer)) == {bound, own}
+
+        client.force_login(reviewer)
+        html = client.get(reverse("applications:list")).content.decode()
+        assert "绑定工单" in html
+        assert "越权工单" not in html
+        assert "hidden-server" not in html
+        assert client.get(reverse("applications:detail", args=[own.pk])).status_code == 200
+        assert (
+            client.post(reverse("applications:review", args=[bound.pk, "reject"]), {"comment": "不通过"}).status_code
+            == 302
+        )
+        bound.refresh_from_db()
+        assert bound.status == Application.Status.REJECTED
+        assert bound.updated_at == bound.reviewed_at
+        assert (
+            client.post(reverse("applications:review", args=[hidden.pk, "reject"]), {"comment": "x"}).status_code == 404
+        )
+
+    def test_withdraw_updates_timestamp(self, client, normal, server):
+        application = Application.objects.create(
+            applicant=normal, username="normal", target_server=server, title="待撤回"
+        )
+        previous = timezone.now() - timedelta(days=1)
+        Application.objects.filter(pk=application.pk).update(updated_at=previous)
+
+        client.force_login(normal)
+        client.post(reverse("applications:withdraw", args=[application.pk]))
+
+        application.refresh_from_db()
+        assert application.status == Application.Status.WITHDRAWN
+        assert application.updated_at > previous
 
 
 class TestReviewProvision:

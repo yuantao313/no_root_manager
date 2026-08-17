@@ -1,7 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -123,12 +122,7 @@ def _bg_provision(application_pk):
 
 def _get_visible_application(user, pk):
     """按角色收窄工单查询后取详情，供查看与重发邮件复用。"""
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
-    if not user.is_superuser:
-        if user.is_staff:
-            qs = qs.filter(Q(applicant=user) | Q(target_server__in=Server.visible_to(user))).distinct()
-        else:
-            qs = qs.filter(applicant=user)
+    qs = Application.objects.select_related("applicant", "target_server", "reviewer").visible_to(user)
     return get_object_or_404(qs, pk=pk)
 
 
@@ -138,7 +132,8 @@ def application_withdraw(request, pk):
     """申请人撤回自己的待审批申请（状态 → 已撤回）。"""
     application = get_object_or_404(Application, pk=pk, applicant=request.user)
     updated = Application.objects.filter(pk=application.pk, status=Application.Status.PENDING).update(
-        status=Application.Status.WITHDRAWN
+        status=Application.Status.WITHDRAWN,
+        updated_at=timezone.now(),
     )
     if not updated:
         messages.error(request, "仅待审批的申请可以撤回。")
@@ -153,11 +148,9 @@ def application_list(request):
 
     支持 URL query 筛选：status / apply_type / server（均可选）。
     """
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
-    if request.user.is_superuser:
-        applications = qs.all()
-    else:
-        applications = qs.filter(target_server__in=Server.visible_to(request.user))
+    applications = Application.objects.select_related("applicant", "target_server", "reviewer").reviewable_by(
+        request.user
+    )
 
     # 筛选参数
     f_status = request.GET.get("status", "").strip()
@@ -180,7 +173,7 @@ def application_list(request):
             "f_server": f_server,
             "status_choices": Application.Status.choices,
             "type_choices": Application.ApplyType.choices,
-            "servers": Server.objects.all().order_by("name"),
+            "servers": Server.visible_to(request.user).order_by("name"),
         },
     )
 
@@ -288,14 +281,7 @@ def application_detail(request, pk):
     is_applicant = application.applicant_id == request.user.id
     can_view_initial_password = has_initial_password and is_applicant
     can_resend_initial_password = has_initial_password and (request.user.is_superuser or is_applicant)
-    can_review = bool(
-        request.user.is_superuser
-        or (
-            request.user.is_staff
-            and application.target_server_id
-            and Server.visible_to(request.user).filter(pk=application.target_server_id).exists()
-        )
-    )
+    can_review = Application.objects.reviewable_by(request.user).filter(pk=application.pk).exists()
     can_approve = can_review and not (application.requires_superuser_approval and not request.user.is_superuser)
     return render(
         request,
@@ -339,11 +325,11 @@ def application_resend_mail(request, pk):
 def application_review(request, pk, action):
     """审批：action 为 approve（通过）或 reject（驳回），
     普通管理员仅能审批绑定服务器的申请。"""
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
-    if request.user.is_superuser:
-        application_qs = qs.filter(pk=pk)
-    else:
-        application_qs = qs.filter(target_server__in=Server.visible_to(request.user), pk=pk)
+    application_qs = (
+        Application.objects.select_related("applicant", "target_server", "reviewer")
+        .reviewable_by(request.user)
+        .filter(pk=pk)
+    )
     application = get_object_or_404(application_qs)
     if action not in {"approve", "reject"}:
         messages.error(request, "无效的审批操作。")
@@ -367,11 +353,13 @@ def application_review(request, pk, action):
             return redirect("applications:detail", pk=pk)
 
     new_status = Application.Status.APPROVED if action == "approve" else Application.Status.REJECTED
+    reviewed_at = timezone.now()
     updated = application_qs.filter(status=Application.Status.PENDING).update(
         status=new_status,
         review_comment=review_form.cleaned_data["comment"],
         reviewer=request.user,
-        reviewed_at=timezone.now(),
+        reviewed_at=reviewed_at,
+        updated_at=reviewed_at,
     )
     if not updated:
         messages.warning(request, "该申请已处理，不能重复审批。")
