@@ -13,6 +13,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.views import LoginView, PasswordResetView
 from django.core.validators import RegexValidator
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
@@ -29,6 +30,20 @@ from servers.management import push_notices
 
 from .email_verify import send_smtp_code, send_user_email_code, verify_code
 from .models import Announcement, EmailVerification, SystemConfig, UserProfile
+
+
+def _save_employee_id(user, employee_id):
+    UserProfile.objects.update_or_create(
+        user=user,
+        defaults={"employee_id": employee_id.strip()},
+    )
+
+
+@transaction.atomic
+def _save_user_profile(user, employee_id):
+    """原子保存用户及其扩展资料。"""
+    user.save()
+    _save_employee_id(user, employee_id)
 
 
 class ProfileForm(forms.Form):
@@ -54,12 +69,8 @@ class ProfileForm(forms.Form):
         user = self.instance
         user.first_name = self.cleaned_data["name"].strip()
         user.email = self.cleaned_data["email"].strip()
-        # 工号写入扩展资料（不存在则创建）
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.employee_id = self.cleaned_data["employee_id"].strip()
         if commit:
-            user.save()
-            profile.save()
+            _save_user_profile(user, self.cleaned_data["employee_id"])
         return user
 
 
@@ -121,12 +132,7 @@ class RegisterForm(UserCreationForm):
         user.first_name = self.cleaned_data["first_name"].strip()
         user.email = self.cleaned_data["email"].strip()
         if commit:
-            user.save()
-        # 工号写入扩展资料（申请单自动带入）
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.employee_id = self.cleaned_data["employee_id"].strip()
-        if commit:
-            profile.save()
+            _save_user_profile(user, self.cleaned_data["employee_id"])
         return user
 
 
@@ -275,9 +281,7 @@ class GitCodeSignupForm(SocialSignupForm):
         super().custom_signup(request, user)
         employee_id = (self.cleaned_data.get("employee_id") or "").strip()
         if employee_id:
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.employee_id = employee_id
-            profile.save()
+            _save_employee_id(user, employee_id)
 
     def clean_password2(self):
         password1 = self.cleaned_data.get("password1")
@@ -392,21 +396,6 @@ def profile(request):
     )
 
     if request.method == "POST":
-        # 1. 发送邮箱验证码（修改邮箱的前置步骤）
-        if "send_email_code" in request.POST:
-            new_email = request.POST.get("email", "").strip()
-            if not new_email:
-                messages.error(request, "请先填写新的邮箱地址。")
-            elif new_email == request.user.email:
-                messages.info(request, "新邮箱与当前邮箱相同，无需验证。")
-            else:
-                ok = send_user_email_code(new_email, request.user)
-                if ok:
-                    messages.success(request, f"验证码已发送至 {new_email}，请查收并填写。")
-                else:
-                    messages.error(request, "验证码发送失败（SMTP 未配置或不可用）。")
-            return redirect("accounts:profile")
-        # 2. 保存个人资料（邮箱变更需验证码）
         if "save_profile" in request.POST:
             form = ProfileForm(request.POST, instance=request.user)
             if form.is_valid():

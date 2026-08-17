@@ -6,6 +6,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
+from accounts.models import UserProfile
+from accounts.views import ProfileForm, RegisterForm
 from notifications.models import WebhookConfig
 
 pytestmark = pytest.mark.django_db
@@ -14,6 +16,62 @@ User = get_user_model()
 
 
 class TestProfileEdit:
+    def test_profile_form_commit_false_does_not_write(self):
+        user = User.objects.create_user(username="u1", email="old@x.com")
+        form = ProfileForm(
+            {"name": "张三", "employee_id": "E001", "email": "new@x.com", "code": ""},
+            instance=user,
+        )
+
+        assert form.is_valid()
+        saved_user = form.save(commit=False)
+
+        assert saved_user.first_name == "张三"
+        assert saved_user.email == "new@x.com"
+        user.refresh_from_db()
+        assert user.first_name == ""
+        assert user.email == "old@x.com"
+        assert not UserProfile.objects.filter(user=user).exists()
+
+    def test_register_form_commit_false_does_not_write(self):
+        form = RegisterForm(
+            {
+                "username": "new_user",
+                "first_name": "张三",
+                "employee_id": "E001",
+                "email": "new@x.com",
+                "password1": "SecurePass123!",
+                "password2": "SecurePass123!",
+            }
+        )
+
+        assert form.is_valid()
+        user = form.save(commit=False)
+
+        assert user.pk is None
+        assert user.first_name == "张三"
+        assert user.email == "new@x.com"
+        assert not User.objects.filter(username="new_user").exists()
+        assert not UserProfile.objects.exists()
+
+    def test_profile_save_rolls_back_user_when_profile_write_fails(self):
+        user = User.objects.create_user(username="u1", email="old@x.com")
+        form = ProfileForm(
+            {"name": "张三", "employee_id": "E001", "email": "new@x.com", "code": ""},
+            instance=user,
+        )
+
+        assert form.is_valid()
+        with (
+            patch("accounts.views.UserProfile.objects.update_or_create", side_effect=RuntimeError),
+            pytest.raises(RuntimeError),
+        ):
+            form.save()
+
+        user.refresh_from_db()
+        assert user.first_name == ""
+        assert user.email == "old@x.com"
+
     def test_profile_inline_edit_controls(self, client):
         user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com", first_name="张三")
         client.force_login(user)
@@ -74,16 +132,16 @@ class TestProfileEdit:
         assert user.email == "new@x.com"
         assert user.first_name == "张三"
 
-    def test_send_email_code_branch(self, client):
-        from unittest.mock import patch
-
-        user = User.objects.create_user(username="u1", password="x12345!", email="old@x.com")
+    def test_send_email_code_ajax(self, client):
+        user = User.objects.create_user(username="u1", email="old@x.com")
         client.force_login(user)
-        with patch("accounts.views.send_user_email_code", return_value=True) as mock:
-            resp = client.post(reverse("accounts:profile"), {"send_email_code": "1", "email": "new@x.com"})
-        assert resp.status_code == 302
-        assert mock.call_count == 1
-        assert mock.call_args.args[0] == "new@x.com"
+
+        with patch("accounts.views.send_user_email_code", return_value=True) as send_code:
+            response = client.post(reverse("accounts:send_email_code_ajax"), {"email": "new@x.com"})
+
+        assert response.json() == {"ok": True, "error": "", "cooldown": 60}
+        send_code.assert_called_once_with("new@x.com", user)
+        assert client.session["email_code_sent_at"]
 
 
 class TestMyWebhooks:
