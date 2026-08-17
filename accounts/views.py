@@ -1,3 +1,5 @@
+from functools import partial
+
 from allauth.socialaccount.forms import SignupForm as SocialSignupForm
 from allauth.socialaccount.internal import flows as socialaccount_flows
 from allauth.socialaccount.models import SocialApp
@@ -19,7 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
-from notifications.forms import WebhookForm
+from notifications.forms import SMTPConfigForm, WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
 from notifications.security import UnsafeWebhookURL, validate_webhook_url
 from notifications.services import send_email, send_email_with_config, send_webhook_to
@@ -306,9 +308,9 @@ class GitCodeLoginView(LoginView):
         return context
 
 
-def _email_code_cooldown(request):
-    """邮箱验证码剩余冷却秒数（60 秒窗口）。"""
-    sent_at = request.session.get("email_code_sent_at")
+def _code_cooldown(request, session_key):
+    """返回验证码 60 秒发送窗口的剩余秒数。"""
+    sent_at = request.session.get(session_key)
     if not sent_at:
         return 0
     return max(0, 60 - int(timezone.now().timestamp() - sent_at))
@@ -319,14 +321,9 @@ def _email_code_cooldown(request):
 def send_email_code_ajax(request):
     """AJAX 发送邮箱验证码（修改邮箱前置）：60 秒冷却 + JSON 返回，不刷新页面。"""
     email = (request.POST.get("email") or "").strip()
-    # 60 秒冷却（session 时间戳）
-    sent_at = request.session.get("email_code_sent_at")
-    if sent_at:
-        remaining = 60 - int(timezone.now().timestamp() - sent_at)
-        if remaining > 0:
-            return JsonResponse(
-                {"ok": False, "error": f"发送过于频繁，请 {remaining} 秒后再试。", "cooldown": remaining}
-            )
+    remaining = _code_cooldown(request, "email_code_sent_at")
+    if remaining:
+        return JsonResponse({"ok": False, "error": f"发送过于频繁，请 {remaining} 秒后再试。", "cooldown": remaining})
     if not email:
         return JsonResponse({"ok": False, "error": "请先填写新的邮箱地址。", "cooldown": 0})
     if email == request.user.email:
@@ -445,7 +442,7 @@ def profile(request):
             "user": request.user,
             "gitcode_enabled": _gitcode_enabled(),
             # 邮箱验证码剩余冷却秒数（前端初始倒计时，不刷新）
-            "email_code_cooldown": _email_code_cooldown(request),
+            "email_code_cooldown": _code_cooldown(request, "email_code_sent_at"),
             "form": form,
             "webhook_form": webhook_form,
         },
@@ -461,10 +458,7 @@ def settings(request):
     announcement = Announcement.objects.first()
 
     # 发码冷却：距上次发送 <60 秒则剩余秒数 >0（模板禁用按钮）
-    sent_at = request.session.get("smtp_code_sent_at")
-    cooldown_remaining = 0
-    if sent_at:
-        cooldown_remaining = max(0, 60 - int(timezone.now().timestamp() - sent_at))
+    cooldown_remaining = _code_cooldown(request, "smtp_code_sent_at")
     smtp_verified = bool(request.session.get("smtp_verified", False))
 
     if request.method == "POST":
@@ -520,54 +514,33 @@ def settings(request):
             if cooldown_remaining > 0:
                 messages.error(request, f"发送过于频繁，请 {cooldown_remaining} 秒后再试。")
                 return redirect("accounts:settings")
-            host = request.POST.get("host", "").strip()
-            port = int(request.POST.get("port") or 465)
-            username = request.POST.get("username", "").strip()
-            new_pw = request.POST.get("password", "").strip()
-            from_email = request.POST.get("from_email", "").strip()
-            use_ssl = "use_ssl" in request.POST
-            enabled = "enabled" in request.POST
-            target = request.POST.get("verify_email", "").strip()
-            if not host or not username:
-                messages.error(request, "SMTP 服务器与用户名必填。")
-            elif not target:
-                messages.error(request, "请填写验证收件邮箱（用于验证 SMTP 配置）。")
-            else:
+            smtp_form = SMTPConfigForm(request.POST)
+            if smtp_form.is_valid():
                 # 暂存待验证配置到 session（密码仅存于会话，验证通过后入库）
-                request.session["pending_smtp"] = {
-                    "host": host,
-                    "port": port,
-                    "username": username,
-                    "password": new_pw,
-                    "from_email": from_email,
-                    "use_ssl": use_ssl,
-                    "enabled": enabled,
-                    "verify_email": target,
-                }
+                pending = smtp_form.cleaned_data
+                request.session["pending_smtp"] = pending
                 request.session["smtp_verified"] = False  # 重新发码使已验证失效
-
-                # 用"待验证配置"发验证码邮件（写库前即可确认 SMTP 可用）
-                def _send_with_pending(subject, body, to_list):
-                    return send_email_with_config(
-                        host,
-                        port,
-                        username,
-                        new_pw,
-                        from_email,
-                        use_ssl,
-                        subject,
-                        body,
-                        to_list,
-                    )
-
-                ok = send_smtp_code(target, _send_with_pending)
+                # 密码留空时复用已保存值进行验证，但 pending 仍保留空值，最终保存不覆盖。
+                password = pending["password"] or (email_cfg.password if email_cfg else "")
+                sender = partial(
+                    send_email_with_config,
+                    pending["host"],
+                    pending["port"],
+                    pending["username"],
+                    password,
+                    pending["from_email"],
+                    pending["use_ssl"],
+                )
+                ok = send_smtp_code(pending["verify_email"], sender)
                 if ok:
                     # 存时间戳（秒），session JSON 序列化不支持 datetime
                     request.session["smtp_code_sent_at"] = int(timezone.now().timestamp())
-                    messages.success(request, f"验证码已发送至 {target}，请查收并点击“验证”。")
+                    messages.success(request, f"验证码已发送至 {pending['verify_email']}，请查收并点击“验证”。")
                 else:
                     messages.error(request, "验证码发送失败：当前 SMTP 配置不可用（请检查服务器/端口/认证），未保存。")
                     request.session.pop("pending_smtp", None)
+            else:
+                messages.error(request, next(iter(smtp_form.errors.values()))[0])
             return redirect("accounts:settings")
         elif "verify_smtp_code" in request.POST:
             # 第二步：校验验证码，通过后允许保存（模板据此启用保存按钮）
@@ -595,14 +568,10 @@ def settings(request):
                 messages.error(request, "请先验证验证码，验证通过后才能保存。")
                 return redirect("accounts:settings")
             email_cfg = EmailConfig.objects.first() or EmailConfig()
-            email_cfg.host = pending["host"]
-            email_cfg.port = pending["port"]
-            email_cfg.username = pending["username"]
+            for field in ("host", "port", "username", "from_email", "use_ssl"):
+                setattr(email_cfg, field, pending[field])
             if pending.get("password"):
                 email_cfg.password = pending["password"]
-            email_cfg.from_email = pending.get("from_email", "")
-            email_cfg.use_ssl = pending.get("use_ssl", True)
-            email_cfg.enabled = pending.get("enabled", False)
             # 发送方式与页面单选联动（SMTP 保存时固定为 smtp）
             email_cfg.send_via = EmailConfig.SEND_VIA_SMTP
             email_cfg.save()

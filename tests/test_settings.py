@@ -1,5 +1,7 @@
 """系统设置页测试：GitCode/邮件/Webhook 功能总开关（切换即时生效）。"""
 
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import override_settings
@@ -142,6 +144,66 @@ class TestGlobalWebhook:
             {"add_webhook": "1", "name": "generic", "url": "https://127.0.0.1/hook"},
         )
         assert not WebhookConfig.objects.exists()
+
+
+class TestSMTPSettings:
+    def _data(self, **overrides):
+        data = {
+            "save_email": "1",
+            "host": "smtp.example.com",
+            "port": "465",
+            "username": "mailer",
+            "password": "",
+            "from_email": "nrm@example.com",
+            "use_ssl": "on",
+            "verify_email": "admin@example.com",
+        }
+        data.update(overrides)
+        return data
+
+    def test_invalid_port_is_form_error_not_server_error(self, client):
+        client.force_login(_superuser())
+        with patch("accounts.views.send_smtp_code") as send_code:
+            response = client.post(reverse("accounts:settings"), self._data(port="invalid"))
+        assert response.status_code == 302
+        send_code.assert_not_called()
+        assert "pending_smtp" not in client.session
+
+    def test_blank_password_reuses_saved_value_only_for_verification(self, client):
+        client.force_login(_superuser())
+        EmailConfig.objects.create(host="old", username="old", password="stored-secret")
+        with patch("accounts.views.send_smtp_code", return_value=True) as send_code:
+            response = client.post(reverse("accounts:settings"), self._data())
+
+        assert response.status_code == 302
+        assert send_code.call_args.args[0] == "admin@example.com"
+        assert send_code.call_args.args[1].args[3] == "stored-secret"
+        assert client.session["pending_smtp"]["password"] == ""
+
+    def test_verified_pending_config_saves_without_clearing_password(self, client):
+        client.force_login(_superuser())
+        config = EmailConfig.objects.create(host="old", username="old", password="stored-secret", enabled=True)
+        session = client.session
+        session["pending_smtp"] = {
+            "host": "smtp.example.com",
+            "port": 587,
+            "username": "mailer",
+            "password": "",
+            "from_email": "nrm@example.com",
+            "use_ssl": False,
+            "verify_email": "admin@example.com",
+        }
+        session["smtp_verified"] = True
+        session.save()
+
+        response = client.post(reverse("accounts:settings"), {"save_email_final": "1"})
+
+        assert response.status_code == 302
+        config.refresh_from_db()
+        assert (config.host, config.port, config.username) == ("smtp.example.com", 587, "mailer")
+        assert config.password == "stored-secret"
+        assert config.send_via == EmailConfig.SEND_VIA_SMTP
+        assert config.enabled is True
 
 
 class TestSettingsPageSwitches:

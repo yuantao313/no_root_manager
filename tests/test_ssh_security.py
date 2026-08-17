@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import paramiko
 import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from credentials.models import Credential
 from servers import ssh
@@ -144,6 +146,64 @@ class TestServerFingerprintForm:
 
         assert not form.is_valid()
         assert "root 级权限组" in form.errors["default_group"][0]
+
+
+class TestServerFormViews:
+    def _data(self, credential, **overrides):
+        data = {
+            "name": "server",
+            "host": "10.0.0.8",
+            "port": 22,
+            "credential": credential.pk,
+            "default_group": "dev",
+            "ssh_host_key_fingerprint": _fingerprint(),
+            "action": "save",
+        }
+        data.update(overrides)
+        return data
+
+    def test_create_and_edit_use_same_save_flow(self, client, credential):
+        admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")
+        client.force_login(admin)
+
+        created = client.post(reverse("servers:create"), self._data(credential))
+        server = Server.objects.get(name="server")
+        updated = client.post(reverse("servers:edit", args=[server.pk]), self._data(credential, name="renamed"))
+
+        assert created.status_code == 302
+        assert updated.status_code == 302
+        server.refresh_from_db()
+        assert server.name == "renamed"
+
+    def test_failed_connection_test_does_not_save(self, client, credential):
+        admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")
+        client.force_login(admin)
+        with patch("servers.views.test_server_connection", return_value=(False, "fingerprint mismatch")):
+            response = client.post(reverse("servers:create"), self._data(credential, action="test"))
+
+        assert response.status_code == 200
+        assert not Server.objects.filter(name="server").exists()
+
+    @pytest.mark.parametrize(
+        ("route", "handler", "payload"),
+        [
+            ("lock_user", "servers.views.lock_user", {"username": "alice"}),
+            ("unlock_user", "servers.views.unlock_user", {"username": "alice"}),
+            ("add_user_group", "servers.views.add_user_group", {"username": "alice", "group": "dev"}),
+            ("remove_user_group", "servers.views.remove_user_group", {"username": "alice", "group": "dev"}),
+        ],
+    )
+    def test_paired_user_action_routes_keep_existing_contract(self, client, credential, route, handler, payload):
+        admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")
+        server = Server.objects.create(
+            name="server", host="10.0.0.8", credential=credential, ssh_host_key_fingerprint=_fingerprint()
+        )
+        client.force_login(admin)
+        with patch(handler, return_value=(True, "ok")) as operation:
+            response = client.post(reverse(f"servers:{route}", args=[server.pk]), payload)
+
+        assert response.status_code == 302
+        operation.assert_called_once()
 
 
 class _Stream:

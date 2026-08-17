@@ -28,6 +28,10 @@ from .models import MachineUserBinding, Server
 from .ssh import test_server_connection
 
 
+def _message_result(request, ok, message):
+    (messages.success if ok else messages.error)(request, message)
+
+
 @superuser_required
 def server_list(request):
     """服务器列表（仅超级管理员）。"""
@@ -38,32 +42,20 @@ def server_list(request):
 @superuser_required
 def server_create(request):
     """新增服务器（仅超级管理员）。选择“保存并测试连接”时先测试连通性，通过后才保存。"""
-    if request.method == "POST":
-        form = ServerForm(request.POST)
-        action = request.POST.get("action", "save")
-        if form.is_valid():
-            server = form.save(commit=False)
-            test_msg = ""
-            if action == "test":
-                ok, test_msg = test_server_connection(server)
-                if not ok:
-                    messages.error(request, f"连接测试未通过，未保存：{test_msg}")
-                    return render(request, "servers/form.html", {"form": form, "editing": False})
-            server.save()
-            form.save_m2m()
-            messages.success(request, "服务器已添加。" + (test_msg or ""))
-            return redirect("servers:list")
-    else:
-        form = ServerForm()
-    return render(request, "servers/form.html", {"form": form, "editing": False})
+    return _server_form(request)
 
 
 @superuser_required
 def server_edit(request, pk):
     """编辑服务器（仅超级管理员）：可修改基本信息与分组配置。"""
-    server = get_object_or_404(Server, pk=pk)
+    return _server_form(request, get_object_or_404(Server, pk=pk))
+
+
+def _server_form(request, server=None):
+    """服务器新增/编辑共用流程，保留保存前连接测试。"""
+    editing = server is not None
+    form = ServerForm(request.POST or None, instance=server)
     if request.method == "POST":
-        form = ServerForm(request.POST, instance=server)
         action = request.POST.get("action", "save")
         if form.is_valid():
             server = form.save(commit=False)
@@ -72,14 +64,12 @@ def server_edit(request, pk):
                 ok, test_msg = test_server_connection(server)
                 if not ok:
                     messages.error(request, f"连接测试未通过，未保存：{test_msg}")
-                    return render(request, "servers/form.html", {"form": form, "editing": True})
+                    return render(request, "servers/form.html", {"form": form, "editing": editing})
             server.save()
             form.save_m2m()
-            messages.success(request, "服务器已更新。" + (test_msg or ""))
-            return redirect("servers:detail", pk=server.pk)
-    else:
-        form = ServerForm(instance=server)
-    return render(request, "servers/form.html", {"form": form, "editing": True})
+            messages.success(request, ("服务器已更新。" if editing else "服务器已添加。") + (test_msg or ""))
+            return redirect("servers:detail", pk=server.pk) if editing else redirect("servers:list")
+    return render(request, "servers/form.html", {"form": form, "editing": editing})
 
 
 @superuser_required
@@ -91,10 +81,7 @@ def server_test(request, pk):
         messages.error(request, "该服务器未关联凭据，无法测试。")
         return redirect("servers:detail", pk=pk)
     ok, msg = test_server_connection(server)
-    if ok:
-        messages.success(request, msg)
-    else:
-        messages.error(request, msg)
+    _message_result(request, ok, msg)
     return redirect("servers:detail", pk=pk)
 
 
@@ -216,56 +203,37 @@ def server_takeover_user(request, pk):
 
 @superuser_required
 @require_POST
-def server_lock_user(request, pk):
-    """禁用目标机器用户（passwd -l，仅超级管理员）。"""
+def server_set_user_lock(request, pk, action):
+    """锁定或解锁目标机器用户（仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     if not username:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
-    ok, msg = lock_user(server, username)
-    messages.success(request, msg) if ok else messages.error(request, msg)
+    handler = lock_user if action == "lock" else unlock_user
+    ok, msg = handler(server, username)
+    _message_result(request, ok, msg)
     return redirect("servers:detail", pk=pk)
 
 
 @superuser_required
 @require_POST
-def server_add_user_group(request, pk):
-    """将受管用户加入指定用户组（usermod -aG，组不存在自动创建，仅超级管理员）。"""
+def server_change_user_group(request, pk, action):
+    """将受管用户加入或移出指定用户组（仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     group = request.POST.get("group", "").strip()
     if not username or not group:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
-    ok, msg = add_user_group(server, username, group)
-    if ok:
-        clear_user_groups_cache(server)
-        messages.success(request, msg)
-    else:
-        messages.error(request, msg)
-    return redirect("servers:detail", pk=pk)
-
-
-@superuser_required
-@require_POST
-def server_remove_user_group(request, pk):
-    """将受管用户从指定用户组移除（仅超级管理员；nrm_managed 标识组不可移除）。"""
-    server = get_object_or_404(Server, pk=pk)
-    username = request.POST.get("username", "").strip()
-    group = request.POST.get("group", "").strip()
-    if not username or not group:
-        messages.error(request, "参数错误。")
-        return redirect("servers:detail", pk=pk)
-    if group == NRM_GROUP:
+    if action == "remove" and group == NRM_GROUP:
         messages.error(request, f"{NRM_GROUP} 是受管用户标识组，不能直接移除。")
         return redirect("servers:detail", pk=pk)
-    ok, msg = remove_user_group(server, username, group)
+    handler = add_user_group if action == "add" else remove_user_group
+    ok, msg = handler(server, username, group)
     if ok:
         clear_user_groups_cache(server)
-        messages.success(request, msg)
-    else:
-        messages.error(request, msg)
+    _message_result(request, ok, msg)
     return redirect("servers:detail", pk=pk)
 
 
@@ -308,23 +276,9 @@ def server_update_user_groups(request, pk):
 
 @superuser_required
 @require_POST
-def server_unlock_user(request, pk):
-    """启用目标机器用户（passwd -u，仅超级管理员）。"""
-    server = get_object_or_404(Server, pk=pk)
-    username = request.POST.get("username", "").strip()
-    if not username:
-        messages.error(request, "参数错误。")
-        return redirect("servers:detail", pk=pk)
-    ok, msg = unlock_user(server, username)
-    messages.success(request, msg) if ok else messages.error(request, msg)
-    return redirect("servers:detail", pk=pk)
-
-
-@superuser_required
-@require_POST
 def server_run_init(request, pk):
     """执行服务器初始化脚本（远程 get 并在目标机运行，仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     ok, msg = run_init_script(server)
-    messages.success(request, msg) if ok else messages.error(request, msg)
+    _message_result(request, ok, msg)
     return redirect("servers:detail", pk=pk)

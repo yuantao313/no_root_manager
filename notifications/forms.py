@@ -4,6 +4,18 @@ from .models import WebhookConfig
 from .security import UnsafeWebhookURL, validate_webhook_url
 
 
+class SMTPConfigForm(forms.Form):
+    """SMTP 写库前验证表单；清洗后的数据可安全存入 JSON session。"""
+
+    host = forms.CharField(label="SMTP 服务器", max_length=255)
+    port = forms.IntegerField(label="端口", min_value=1, max_value=65535, initial=465)
+    username = forms.CharField(label="用户名", max_length=255)
+    password = forms.CharField(label="密码/授权码", required=False)
+    from_email = forms.CharField(label="发件人地址", max_length=255, required=False)
+    use_ssl = forms.BooleanField(label="使用 SSL 直连", required=False)
+    verify_email = forms.EmailField(label="验证收件邮箱")
+
+
 class WriteOnlyURLInput(forms.URLInput):
     """Webhook URL 常自带访问令牌，任何重渲染都不回填 HTML。"""
 
