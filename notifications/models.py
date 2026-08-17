@@ -45,6 +45,11 @@ class EmailConfig(models.Model):
     def __str__(self):
         return f"SMTP {self.host}:{self.port}（{'启用' if self.enabled else '停用'}）"
 
+    @classmethod
+    def get_current(cls):
+        """优先返回启用配置；全部停用时返回最近更新项。"""
+        return cls.objects.order_by("-enabled", "-updated_at", "-pk").first()
+
     def save(self, *args, **kwargs):
         # 保证只有一条生效配置：保存时把其他记录设为停用
         super().save(*args, **kwargs)

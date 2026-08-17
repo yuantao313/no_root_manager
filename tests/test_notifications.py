@@ -133,6 +133,21 @@ class TestSendEmailWebhook:
             assert mock_backend.call_args.kwargs["host"] == "smtp.example.com"
             assert mock_backend.call_args.kwargs["port"] == 587
 
+    def test_enabled_config_is_preferred_over_older_disabled_record(self):
+        EmailConfig.objects.create(host="old.example.com", username="old", enabled=False)
+        current = EmailConfig.objects.create(host="new.example.com", username="new", enabled=True)
+
+        with patch("notifications.services.EmailBackend") as backend:
+            backend.return_value.send_messages.return_value = 1
+            assert send_email("主题", "内容", ["a@b.com"]) is True
+
+        assert EmailConfig.get_current() == current
+        assert backend.call_args.kwargs["host"] == "new.example.com"
+
+        current.enabled = False
+        current.save()
+        assert EmailConfig.get_current() == current
+
     def test_send_failure_returns_false(self, application):
         EmailConfig.objects.create(host="h", port=25, username="u", enabled=True)
         with patch("notifications.services.EmailBackend") as mock_backend:

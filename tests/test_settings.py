@@ -47,10 +47,13 @@ class TestToggleSwitch:
 
     def test_toggle_email(self, client):
         client.force_login(_superuser())
-        EmailConfig.objects.create(host="smtp.example.com", port=465, username="u", enabled=True)
+        EmailConfig.objects.create(host="old.example.com", username="old", enabled=False)
+        config = EmailConfig.objects.create(host="smtp.example.com", port=465, username="u", enabled=True)
         resp = client.post(reverse("accounts:toggle_switch"), {"switch": "email", "enabled": "0"})
         assert resp.json()["ok"] is True
-        assert EmailConfig.objects.get().enabled is False
+        config.refresh_from_db()
+        assert config.enabled is False
+        assert EmailConfig.get_current() == config
 
     def test_toggle_webhook(self, client):
         client.force_login(_superuser())

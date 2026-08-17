@@ -249,7 +249,7 @@ class TestReviewProvision:
         )
         from django.core import mail
 
-        with patch("notifications.services.EmailConfig.objects.first", return_value=None):
+        with patch("notifications.services.EmailConfig.get_current", return_value=None):
             # 未配置 SMTP：不发送，直接返回 False（不影响工单已存密码）
             assert send_provision_credentials(app, "Pass123") is False
         # 配置 SMTP 时发送，正文含强制改密提示

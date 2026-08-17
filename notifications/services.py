@@ -94,7 +94,7 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
     - smtp：原 EmailBackend 直连逻辑（不改动）
     - webhook：POST 到邮件 Webhook（规避 SMTP 端口屏蔽）
     """
-    cfg = EmailConfig.objects.first()
+    cfg = EmailConfig.get_current()
     if not cfg or not cfg.enabled or not to_list:
         logger.info("邮件未发送（未启用/未配置）：%s -> %s", subject, to_list)
         return False
@@ -150,16 +150,21 @@ def _send_email_via_webhook(cfg, subject: str, body: str, to_list: list[str]) ->
         return False
 
 
+def _application_reviewers(application=None):
+    """返回活跃管理员；传入工单时按服务器审批权限收窄。"""
+    User = get_user_model()
+    users = User.objects.filter(is_staff=True, is_active=True)
+    if application is None:
+        return users
+    scope = Q(is_superuser=True)
+    if application.target_server_id:
+        scope |= Q(server_bindings__server_id=application.target_server_id)
+    return users.filter(scope).distinct()
+
+
 def admin_emails(application=None) -> list[str]:
     """返回有权处理该工单的管理员邮箱；未传工单时保留通用查询。"""
-    User = get_user_model()
-    users = User.objects.filter(is_staff=True, is_active=True).exclude(email="")
-    if application is not None:
-        scope = Q(is_superuser=True)
-        if application.target_server_id:
-            scope |= Q(server_bindings__server_id=application.target_server_id)
-        users = users.filter(scope).distinct()
-    return list(users.values_list("email", flat=True))
+    return list(_application_reviewers(application).exclude(email="").values_list("email", flat=True))
 
 
 def _format_mail_details(application) -> str:
@@ -405,11 +410,7 @@ def send_webhook(event: str, payload: dict, *, application=None) -> bool:
         # 没有权限上下文的通用事件只能推送到超级管理员维护的全局 Hook。
         hooks = hooks.filter(owner__isnull=True)
     else:
-        active_staff = Q(owner__is_staff=True, owner__is_active=True)
-        scope = Q(owner__isnull=True) | (Q(owner__is_superuser=True) & active_staff)
-        if application.target_server_id:
-            scope |= active_staff & Q(owner__server_bindings__server_id=application.target_server_id)
-        hooks = hooks.filter(scope).distinct()
+        hooks = hooks.filter(Q(owner__isnull=True) | Q(owner__in=_application_reviewers(application)))
     if not hooks:
         return False
     ok = True

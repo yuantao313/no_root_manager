@@ -214,7 +214,7 @@ def toggle_switch(request):
         cfg.gitcode_enabled = enabled
         cfg.save()
     elif switch == "email":
-        cfg = EmailConfig.objects.first() or EmailConfig()
+        cfg = EmailConfig.get_current() or EmailConfig()
         cfg.enabled = enabled
         cfg.save()
     elif switch == "webhook":
@@ -440,7 +440,7 @@ def profile(request):
 def settings(request):
     """系统设置（仅超级管理员）：GitCode、邮件、全局 Webhook 与公告。"""
     syscfg = SystemConfig.get_singleton()
-    email_cfg = EmailConfig.objects.first()
+    email_cfg = EmailConfig.get_current()
     hook = WebhookConfig.objects.filter(owner__isnull=True).first()
     announcement = Announcement.objects.first()
 
