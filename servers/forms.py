@@ -2,7 +2,8 @@ from django import forms
 
 from credentials.models import Credential
 
-from .models import Server
+from .models import ROOT_EQUIVALENT_GROUPS, Server
+from .ssh import normalize_host_key_fingerprint
 
 
 class ServerForm(forms.ModelForm):
@@ -20,6 +21,7 @@ class ServerForm(forms.ModelForm):
             "name",
             "host",
             "port",
+            "ssh_host_key_fingerprint",
             "credential",
             "default_group",
             "is_npu",
@@ -28,6 +30,33 @@ class ServerForm(forms.ModelForm):
             "port": forms.NumberInput(attrs={"min": 1, "max": 65535}),
         }
         help_texts = {
-            "default_group": "多个分组用英文逗号分隔，如：dev,ops",
+            "default_group": "多个分组用英文逗号分隔，如：dev,ops；禁止配置 sudo、wheel、docker 等 root 级权限组",
             "is_npu": "勾选后，用户申请的分组选择转换为 NPU 算力卡组选择；NPU 卡组由系统自动检测（详情页可重新检测）",
         }
+
+    def clean_default_group(self):
+        """默认组会自动授予每个新账号，禁止夹带 root 级权限。"""
+        value = self.cleaned_data.get("default_group", "")
+        groups = {group.strip() for group in value.split(",") if group.strip()}
+        dangerous = sorted(groups & ROOT_EQUIVALENT_GROUPS)
+        if dangerous:
+            raise forms.ValidationError(
+                f"默认用户组不能包含 root 级权限组：{', '.join(dangerous)}；请改走独立权限申请。"
+            )
+        return ",".join(group.strip() for group in value.split(",") if group.strip())
+
+    def clean_ssh_host_key_fingerprint(self):
+        """仅接受 OpenSSH SHA256 指纹。
+
+        首次“保存并测试连接”允许留空，由 SSH 层只读获取候选指纹；
+        普通保存必须已经填入经管理员核对的指纹。
+        """
+        value = self.cleaned_data.get("ssh_host_key_fingerprint", "")
+        if not value:
+            if self.data.get("action") == "test":
+                return ""
+            raise forms.ValidationError("请先获取并核对 SSH 主机指纹，再保存服务器。")
+        try:
+            return normalize_host_key_fingerprint(value)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc

@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 
 from applications.models import Application
 from credentials.models import Credential
@@ -13,6 +14,7 @@ from servers.models import Server
 pytestmark = pytest.mark.django_db
 
 User = get_user_model()
+TEST_HOST_FINGERPRINT = "SHA256:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE"
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +44,13 @@ def normal():
 @pytest.fixture
 def server():
     cred = Credential.objects.create(name="c1", username="root", password="p1")
-    return Server.objects.create(name="web", host="10.0.0.1", port=22, credential=cred)
+    return Server.objects.create(
+        name="web",
+        host="10.0.0.1",
+        port=22,
+        credential=cred,
+        ssh_host_key_fingerprint=TEST_HOST_FINGERPRINT,
+    )
 
 
 class TestRequireLogin:
@@ -66,7 +74,7 @@ class TestRequireLogin:
         assert resp.status_code == 302
         assert Application.objects.count() == 0
 
-    def test_login_user_can_submit(self, client, normal):
+    def test_login_user_can_submit(self, client, normal, server):
         client.force_login(normal)
         resp = client.post(
             reverse("applications:my"),
@@ -76,7 +84,7 @@ class TestRequireLogin:
                 "email": "zs@example.com",
                 "employee_id": "E001",
                 "apply_type": "create",
-                "target_server": "",
+                "target_server": str(server.pk),
                 "title": "开通账号",
                 "description": "需要登录",
             },
@@ -184,9 +192,10 @@ class TestReviewProvision:
         # 初始密码同步写入工单（加密存储，读取自动解密）
         assert app.initial_password == "Pass123"
 
-    def test_provision_initial_password_shown_in_detail(self, client, staff, server):
-        """开通后工单详情页展示初始密码（邮件不可用时的兜底渠道）。"""
+    def test_provision_initial_password_only_shown_to_applicant(self, client, staff, normal, server):
+        """开通后仅申请人本人可见初始密码，且详情响应禁止缓存。"""
         app = Application.objects.create(
+            applicant=normal,
             applicant_name="张三",
             username="zhangsan",
             email="zs@x.com",
@@ -194,14 +203,22 @@ class TestReviewProvision:
             title="开通",
             target_server=server,
             status=Application.Status.APPROVED,
+            provisioned_at=timezone.now(),
             initial_password="Pass123",
         )
-        client.force_login(staff)
+        client.force_login(normal)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
         html = resp.content.decode()
         assert "初始密码" in html
         assert "Pass123" in html
         assert "首次登录必须修改" in html
+        assert "no-store" in resp.headers["Cache-Control"]
+
+        client.force_login(staff)
+        resp = client.get(reverse("applications:detail", args=[app.pk]))
+        html = resp.content.decode()
+        assert "Pass123" not in html
+        assert "初始凭据仅申请人本人可见" in html
 
     def test_send_provision_credentials_body_has_force_change(self):
         """开通邮件正文包含密码与"首次必须改密"提示（与工单同步通知）。"""
@@ -503,7 +520,7 @@ class TestNpuGroups:
 
 
 class TestResendMail:
-    """重发开通凭据邮件：仅已开通且有初始密码的工单（申请人本人或管理员）。"""
+    """重发开通凭据邮件：仅已开通且有初始密码的工单（申请人本人或超级管理员）。"""
 
     @pytest.fixture
     def opened_app(self, staff, server):

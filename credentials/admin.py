@@ -8,8 +8,16 @@ class CredentialAdmin(admin.ModelAdmin):
     list_display = ("name", "username", "has_password", "has_private_key", "updated_at")
     list_filter = ("username",)
     search_fields = ("name", "username", "remark")
-    readonly_fields = ("created_at", "updated_at")
-    fields = ("name", "username", "password", "private_key", "remark", "created_at", "updated_at")
+    readonly_fields = ("has_password", "has_private_key", "created_at", "updated_at")
+    fields = (
+        "name",
+        "username",
+        "remark",
+        "has_password",
+        "has_private_key",
+        "created_at",
+        "updated_at",
+    )
 
     @admin.display(description="密码", boolean=True)
     def has_password(self, obj):

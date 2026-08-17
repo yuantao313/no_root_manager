@@ -15,10 +15,12 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
+from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
 from notifications.forms import WebhookForm
 from notifications.models import EmailConfig, WebhookConfig
+from notifications.security import UnsafeWebhookURL, validate_webhook_url
 from notifications.services import send_email, send_email_with_config, send_webhook_to
 from servers.management import push_notices
 
@@ -188,6 +190,7 @@ def _gitcode_enabled():
 
 
 @superuser_required
+@require_POST
 def toggle_switch(request):
     """系统功能开关即时切换（AJAX）：gitcode / email / webhook。
 
@@ -195,8 +198,6 @@ def toggle_switch(request):
     返回 JSON：{"ok": true} 或 {"ok": false, "error": "..."}。
     """
     switch = request.POST.get("switch", "")
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "仅支持 POST"}, status=405)
     enabled = request.POST.get("enabled") == "1"
     if switch == "gitcode":
         cfg = SystemConfig.get_singleton()
@@ -207,7 +208,11 @@ def toggle_switch(request):
         cfg.enabled = enabled
         cfg.save()
     elif switch == "webhook":
-        hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
+        hook = WebhookConfig.objects.filter(owner__isnull=True).first()
+        if hook is None:
+            if enabled:
+                return JsonResponse({"ok": False, "error": "请先保存有效的全局 Webhook 配置。"}, status=400)
+            return JsonResponse({"ok": True})
         hook.enabled = enabled
         hook.save()
     else:
@@ -311,6 +316,7 @@ def _email_code_cooldown(request):
 
 
 @login_required
+@require_POST
 def send_email_code_ajax(request):
     """AJAX 发送邮箱验证码（修改邮箱前置）：60 秒冷却 + JSON 返回，不刷新页面。"""
     from django.utils import timezone
@@ -336,6 +342,7 @@ def send_email_code_ajax(request):
 
 
 @login_required
+@require_POST
 def verify_email_code_ajax(request):
     """AJAX 校验邮箱验证码：通过才允许保存邮箱，失败前端提示错误（不刷新）。
 
@@ -358,7 +365,7 @@ def profile(request):
     my_hook = hooks.first()
     webhook_form = WebhookForm(
         instance=my_hook,
-        initial={"name": my_hook.name, "url": my_hook.url, "enabled": my_hook.enabled} if my_hook else None,
+        initial={"name": my_hook.name, "enabled": my_hook.enabled} if my_hook else None,
     )
 
     if request.method == "POST":
@@ -396,7 +403,7 @@ def profile(request):
                 messages.success(request, "个人信息已更新。")
                 return redirect("accounts:profile")
         elif "add_webhook" in request.POST and request.user.is_staff:
-            webhook_form = WebhookForm(request.POST)
+            webhook_form = WebhookForm(request.POST, instance=my_hook)
             if webhook_form.is_valid():
                 # 个人 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
                 hook = WebhookConfig.objects.filter(owner=request.user).first() or WebhookConfig(owner=request.user)
@@ -410,9 +417,9 @@ def profile(request):
                 return redirect("accounts:profile")
         elif "test_webhook" in request.POST and request.user.is_staff:
             # 测试个人 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
-            test_url = request.POST.get("url", "").strip()
-            test_secret = request.POST.get("secret", "").strip()
-            test_platform = request.POST.get("name", "").strip()
+            test_url = request.POST.get("url", "").strip() or (my_hook.url if my_hook else "")
+            test_secret = request.POST.get("secret", "").strip() or (my_hook.secret if my_hook else "")
+            test_platform = request.POST.get("name", "").strip() or (my_hook.name if my_hook else "")
             ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
             if ok:
                 messages.success(request, f"Webhook 测试：{msg}")
@@ -465,9 +472,16 @@ def settings(request):
             new_token = request.POST.get("mail_webhook_token", "").strip()
             if send_via in dict(EmailConfig.SEND_VIA_CHOICES):
                 email_cfg = EmailConfig.objects.first() or EmailConfig()
+                effective_url = new_url or email_cfg.mail_webhook_url
+                if send_via == EmailConfig.SEND_VIA_WEBHOOK:
+                    try:
+                        effective_url = validate_webhook_url(effective_url)
+                    except UnsafeWebhookURL as exc:
+                        messages.error(request, f"邮件 Webhook 配置无效：{exc}")
+                        return redirect("accounts:settings")
                 email_cfg.send_via = send_via
                 if new_url:
-                    email_cfg.mail_webhook_url = new_url
+                    email_cfg.mail_webhook_url = effective_url
                 if new_token:
                     email_cfg.mail_webhook_token = new_token
                 email_cfg.save()
@@ -588,24 +602,32 @@ def settings(request):
             messages.success(request, "SMTP 配置已通过验证并保存。")
         elif "add_webhook" in request.POST:
             name = request.POST.get("name", "").strip()
-            url = request.POST.get("url", "").strip()
+            hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
+            url = request.POST.get("url", "").strip() or hook.url
             if name and url:
+                try:
+                    url = validate_webhook_url(url)
+                except UnsafeWebhookURL as exc:
+                    messages.error(request, f"Webhook 配置无效：{exc}")
+                    return redirect("accounts:settings")
                 # 全局 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
-                hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
                 hook.name = name
                 hook.url = url
                 if request.POST.get("secret", "").strip():
                     hook.secret = request.POST.get("secret", "").strip()
-                hook.enabled = "enabled" in request.POST
+                # 启停由标题栏总开关维护；保存表单不应把现有 Hook 意外关闭。
+                if not hook.pk:
+                    hook.enabled = True
                 hook.save()
                 messages.success(request, "全局 Webhook 已保存。")
             else:
                 messages.error(request, "Webhook 名称与 URL 必填。")
         elif "test_webhook" in request.POST:
             # 测试全局 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
-            test_url = request.POST.get("url", "").strip()
-            test_secret = request.POST.get("secret", "").strip()
-            test_platform = request.POST.get("name", "").strip()
+            hook = WebhookConfig.objects.filter(owner__isnull=True).first()
+            test_url = request.POST.get("url", "").strip() or (hook.url if hook else "")
+            test_secret = request.POST.get("secret", "").strip() or (hook.secret if hook else "")
+            test_platform = request.POST.get("name", "").strip() or (hook.name if hook else "")
             ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
             if ok:
                 messages.success(request, f"Webhook 测试：{msg}")
@@ -661,6 +683,7 @@ def settings(request):
 
 
 @login_required
+@require_POST
 def gitcode_unbind(request):
     """解绑 GitCode：无密码用户（仅靠 GitCode 登录）须先设置本地密码，
     否则解绑后将无法登录系统。"""

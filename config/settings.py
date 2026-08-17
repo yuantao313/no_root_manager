@@ -28,6 +28,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 NRM_ENV = os.environ.get("NRM_ENV", "dev").strip().lower()
 MODE = "deploy" if NRM_ENV == "prod" else "dev"
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 try:
     from dotenv import load_dotenv
 
@@ -94,6 +102,17 @@ else:  # deploy
     ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get("NRM_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
     LOG_LEVEL = os.environ.get("NRM_LOG_LEVEL", "INFO").strip().upper()
+
+# 生产环境默认启用 Django 官方部署安全基线。
+SECURE_SSL_REDIRECT = MODE == "deploy" and _env_bool("NRM_SECURE_SSL_REDIRECT", True)
+SESSION_COOKIE_SECURE = MODE == "deploy"
+CSRF_COOKIE_SECURE = MODE == "deploy"
+SECURE_HSTS_SECONDS = int(os.environ.get("NRM_SECURE_HSTS_SECONDS", "31536000")) if MODE == "deploy" else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = MODE == "deploy" and _env_bool("NRM_SECURE_HSTS_INCLUDE_SUBDOMAINS")
+SECURE_HSTS_PRELOAD = MODE == "deploy" and _env_bool("NRM_SECURE_HSTS_PRELOAD")
+SECURE_CONTENT_TYPE_NOSNIFF = True
+if MODE == "deploy" and _env_bool("NRM_TRUST_X_FORWARDED_PROTO"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # GitCode OAuth 回调基准地址：一律从环境变量（.env / .env.prod）读取，禁止硬编码。
 # 未配置时为空串，站点地址由数据库 SystemConfig.site_base_url 兜底。
@@ -314,6 +333,7 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # 项目自研静态资源（app.css / app.js）放在根目录 static/ 下，
 # 不属于任何 app，需显式登记到 STATICFILES_DIRS，

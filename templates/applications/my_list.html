@@ -56,13 +56,10 @@
                 <span class="helptext">{{ form.user_groups.help_text }}</span>
                 {{ form.user_groups.errors }}
             </div>
-            <!-- 转移类型：从目标机器读取的用户列表下拉选择（由 app.js 填充，select2 可搜索） -->
+            <!-- 转移类型：只填写本人已知账号，不向普通用户枚举目标机用户名。 -->
             <p data-field-for="transfer" id="transfer-field">
-                <label>已有机器用户名:</label>
-                <select name="transfer_username" id="id_transfer_username" class="form-control select2" data-users-url="{% url 'servers:groups_api' 0 %}">
-                    <option value="">请先选择目标服务器</option>
-                </select>
-                <span class="helptext">从目标机器读取的用户列表中选择要接管的账号</span>
+                {{ form.transfer_username.label_tag }} {{ form.transfer_username }}
+                <span class="helptext">{{ form.transfer_username.help_text }}</span>
                 {{ form.transfer_username.errors }}
             </p>
             <!-- 平台管理员：仅"申请平台管理员"类型显示（不选 NPU/用户组） -->

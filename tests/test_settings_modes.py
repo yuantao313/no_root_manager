@@ -1,7 +1,7 @@
 """dev / deploy 运行模式与配置文件加载测试。
 
 通过独立子进程加载 settings，避免污染测试进程、不触碰开发数据库。
-核心约定（见 .env / .env.prod）：
+核心约定：
   - NRM_ENV=prod -> 部署模式（严格按 .env.prod 执行）
   - 其他（含未设置 / dev）-> 开发模式（宽松 + 详细日志）
 """
@@ -61,8 +61,8 @@ def test_dev_mode_default_loads_dotenv():
     assert cfg["ALLOWED_HOSTS"] == ["*"]
     assert set(cfg["CSRF_TRUSTED_ORIGINS"]) >= {"http://*", "https://*"}
     assert cfg["LOG_LEVEL"] == "DEBUG"
-    # NRM_GITCODE_CALLBACK_BASE_URL 从环境变量读取（无硬编码默认值）
-    assert cfg["GITCODE_CALLBACK_BASE_URL"] != ""
+    # 可选回调地址没有硬编码默认值。
+    assert cfg["GITCODE_CALLBACK_BASE_URL"] == ""
     # 开发模式默认不启动 NPU 状态同步（避免启动即 SSH 探测真实机器）
     assert cfg["NPU_SYNC_ON_STARTUP"] is False
 
@@ -83,7 +83,17 @@ def test_dev_mode_explicit():
 
 def test_deploy_mode_loads_dotenv_prod():
     # NRM_ENV=prod -> 部署模式，加载 .env.prod，严格按配置解析
-    cfg = _loads(_load({"NRM_ENV": "prod"}))
+    cfg = _loads(
+        _load(
+            {
+                "NRM_ENV": "prod",
+                "NRM_SECRET_KEY": "test-only-secret",
+                "NRM_ALLOWED_HOSTS": "your.domain.com,localhost",
+                "NRM_CSRF_TRUSTED_ORIGINS": "https://your.domain.com",
+                "NRM_GITCODE_CALLBACK_BASE_URL": "https://your.domain.com",
+            }
+        )
+    )
     assert cfg["MODE"] == "deploy"
     assert cfg["DEBUG"] is False
     assert cfg["ALLOWED_HOSTS"] == ["your.domain.com", "localhost"]
@@ -106,6 +116,7 @@ def test_deploy_mode_env_overrides_file():
         _load(
             {
                 "NRM_ENV": "prod",
+                "NRM_SECRET_KEY": "test-only-secret",
                 "NRM_ALLOWED_HOSTS": "real.example.com",
                 "NRM_DEBUG": "True",
             }

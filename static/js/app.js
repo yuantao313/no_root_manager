@@ -11,6 +11,12 @@
         return m ? decodeURIComponent(m[2]) : "";
     }
 
+    function escapeHtml(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char];
+        });
+    }
+
     /* ===== 个人中心：行内编辑 ===== */
     function editField(field) {
         document.querySelectorAll(".field-input").forEach(function (i) { i.style.display = "none"; });
@@ -31,6 +37,9 @@
     }
     document.querySelectorAll(".field-edit").forEach(function (a) {
         a.addEventListener("click", function () { editField(this.dataset.field); });
+    });
+    document.querySelectorAll(".field-cancel").forEach(function (button) {
+        button.addEventListener("click", function () { cancelEdit(this.dataset.field); });
     });
 
     /* ===== 邮箱验证码 AJAX（发送不刷新、60 秒倒计时、错误前端提示）===== */
@@ -123,7 +132,7 @@
         startCooldown(parseInt(cooldownAttr, 10));
     }
 
-    /* ===== 申请页：类型条件显示 + NPU 卡组按钮组 + 转移用户下拉 ===== */
+    /* ===== 申请页：类型条件显示 + NPU 卡组按钮组 ===== */
     var serverSelect = document.querySelector('select[name="target_server"]');
     var applyTypeSelect = document.getElementById("id_apply_type");
     var groupsUl = document.getElementById("id_applied_groups");
@@ -131,7 +140,6 @@
     var userGroupsField = document.getElementById("user-groups-field");
     var transferField = document.getElementById("transfer-field");
     var adminField = document.getElementById("admin-field");
-    var transferSelect = document.getElementById("id_transfer_username");
 
     if (serverSelect) {
         var groupsApiUrl = serverSelect.dataset.groupsUrl || "/servers/api/groups/";
@@ -150,66 +158,26 @@
             if (adminField) adminField.style.display = t === "admin" ? "" : "none";
             // 切回 create 时按当前服务器重新加载卡组按钮
             if (t === "create" && groupsUl) loadGroups(serverSelect.value);
-            // transfer 时加载机器用户下拉
-            if (t === "transfer") loadTransferUsers(serverSelect.value);
-        }
-
-        function loadTransferUsers(serverId) {
-            if (!transferSelect) return;
-            transferSelect.innerHTML = '<option value="">请先选择目标服务器</option>';
-            // select2 重建：先销毁再初始化，确保新选项生效
-            if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2 && transferSelect.dataset.select2init) {
-                window.jQuery(transferSelect).select2("destroy");
-                delete transferSelect.dataset.select2init;
-            }
-            if (!serverId) return;
-            fetch(apiUrl(groupsApiUrl, serverId))
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    var users = data.users || [];
-                    if (!users.length) {
-                        transferSelect.innerHTML = '<option value="">该服务器无可接管用户</option>';
-                        return;
-                    }
-                    var html = '<option value="">请选择要接管的账号</option>';
-                    users.forEach(function (u) {
-                        html += '<option value="' + u + '">' + u + "</option>";
-                    });
-                    transferSelect.innerHTML = html;
-                })
-                .catch(function () {
-                    transferSelect.innerHTML = '<option value="">读取机器用户失败</option>';
-                })
-                .finally(function () {
-                    // 选项就绪后初始化 select2（可搜索）
-                    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
-                        window.jQuery(transferSelect).select2({ width: "100%" });
-                        transferSelect.dataset.select2init = "1";
-                    }
-                });
         }
 
         var selected = [];
         var npuCardCount = 0; // 当前服务器可选 NPU 卡组数（过滤公共组 npu 后），用于按需选择校验
-        var currentGroups = []; // 最近一次 groups_api 的卡组（NPU 按钮重渲染用）
-        var currentIsNpu = false;
-
         // 渲染设备信息条（CPU/内存/硬盘），显示在目标服务器下方
         function renderDeviceInfo(device) {
             var strip = document.getElementById("device-info-strip");
             if (!strip) return;
             device = device || {};
             var parts = [];
-            if (device.cpu) parts.push("CPU：" + device.cpu);
-            if (device.memory) parts.push("内存：" + device.memory);
-            if (device.disk) parts.push("硬盘：" + device.disk);
+            if (device.cpu) parts.push("CPU：" + escapeHtml(device.cpu));
+            if (device.memory) parts.push("内存：" + escapeHtml(device.memory));
+            if (device.disk) parts.push("硬盘：" + escapeHtml(device.disk));
             if (parts.length) {
                 strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + parts.join("　|　") + "</span>";
                 strip.style.display = "";
             } else {
                 // 查询失败或空：显示提示而非静默隐藏（避免看起来像"没加载"）
                 var msg = (device && device.msg) ? device.msg : "设备信息获取失败";
-                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + msg + "</span>";
+                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + escapeHtml(msg) + "</span>";
                 strip.style.display = "";
             }
         }
@@ -259,8 +227,8 @@
                 var btnCls = active ? " btn-primary" : (critical ? " btn-danger npu-card-critical" : " btn-default");
                 html += '<div class="col-xs-3" style="padding:2px;">' +
                     '<button type="button" class="btn btn-block npu-card-btn' + btnCls +
-                    '" data-group="' + g + '" title="' + title + '" style="font-size:13px;padding:6px 0;font-weight:bold;">' +
-                    (healthCls ? '<span class="' + healthCls + '">' + label + "</span>" : label) + "</button></div>";
+                    '" data-group="' + escapeHtml(g) + '" title="' + escapeHtml(title) + '" style="font-size:13px;padding:6px 0;font-weight:bold;">' +
+                    (healthCls ? '<span class="' + healthCls + '">' + escapeHtml(label) + "</span>" : escapeHtml(label)) + "</button></div>";
             });
             html += "</div>";
             groupsUl.innerHTML = html;
@@ -301,12 +269,12 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     var device = data.device || {};
-                    currentGroups = data.extra_groups || [];
-                    currentIsNpu = !!data.is_npu;
+                    var groups = data.extra_groups || [];
+                    var isNpu = !!data.is_npu;
                     // 设备信息条（CPU/内存/硬盘）：所有服务器都显示
                     renderDeviceInfo(device);
                     // NPU 卡按钮：设备号+型号+内存G 一次渲染
-                    renderGroups(currentGroups, currentIsNpu, device);
+                    renderGroups(groups, isNpu, device);
                     // 非 NPU 服务器：隐藏整个卡组区（含 label）
                     if (!data.is_npu) {
                         var wrap = document.getElementById("npu-field");
@@ -322,7 +290,6 @@
         serverSelect.addEventListener("change", function () {
             selected = [];
             loadGroups(this.value);
-            if (applyTypeSelect && applyTypeSelect.value === "transfer") loadTransferUsers(this.value);
         });
         if (applyTypeSelect) applyTypeSelect.addEventListener("change", toggleTypeFields);
         toggleTypeFields();
@@ -330,14 +297,13 @@
 
         // 服务器下拉 select2 初始化（可搜索）。
         // 注意：select2 隐藏原生 select 后不再触发原生 change 事件，
-        // 必须额外监听 select2:select 才能联动加载 NPU 卡组/机器用户。
+        // 必须额外监听 select2:select 才能联动加载 NPU 卡组。
         if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
             window.jQuery(serverSelect).select2({ width: "100%" });
             window.jQuery(serverSelect).on("select2:select", function () {
                 var val = window.jQuery(serverSelect).val();
                 selected = [];
                 loadGroups(val);
-                if (applyTypeSelect && applyTypeSelect.value === "transfer") loadTransferUsers(val);
             });
         }
 
@@ -548,7 +514,7 @@
             var html = '<table class="table table-striped info-table">' +
                 "<thead><tr><th>设备号</th><th>型号</th><th>内存</th></tr></thead><tbody>";
             cards.forEach(function (c) {
-                html += "<tr><td>" + c.index + "</td><td>" + c.soc_name + "</td><td>" + c.mem_g + "G</td></tr>";
+                html += "<tr><td>" + escapeHtml(c.index) + "</td><td>" + escapeHtml(c.soc_name) + "</td><td>" + escapeHtml(c.mem_g) + "G</td></tr>";
             });
             html += "</tbody></table>";
             npuList.innerHTML = html;

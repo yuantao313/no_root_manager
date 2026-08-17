@@ -1,7 +1,12 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_POST
 
 from accounts.models import Announcement
 from config.decorators import staff_required
@@ -23,7 +28,7 @@ from servers.management import (
 )
 from servers.models import MachineUserBinding, Server
 
-from .forms import ApplicationForm
+from .forms import ApplicationForm, ApplicationReviewForm
 from .models import Application
 
 
@@ -48,7 +53,7 @@ def _bg_provision(application_pk):
     按 pk 重新取数（后台线程内使用独立 DB 连接）；结果写入工单字段，
     管理员/申请人稍后刷新详情页可见。granted_by 取审批人（application.reviewer）。
     """
-    application = Application.objects.select_related("target_server", "target_server__credential").get(
+    application = Application.objects.select_related("reviewer", "target_server", "target_server__credential").get(
         pk=application_pk
     )
     if not application.target_server or not application.target_server.credential:
@@ -57,6 +62,11 @@ def _bg_provision(application_pk):
         return
 
     server = application.target_server
+    if application.requires_superuser_approval and not (application.reviewer and application.reviewer.is_superuser):
+        application.provisioned_at = None
+        application.provision_note = "开通失败：该申请包含 root 级权限，但审批人不是超级管理员。"
+        application.save(update_fields=["provisioned_at", "provision_note"])
+        return
 
     # 转移类型：将目标机器已有用户接管为受管用户（用户信息实时扫描，不落库）
     if application.apply_type == Application.ApplyType.TRANSFER:
@@ -155,16 +165,16 @@ def _bg_provision(application_pk):
 
 
 @login_required
+@require_POST
 def application_withdraw(request, pk):
     """申请人撤回自己的待审批申请（状态 → 已撤回）。"""
     application = get_object_or_404(Application, pk=pk, applicant=request.user)
-    if request.method != "POST":
-        return redirect("applications:my")
-    if application.status != Application.Status.PENDING:
+    updated = Application.objects.filter(pk=application.pk, status=Application.Status.PENDING).update(
+        status=Application.Status.WITHDRAWN
+    )
+    if not updated:
         messages.error(request, "仅待审批的申请可以撤回。")
         return redirect("applications:my")
-    application.status = Application.Status.WITHDRAWN
-    application.save(update_fields=["status"])
     messages.success(request, "申请已撤回。")
     return redirect("applications:my")
 
@@ -267,7 +277,12 @@ def my_applications(request):
                 )
                 return redirect("applications:my")
 
-            application.save()
+            try:
+                with transaction.atomic():
+                    application.save()
+            except IntegrityError:
+                messages.error(request, f"服务器上用户 {application.username} 已存在进行中的申请。")
+                return redirect("applications:my")
             messages.success(request, "申请已提交，等待管理员审批。")
             # 通知（webhook+邮件）后台执行，不阻塞提交请求
             run_in_background(_bg_notify_new_application, application.pk)
@@ -292,6 +307,7 @@ def my_applications(request):
 
 
 @login_required
+@never_cache
 def application_detail(request, pk):
     """申请详情：申请人本人可查看自己的工单；
     管理员（staff）按既有逻辑（超管全部，普通管理员仅绑定服务器的申请）。"""
@@ -299,16 +315,51 @@ def application_detail(request, pk):
     if request.user.is_superuser:
         application = get_object_or_404(qs, pk=pk)
     elif request.user.is_staff:
-        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
+        application = get_object_or_404(
+            qs.filter(Q(applicant=request.user) | Q(target_server__in=Server.visible_to(request.user))).distinct(),
+            pk=pk,
+        )
     else:
         # 普通用户：只能查看自己的工单（他人工单 404，防止越权）
         application = get_object_or_404(qs, pk=pk, applicant=request.user)
-    return render(request, "applications/detail.html", {"application": application})
+    can_view_initial_password = bool(
+        application.initial_password
+        and application.status == Application.Status.APPROVED
+        and application.provisioned_at
+        and application.applicant_id == request.user.id
+    )
+    can_resend_initial_password = bool(
+        application.initial_password
+        and application.status == Application.Status.APPROVED
+        and application.provisioned_at
+        and (request.user.is_superuser or application.applicant_id == request.user.id)
+    )
+    can_review = bool(
+        request.user.is_superuser
+        or (
+            request.user.is_staff
+            and application.target_server_id
+            and Server.visible_to(request.user).filter(pk=application.target_server_id).exists()
+        )
+    )
+    can_approve = can_review and not (application.requires_superuser_approval and not request.user.is_superuser)
+    return render(
+        request,
+        "applications/detail.html",
+        {
+            "application": application,
+            "can_view_initial_password": can_view_initial_password,
+            "can_resend_initial_password": can_resend_initial_password,
+            "can_review": can_review,
+            "can_approve": can_approve,
+        },
+    )
 
 
 @login_required
+@require_POST
 def application_resend_mail(request, pk):
-    """重发开通凭据邮件（含初始密码）：申请人本人或管理员，仅已开通且有初始密码的工单。
+    """重发开通凭据邮件（含初始密码）：申请人本人或超级管理员，仅限已开通工单。
 
     邮件正文由 send_provision_credentials 生成（含用户名/初始密码/强制改密提示），
     重发复用工单中加密存储的 initial_password，无需重新开通。
@@ -317,12 +368,15 @@ def application_resend_mail(request, pk):
     if request.user.is_superuser:
         application = get_object_or_404(qs, pk=pk)
     elif request.user.is_staff:
-        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
+        application = get_object_or_404(
+            qs.filter(Q(applicant=request.user) | Q(target_server__in=Server.visible_to(request.user))).distinct(),
+            pk=pk,
+        )
     else:
         # 普通用户：只能重发自己的工单（他人工单 404，防止越权）
         application = get_object_or_404(qs, pk=pk, applicant=request.user)
-    if request.method != "POST":
-        return redirect("applications:detail", pk=pk)
+    if not (request.user.is_superuser or application.applicant_id == request.user.id):
+        raise Http404
     if application.status != Application.Status.APPROVED or not application.provisioned_at:
         messages.error(request, "仅已开通的申请可以重发邮件。")
         return redirect("applications:detail", pk=pk)
@@ -337,40 +391,55 @@ def application_resend_mail(request, pk):
 
 
 @staff_required
+@require_POST
 def application_review(request, pk, action):
     """审批：action 为 approve（通过）或 reject（驳回），
     普通管理员仅能审批绑定服务器的申请。"""
     qs = Application.objects.select_related("applicant", "target_server", "reviewer")
     if request.user.is_superuser:
-        application = get_object_or_404(qs, pk=pk)
+        application_qs = qs.filter(pk=pk)
     else:
-        application = get_object_or_404(qs.filter(target_server__in=Server.visible_to(request.user)), pk=pk)
-    if application.status != Application.Status.PENDING:
-        messages.warning(request, "该申请已处理，不能重复审批。")
-        return redirect("applications:detail", pk=pk)
-
-    comment = request.POST.get("comment", "").strip()
-    if action == "approve":
-        application.status = Application.Status.APPROVED
-        application.review_comment = comment
-        messages.success(request, f"已通过申请：{application.description[:30] or application.username}")
-    elif action == "reject":
-        application.status = Application.Status.REJECTED
-        application.review_comment = comment
-        messages.success(request, f"已驳回申请：{application.description[:30] or application.username}")
-    else:
+        application_qs = qs.filter(target_server__in=Server.visible_to(request.user), pk=pk)
+    application = get_object_or_404(application_qs)
+    if action not in {"approve", "reject"}:
         messages.error(request, "无效的审批操作。")
         return redirect("applications:detail", pk=pk)
 
-    application.reviewer = request.user
-    application.reviewed_at = timezone.now()
-    application.save()
+    if action == "approve" and application.requires_superuser_approval and not request.user.is_superuser:
+        messages.error(request, "sudo、docker 和平台管理员属于 root 级权限，仅超级管理员可以批准。")
+        return redirect("applications:detail", pk=pk)
+
+    review_form = ApplicationReviewForm(request.POST, require_comment=action == "reject")
+    if not review_form.is_valid():
+        messages.error(request, review_form.errors["comment"][0])
+        return redirect("applications:detail", pk=pk)
+
+    if action == "approve":
+        if not application.target_server or not application.target_server.credential:
+            messages.error(request, "目标服务器未关联管理凭据，不能批准。")
+            return redirect("applications:detail", pk=pk)
+        if not application.target_server.ssh_host_key_fingerprint:
+            messages.error(request, "目标服务器 SSH 主机指纹尚未核验，不能批准。")
+            return redirect("applications:detail", pk=pk)
+
+    new_status = Application.Status.APPROVED if action == "approve" else Application.Status.REJECTED
+    updated = application_qs.filter(status=Application.Status.PENDING).update(
+        status=new_status,
+        review_comment=review_form.cleaned_data["comment"],
+        reviewer=request.user,
+        reviewed_at=timezone.now(),
+    )
+    if not updated:
+        messages.warning(request, "该申请已处理，不能重复审批。")
+        return redirect("applications:detail", pk=pk)
     # 审批通过且指定目标服务器时：后台自动开通账号（SSH 耗时，不阻塞审批请求）。
     # 必须放在 application.save() 之后：后台任务按 pk 重新取数并回写工单字段，
     # 若在 save() 之前调度，旧实例的 save() 会把后台写入的 provisioned_at 覆盖回 None。
     if action == "approve":
         run_in_background(_bg_provision, application.pk)
         messages.success(request, "已通过申请，账号将在后台自动开通，稍后刷新详情页查看结果。")
+    else:
+        messages.success(request, f"已驳回申请：{application.description[:30] or application.username}")
     # 审批结果通知（webhook+邮件）后台执行，不阻塞审批请求
     run_in_background(_bg_notify_review_result, application.pk)
     return redirect("applications:detail", pk=pk)

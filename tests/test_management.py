@@ -138,9 +138,7 @@ class TestManagedUsersBinding:
 
         from servers.models import MachineUserBinding
 
-        su = django_user_model.objects.create_user(
-            username="su2", password="x12345!", is_staff=True, is_superuser=True
-        )
+        su = django_user_model.objects.create_user(username="su2", password="x12345!", is_staff=True, is_superuser=True)
         normal = django_user_model.objects.create_user(username="normal2", password="x12345!")
         MachineUserBinding.objects.create(server=ubuntu_server, username="m_user_a", user=normal, source="create")
         MachineUserBinding.objects.create(server=ubuntu_server, username="m_user_b", user=None, source="manual")
@@ -191,7 +189,9 @@ class TestUserGroups:
         from servers.management import sort_user_groups
 
         npu_names = {"npu", "npu0", "npu1"}
-        priority, npu_in, others = sort_user_groups("alice", ["alice", "nrm_managed", "docker", "sudo", "npu1", "npu0"], npu_names)
+        priority, npu_in, others = sort_user_groups(
+            "alice", ["alice", "nrm_managed", "docker", "sudo", "npu1", "npu0"], npu_names
+        )
         assert priority == ["nrm_managed"]
         assert npu_in == ["npu0", "npu1"]
         assert others == ["docker", "sudo"]

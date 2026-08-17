@@ -57,6 +57,11 @@ export NRM_ENV=prod
 | `NRM_DEBUG` | 部署 | 是否开启 DEBUG（布尔） | `False` |
 | `NRM_ALLOWED_HOSTS` | 部署必填 | 允许访问的域名/IP，逗号分隔 | 无（缺失报错） |
 | `NRM_CSRF_TRUSTED_ORIGINS` | 部署 | CSRF 信任来源，逗号分隔 | 空 |
+| `NRM_SECURE_SSL_REDIRECT` | 部署 | 是否把 HTTP 重定向到 HTTPS | `True` |
+| `NRM_SECURE_HSTS_SECONDS` | 部署 | HSTS 有效期；确认 HTTPS 稳定后再保持长周期 | `31536000` |
+| `NRM_SECURE_HSTS_INCLUDE_SUBDOMAINS` | 部署可选 | HSTS 是否覆盖子域名 | `False` |
+| `NRM_SECURE_HSTS_PRELOAD` | 部署可选 | 是否声明 HSTS preload；启用前需确认域名满足预加载要求 | `False` |
+| `NRM_TRUST_X_FORWARDED_PROTO` | 反向代理部署可选 | 仅当可信代理会覆盖 `X-Forwarded-Proto` 时启用 | `False` |
 | `NRM_GITCODE_CALLBACK_BASE_URL` | 全局 | GitCode OAuth 回调基准地址（无默认值，务必在 .env/.env.prod 中配置） | 空（由系统设置页的站点地址兜底） |
 | `NRM_SYNC_NPU` | 开发 | 设为 `1` 时开发模式也启动 NPU 状态同步（部署模式默认开启） | 关 |
 | `NRM_LOG_LEVEL` | 部署 | 日志级别（DEBUG/INFO/WARNING…） | `INFO` |
@@ -73,6 +78,8 @@ NRM_SECRET_KEY='一个足够长的随机字符串'
 NRM_DEBUG=False
 NRM_ALLOWED_HOSTS=nrm.example.com,www.nrm.example.com,localhost
 NRM_CSRF_TRUSTED_ORIGINS=https://nrm.example.com
+NRM_SECURE_SSL_REDIRECT=True
+NRM_SECURE_HSTS_SECONDS=31536000
 NRM_GITCODE_CALLBACK_BASE_URL=https://nrm.example.com
 NRM_LOG_LEVEL=INFO
 NRM_LOG_FILE=/var/log/nrm/nrm.log
@@ -90,6 +97,14 @@ NRM_LOG_FILE=/var/log/nrm/nrm.log
 2. 加密方式：**465 端口勾选「使用 SSL 直连」**；587/25 端口取消勾选。
 3. 按页面三步流程验证并保存：发送验证码 → 验证 → 保存配置。
 4. 勾选「启用邮件通知」后生效（新申请、审批结果、开通密码等通知走此邮箱）。
+
+### 服务器 SSH 主机指纹
+
+新增或编辑服务器时必须保存经管理员核对的 OpenSSH `SHA256:` 主机指纹。系统不会自动信任未知主机，指纹不匹配时会拒绝连接；升级后已有服务器也必须补录指纹，才能继续批准开通申请。
+
+### Webhook 出站限制
+
+邮件 Webhook、全局 Webhook 和管理员个人 Webhook 仅允许公网 HTTPS 地址。系统会拒绝回环、内网、链路本地和保留地址，并在请求时固定已校验的公网 IP，避免 DNS 重绑定导致 SSRF。
 
 ## 启动
 

@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
 
@@ -36,6 +37,7 @@ def credential_detail(request, pk):
 
 
 @superuser_required
+@require_POST
 def credential_delete(request, pk):
     """删除凭据（仅超级管理员）。
 
@@ -43,15 +45,13 @@ def credential_delete(request, pk):
     阻止删除并提示关联服务器数量，引导去服务器管理解除。
     """
     credential = get_object_or_404(Credential, pk=pk)
-    if request.method == "POST":
-        linked_count = credential.servers.count()
-        if linked_count > 0:
-            messages.error(
-                request,
-                f"该凭据被 {linked_count} 个服务器使用，无法删除。请先到「服务器」管理中删除/更换使用该凭据的服务器。",
-            )
-            return redirect("credentials:list")
-        credential.delete()
-        messages.success(request, f"凭据「{credential.name}」已删除。")
+    linked_count = credential.servers.count()
+    if linked_count > 0:
+        messages.error(
+            request,
+            f"该凭据被 {linked_count} 个服务器使用，无法删除。请先到「服务器」管理中删除/更换使用该凭据的服务器。",
+        )
         return redirect("credentials:list")
+    credential.delete()
+    messages.success(request, f"凭据「{credential.name}」已删除。")
     return redirect("credentials:list")

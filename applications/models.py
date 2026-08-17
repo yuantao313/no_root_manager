@@ -1,8 +1,9 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from servers.fields import EncryptedTextField
-from servers.models import Server
+from servers.models import ROOT_EQUIVALENT_GROUPS, Server
 
 
 class Application(models.Model):
@@ -14,9 +15,10 @@ class Application(models.Model):
         GROUP = "group", "申请用户组"
         ADMIN = "admin", "申请平台管理员"
 
-    # 可申请的用户组（用户组类型可选加入；逗号分隔存储）。
-    # 仅普通用户组：不给普通用户开放 HwHiAiUser 等驱动专用组
+    # 可申请的高危权限组；sudo/docker 都能取得 root 级能力，只允许超级管理员审批。
+    # 不给普通用户开放 HwHiAiUser 等驱动专用组。
     USER_GROUP_CHOICES = ["sudo", "docker"]
+    PRIVILEGED_GROUPS = ROOT_EQUIVALENT_GROUPS
 
     class Status(models.TextChoices):
         PENDING = "pending", "待审批"
@@ -52,10 +54,9 @@ class Application(models.Model):
         Server,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True,
         related_name="applications",
         verbose_name="目标服务器",
-        help_text="从服务器列表中选择",
+        help_text="请选择申请要操作的目标服务器",
     )
     # 用户勾选的附加分组（来自服务器 extra_groups，逗号分隔）
     applied_groups = models.CharField(
@@ -103,6 +104,13 @@ class Application(models.Model):
         ordering = ["-created_at"]
         verbose_name = "申请单"
         verbose_name_plural = "申请单"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target_server", "username"],
+                condition=Q(status="pending") | Q(status="approved", provisioned_at__isnull=True),
+                name="uniq_active_server_username",
+            )
+        ]
 
     def __str__(self):
         return f"{self.title} ({self.get_status_display()})"
@@ -114,3 +122,20 @@ class Application(models.Model):
         """
         groups = [g.strip() for g in (self.applied_groups or "").split(",") if g.strip()]
         return ",".join(g for g in groups if g != "npu")
+
+    def requested_user_groups(self) -> set[str]:
+        """返回规范化的用户组申请集合。"""
+        return {group.strip() for group in (self.user_groups or "").split(",") if group.strip()}
+
+    @property
+    def requires_superuser_approval(self) -> bool:
+        """sudo、docker 及服务器管理员授权必须由超级管理员批准。"""
+        if self.apply_type == self.ApplyType.ADMIN:
+            return True
+        if self.requested_user_groups() & self.PRIVILEGED_GROUPS:
+            return True
+        return bool(
+            self.apply_type == self.ApplyType.CREATE
+            and self.target_server
+            and set(self.target_server.default_groups_list()) & self.PRIVILEGED_GROUPS
+        )

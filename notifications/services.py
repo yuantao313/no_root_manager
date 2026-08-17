@@ -4,11 +4,15 @@ import json
 import logging
 import threading
 import urllib.request
+from urllib.parse import urlsplit
 
+from django.conf import settings
 from django.core.mail import EmailMessage
 from django.core.mail.backends.smtp import EmailBackend
+from django.db.models import Q
 
 from .models import EmailConfig, WebhookConfig
+from .security import UnsafeWebhookURL, open_webhook_request, validate_webhook_url
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,11 @@ def run_in_background(func, *args):
         finally:
             close_old_connections()
 
+    # pytest 的事务隔离不允许后台线程跨用例访问测试库；同步执行也让断言确定。
+    if settings.DJANGO_TESTING:
+        func(*args)
+        return
+
     threading.Thread(target=_runner, daemon=True).start()
 
 
@@ -45,6 +54,7 @@ def send_email_with_config(
     """
     from_email = from_email or username
     connection = EmailBackend(
+        alias="nrm-database-smtp",
         host=host,
         port=port,
         username=username,
@@ -61,10 +71,12 @@ def send_email_with_config(
         body=body,
         from_email=from_email,
         to=to_list,
-        connection=connection,
     )
     try:
-        message.send()
+        sent = connection.send_messages([message])
+        if not sent:
+            logger.error("邮件后端未发送任何消息：%s -> %s", subject, to_list)
+            return False
         logger.info("邮件已发送（指定配置）：%s -> %s", subject, to_list)
         return True
     except Exception:  # noqa: BLE001 —— 邮件失败不应影响主流程
@@ -125,7 +137,10 @@ def send_email_via_webhook(subject: str, body: str, to_list: list[str]) -> bool:
         headers["X-Webhook-Token"] = cfg.mail_webhook_token
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with open_webhook_request(req, timeout=10) as resp:
+            if not 200 <= resp.status < 300:
+                logger.error("邮件 Webhook 返回非成功状态：%s", resp.status)
+                return False
             logger.info("邮件已发送（Webhook）：%s -> %s (%s)", subject, to_list, resp.status)
             return True
     except Exception:  # noqa: BLE001 —— 邮件失败不应影响主流程
@@ -133,12 +148,18 @@ def send_email_via_webhook(subject: str, body: str, to_list: list[str]) -> bool:
         return False
 
 
-def admin_emails() -> list[str]:
-    """所有启用邮箱的管理员地址。"""
+def admin_emails(application=None) -> list[str]:
+    """返回有权处理该工单的管理员邮箱；未传工单时保留通用查询。"""
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
-    return list(User.objects.filter(is_staff=True).exclude(email="").values_list("email", flat=True))
+    users = User.objects.filter(is_staff=True, is_active=True).exclude(email="")
+    if application is not None:
+        scope = Q(is_superuser=True)
+        if application.target_server_id:
+            scope |= Q(server_bindings__server_id=application.target_server_id)
+        users = users.filter(scope).distinct()
+    return list(users.values_list("email", flat=True))
 
 
 def _format_mail_details(application) -> str:
@@ -164,6 +185,8 @@ def _format_mail_details(application) -> str:
     lines.append(f"状态：{application.get_status_display()}")
     if application.review_comment:
         lines.append(f"审批意见：{application.review_comment}")
+    if application.provision_note:
+        lines.append(f"开通结果：{application.provision_note}")
     link = f"{_site_base_url()}{reverse('applications:detail', args=[application.pk])}"
     if link:
         lines.append(f"工单链接：{link}")
@@ -174,7 +197,7 @@ def notify_new_application(application) -> bool:
     """新申请提交时通知管理员（邮件正文包含完整申请详情）。"""
     subject = f"[NRM] 新申请待审批：{application.title or application.description[:30]}"
     body = f"收到新的申请：\n\n{_format_mail_details(application)}\n\n请登录系统及时审批。"
-    return send_email(subject, body, admin_emails())
+    return send_email(subject, body, admin_emails(application))
 
 
 def notify_review_result(application) -> bool:
@@ -220,7 +243,14 @@ def send_provision_credentials(application, password) -> bool:
 
 def _is_feishu_url(url: str) -> bool:
     """是否为飞书/Lark 机器人 Webhook 域名（无平台配置时按 URL 兜底判断）。"""
-    return "open.feishu.cn" in url or "open.larksuite.com" in url
+    hostname = (urlsplit(url).hostname or "").rstrip(".").lower()
+    return hostname in {"open.feishu.cn", "open.larksuite.com"}
+
+
+def _webhook_destination(url: str) -> str:
+    """日志只记录目标主机，不泄漏通常包含机器人密钥的完整路径。"""
+    parsed = urlsplit(url)
+    return parsed.hostname or "unknown-host"
 
 
 def _site_base_url() -> str:
@@ -308,6 +338,11 @@ def _post_webhook(
     部分平台（飞书等）业务失败时仍返回 HTTP 200，仅在响应体 code 字段
     表示错误——只认 HTTP 状态会误报成功。返回 (是否成功, 提示信息)。
     """
+    try:
+        url = validate_webhook_url(url)
+    except UnsafeWebhookURL as exc:
+        return False, str(exc)
+
     body = _build_webhook_body(
         platform, url, event, payload if payload is not None else {"message": "NRM Webhook 连通性测试"}
     )
@@ -321,7 +356,15 @@ def _post_webhook(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with open_webhook_request(req, timeout=5) as resp:
+            if not 200 <= resp.status < 300:
+                logger.error(
+                    "Webhook HTTP 失败：%s -> %s (%s)",
+                    event,
+                    _webhook_destination(url),
+                    resp.status,
+                )
+                return False, f"推送失败：HTTP {resp.status}"
             resp_body = resp.read().decode("utf-8", errors="replace").strip()
             # 尝试解析响应体业务码（飞书: {"code":0,"msg":"success"}）
             try:
@@ -329,14 +372,14 @@ def _post_webhook(
                 code = data.get("code")
                 if code is not None and int(code) != 0:
                     msg = data.get("msg") or resp_body or f"业务码 {code}"
-                    logger.error("Webhook 业务失败：%s -> %s (%s)", event, url, msg)
+                    logger.error("Webhook 业务失败：%s -> %s (%s)", event, _webhook_destination(url), msg)
                     return False, f"推送失败：{msg}"
             except (ValueError, TypeError):
                 pass  # 非 JSON 响应体，按 HTTP 状态判断
-            logger.info("Webhook 推送成功：%s -> %s (%s)", event, url, resp.status)
+            logger.info("Webhook 推送成功：%s -> %s (%s)", event, _webhook_destination(url), resp.status)
             return True, f"推送成功（HTTP {resp.status}）"
     except Exception as e:  # noqa: BLE001 —— 需兜底展示失败原因
-        logger.exception("Webhook 推送失败：%s -> %s", event, url)
+        logger.exception("Webhook 推送失败：%s -> %s", event, _webhook_destination(url))
         return False, f"推送失败：{e}"
 
 
@@ -356,9 +399,18 @@ def send_webhook_to(
     return _post_webhook(url, secret, event, payload, platform)
 
 
-def send_webhook(event: str, payload: dict) -> bool:
-    """向所有启用的 Webhook 推送 JSON 事件（按各自配置的平台格式化）。"""
+def send_webhook(event: str, payload: dict, *, application=None) -> bool:
+    """向全局及有权处理该工单的个人 Webhook 推送事件。"""
     hooks = WebhookConfig.objects.filter(enabled=True)
+    if application is None:
+        # 没有权限上下文的通用事件只能推送到超级管理员维护的全局 Hook。
+        hooks = hooks.filter(owner__isnull=True)
+    else:
+        active_staff = Q(owner__is_staff=True, owner__is_active=True)
+        scope = Q(owner__isnull=True) | (Q(owner__is_superuser=True) & active_staff)
+        if application.target_server_id:
+            scope |= active_staff & Q(owner__server_bindings__server_id=application.target_server_id)
+        hooks = hooks.filter(scope).distinct()
     if not hooks:
         return False
     ok = True
@@ -394,7 +446,7 @@ def _application_payload(application) -> dict:
 
 def webhook_new_application(application) -> bool:
     """新申请事件推送 Webhook。"""
-    return send_webhook("application.created", _application_payload(application))
+    return send_webhook("application.created", _application_payload(application), application=application)
 
 
 def webhook_review_result(application) -> bool:
@@ -406,4 +458,4 @@ def webhook_review_result(application) -> bool:
             "reviewed_at": application.reviewed_at.isoformat() if application.reviewed_at else None,
         }
     )
-    return send_webhook("application.reviewed", payload)
+    return send_webhook("application.reviewed", payload, application=application)

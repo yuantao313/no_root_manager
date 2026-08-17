@@ -16,11 +16,11 @@
                             <th style="width:120px;">姓名</th>
                             <td>
                                 <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
-                                <a href="javascript:void(0)" class="field-edit" data-field="name">编辑</a>
+                                <button type="button" class="btn btn-link btn-xs field-edit" data-field="name">编辑</button>
                                 <span id="field-name" class="field-input" style="display:none;white-space:nowrap;">
                                     <input type="text" name="name" class="form-control" style="display:inline-block;width:60%;" value="{{ user.first_name }}">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('name')">取消</a>
+                                    <button type="button" class="btn btn-default btn-xs field-cancel" data-field="name">取消</button>
                                 </span>
                             </td>
                         </tr>
@@ -28,11 +28,11 @@
                             <th>工号</th>
                             <td>
                                 <span class="field-text" data-field="employee_id">{{ user.profile.employee_id|default:"—" }}</span>
-                                <a href="javascript:void(0)" class="field-edit" data-field="employee_id">编辑</a>
+                                <button type="button" class="btn btn-link btn-xs field-edit" data-field="employee_id">编辑</button>
                                 <span id="field-employee_id" class="field-input" style="display:none;white-space:nowrap;">
                                     <input type="text" name="employee_id" class="form-control" style="display:inline-block;width:60%;" value="{{ user.profile.employee_id }}">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                    <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('employee_id')">取消</a>
+                                    <button type="button" class="btn btn-default btn-xs field-cancel" data-field="employee_id">取消</button>
                                 </span>
                             </td>
                         </tr>
@@ -40,7 +40,7 @@
                             <th>邮箱</th>
                             <td>
                                 <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
-                                <a href="javascript:void(0)" class="field-edit" data-field="email">编辑</a>
+                                <button type="button" class="btn btn-link btn-xs field-edit" data-field="email">编辑</button>
                                 <span id="field-email" class="field-input" style="display:none;">
                                     <span style="white-space:nowrap;">
                                         <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
@@ -50,7 +50,7 @@
                                     <span style="white-space:nowrap;">
                                         <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:45%;margin-top:6px;" placeholder="邮箱验证码">
                                         <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
-                                        <a href="javascript:void(0)" class="btn btn-default btn-xs" onclick="cancelEdit('email')">取消</a>
+                                        <button type="button" class="btn btn-default btn-xs field-cancel" data-field="email">取消</button>
                                     </span>
                                     <br>
                                     <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;" data-cooldown="{{ email_code_cooldown }}"></span>

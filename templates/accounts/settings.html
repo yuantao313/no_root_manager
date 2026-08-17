@@ -120,8 +120,8 @@
                     </fieldset>
                     <!-- 邮件 Webhook 设置区：发送方式为 Webhook 时显示（隐藏时由 JS 禁用） -->
                     <fieldset id="webhook-settings" data-sendvia-panel="webhook" style="display:none;">
-                        <p><label>邮件 Webhook URL</label><input type="text" name="mail_webhook_url" class="form-control" value="{{ email_cfg.mail_webhook_url|default:'' }}" placeholder="如 http://host/webhook/mail"></p>
-                        <p><label>Webhook Token（X-Webhook-Token 请求头，留空表示不修改）</label><input type="password" name="mail_webhook_token" class="form-control" value="{{ email_cfg.mail_webhook_token|default:'' }}" placeholder="长随机字符串"></p>
+                        <p><label>邮件 Webhook URL</label><input type="url" name="mail_webhook_url" class="form-control" placeholder="必须为 HTTPS；已配置时留空表示不修改"></p>
+                        <p><label>Webhook Token（X-Webhook-Token 请求头，留空表示不修改）</label><input type="password" name="mail_webhook_token" class="form-control" placeholder="已配置时留空表示不修改"></p>
                         <button type="submit" name="save_mail_webhook" class="btn btn-primary">保存 Webhook 配置</button>
                     </fieldset>
                 </form>
@@ -158,7 +158,7 @@
                             {% endfor %}
                         </select>
                     </p>
-                    <p><label>URL</label><input type="text" name="url" class="form-control" value="{{ hooks.first.url|default:'' }}"></p>
+                    <p><label>URL</label><input type="url" name="url" class="form-control" placeholder="必须为 HTTPS；已配置时留空表示不修改"></p>
                     <p><label>密钥（可选，留空表示不修改）</label><input type="password" name="secret" class="form-control"></p>
                     <button type="submit" name="add_webhook" class="btn btn-primary">保存</button>
                     <button type="submit" name="test_webhook" class="btn btn-default">测试推送</button>

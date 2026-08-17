@@ -348,7 +348,11 @@ def grant_sudo(server, username):
         return False, "", "用户名为空"
     ok, out, err = _run_mgmt(server, ["grant_sudo", username])
     if ok:
-        return True, "sudo", out or f"用户 {username} 已加入 sudo 组，获得 sudo 权限"
+        match = re.search(r"\bgroup=(sudo|wheel)\b", out)
+        if not match:
+            return False, "", "目标机器未返回已授予的 sudo/wheel 组，结果无法确认"
+        group = match.group(1)
+        return True, group, f"用户 {username} 已加入 {group} 组，获得 sudo 权限"
     return False, "", err or "授予 sudo 失败"
 
 
@@ -428,16 +432,19 @@ def grant_npu_access(server, username, groups):
 
 
 def usermod_add_group(server, username, group):
-    """将用户加入单个用户组（usermod -aG <group>，如 sudo/docker）。返回 (ok, msg)。
-
-    收敛到脚本 grant_sudo 子命令（其支持指定组名），
-    用户不存在时由脚本明确报错。
-    """
+    """安全授予可申请的 root 级组；不创建伪 sudo/docker 组。"""
     username = (username or "").strip()
     group = (group or "").strip()
     if not username or not group:
         return False, "参数错误"
-    ok, out, err = _run_mgmt(server, ["grant_sudo", username, group])
+    if group == "sudo":
+        ok, actual_group, msg = grant_sudo(server, username)
+        if ok:
+            return True, msg
+        return False, msg or "授予 sudo 失败"
+    if group != "docker":
+        return False, f"不支持申请用户组：{group}"
+    ok, out, err = _run_mgmt(server, ["grant_docker", username])
     if ok:
         return True, out or f"用户 {username} 已加入 {group} 组"
     return False, err or f"加入用户组失败：{group}"
@@ -556,11 +563,11 @@ def write_server_motd(server):
     motd_file = "/etc/motd.d/nrm_notifications"
     # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
     # 注意：不能用 `echo x > file`（重定向由当前 shell 执行，sudo 无法提权），
-    # 必须走 `printf | sudo -n tee` 让 tee 以 root 写文件
+    # 走 `printf | tee`，再由 _sudo_wrap 仅为非 root SSH 用户的 tee 加 sudo。
     if content:
         ok, _, err = _exec(
             server,
-            f"mkdir -p /etc/motd.d && printf '%s\\n' {shlex.quote(content)} | sudo -n tee {motd_file} >/dev/null",
+            f"mkdir -p /etc/motd.d && printf '%s\\n' {shlex.quote(content)} | tee {motd_file} >/dev/null",
         )
         if not ok:
             return False, f"motd 写入失败：{err}"

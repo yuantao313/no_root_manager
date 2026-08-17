@@ -39,7 +39,7 @@ class TestSendEmailWebhook:
             username="u",
             enabled=True,
             send_via=EmailConfig.SEND_VIA_WEBHOOK,
-            mail_webhook_url="http://127.0.0.1:9/webhook/mail",
+            mail_webhook_url="https://hooks.example.com/webhook/mail",
             mail_webhook_token="secret-token",
         )
         defaults.update(kw)
@@ -50,7 +50,7 @@ class TestSendEmailWebhook:
         from notifications.services import send_email
 
         self._cfg()
-        with patch("urllib.request.urlopen") as mock:
+        with patch("notifications.services.open_webhook_request") as mock:
             mock.return_value.__enter__.return_value.status = 200
             ok = send_email("主题", "正文", ["a@b.com", "c@d.com"])
         assert ok is True
@@ -70,7 +70,7 @@ class TestSendEmailWebhook:
         from notifications.services import send_email
 
         self._cfg()
-        with patch("urllib.request.urlopen", side_effect=Exception("net down")):
+        with patch("notifications.services.open_webhook_request", side_effect=Exception("net down")):
             assert send_email("t", "b", ["a@b.com"]) is False
 
     def test_webhook_mode_without_url_returns_false(self, application):
@@ -123,7 +123,7 @@ class TestSendEmailWebhook:
             enabled=True,
         )
         with patch("notifications.services.EmailBackend") as mock_backend:
-            mock_backend.return_value = object()
+            mock_backend.return_value.send_messages.return_value = 1
             send_email("主题", "内容", ["a@b.com"])
             # 使用配置的 host/port，而非默认 localhost
             assert mock_backend.call_args.kwargs["host"] == "smtp.example.com"
@@ -131,8 +131,8 @@ class TestSendEmailWebhook:
 
     def test_send_failure_returns_false(self, application):
         EmailConfig.objects.create(host="h", port=25, username="u", enabled=True)
-        with patch("notifications.services.EmailMessage") as mock_msg:
-            mock_msg.return_value.send.side_effect = Exception("smtp down")
+        with patch("notifications.services.EmailBackend") as mock_backend:
+            mock_backend.return_value.send_messages.side_effect = Exception("smtp down")
             assert send_email("t", "b", ["a@b.com"]) is False
 
 
@@ -160,13 +160,19 @@ class TestNotify:
             username="u",
             enabled=True,
             send_via=EmailConfig.SEND_VIA_WEBHOOK,
-            mail_webhook_url="http://127.0.0.1:9/webhook/mail",
+            mail_webhook_url="https://hooks.example.com/webhook/mail",
             mail_webhook_token="tok",
         )
         from django.contrib.auth import get_user_model
 
-        get_user_model().objects.create_user(username="admin1", password="x12345!", is_staff=True, email="admin1@x.com")
-        with patch("urllib.request.urlopen") as mock:
+        get_user_model().objects.create_user(
+            username="admin1",
+            password="x12345!",
+            is_staff=True,
+            is_superuser=True,
+            email="admin1@x.com",
+        )
+        with patch("notifications.services.open_webhook_request") as mock:
             mock.return_value.__enter__.return_value.status = 200
             ok = notify_new_application(application)
         assert ok is True
@@ -223,30 +229,30 @@ class TestWebhook:
 
     def test_pushes_to_all_enabled_hooks(self, application):
         # 单例：同一作用域只保留一条，保存后旧记录被清理
-        WebhookConfig.objects.create(name="h1", url="http://127.0.0.1:1/hook", secret="s1", enabled=True)
-        WebhookConfig.objects.create(name="h2", url="http://127.0.0.1:1/hook2", secret="", enabled=True)
+        WebhookConfig.objects.create(name="h1", url="https://hooks.example.com/hook", secret="s1", enabled=True)
+        WebhookConfig.objects.create(name="h2", url="https://hooks.example.com/hook2", secret="", enabled=True)
         assert WebhookConfig.objects.count() == 1
         hook = WebhookConfig.objects.get()
         assert hook.name == "h2"
-        with patch("urllib.request.urlopen") as mock:
+        with patch("notifications.services.open_webhook_request") as mock:
             mock.return_value.__enter__.return_value.status = 200
             ok = send_webhook("application.created", {"id": 1})
         assert ok is True
         assert mock.call_count == 1  # 单例下只推送一条
 
     def test_disabled_hook_not_pushed(self, application):
-        WebhookConfig.objects.create(name="h", url="http://127.0.0.1:1/hook", enabled=False)
-        with patch("urllib.request.urlopen") as mock:
+        WebhookConfig.objects.create(name="h", url="https://hooks.example.com/hook", enabled=False)
+        with patch("notifications.services.open_webhook_request") as mock:
             assert send_webhook("application.created", {}) is False
         assert mock.call_count == 0
 
     def test_failure_does_not_raise(self, application):
-        WebhookConfig.objects.create(name="h", url="http://127.0.0.1:1/hook", enabled=True)
-        with patch("urllib.request.urlopen", side_effect=Exception("net down")):
+        WebhookConfig.objects.create(name="h", url="https://hooks.example.com/hook", enabled=True)
+        with patch("notifications.services.open_webhook_request", side_effect=Exception("net down")):
             assert send_webhook("application.created", {}) is False
 
     def test_new_application_event(self, application):
-        WebhookConfig.objects.create(name="h", url="http://127.0.0.1:1/hook", enabled=True)
+        WebhookConfig.objects.create(name="h", url="https://hooks.example.com/hook", enabled=True)
         with patch("notifications.services.send_webhook", return_value=True) as mock:
             webhook_new_application(application)
         event, payload = mock.call_args.args
@@ -348,7 +354,10 @@ class TestFeishuWebhook:
         resp = object.__new__(type("FakeResp", (), {}))
         resp.status = 200
         resp.read = lambda: b'{"code": 19001, "msg": "sign match fail"}'
-        with patch("urllib.request.urlopen", return_value=__import__("contextlib").nullcontext(resp)):
+        with patch(
+            "notifications.services.open_webhook_request",
+            return_value=__import__("contextlib").nullcontext(resp),
+        ):
             ok, msg = send_webhook_to("https://open.feishu.cn/open-apis/bot/v2/hook/abc", "")
         assert ok is False
         assert "sign match fail" in msg
@@ -359,7 +368,10 @@ class TestFeishuWebhook:
         resp = object.__new__(type("FakeResp", (), {}))
         resp.status = 200
         resp.read = lambda: b'{"code": 0, "msg": "success"}'
-        with patch("urllib.request.urlopen", return_value=__import__("contextlib").nullcontext(resp)):
+        with patch(
+            "notifications.services.open_webhook_request",
+            return_value=__import__("contextlib").nullcontext(resp),
+        ):
             ok, msg = send_webhook_to("https://open.feishu.cn/open-apis/bot/v2/hook/abc", "")
         assert ok is True
 
@@ -369,6 +381,9 @@ class TestFeishuWebhook:
         resp = object.__new__(type("FakeResp", (), {}))
         resp.status = 200
         resp.read = lambda: b""
-        with patch("urllib.request.urlopen", return_value=__import__("contextlib").nullcontext(resp)):
+        with patch(
+            "notifications.services.open_webhook_request",
+            return_value=__import__("contextlib").nullcontext(resp),
+        ):
             ok, msg = send_webhook_to("https://example.com/hook", "")
         assert ok is True

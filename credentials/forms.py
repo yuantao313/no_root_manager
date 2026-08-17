@@ -3,13 +3,20 @@ from django import forms
 from .models import Credential
 
 
+class WriteOnlyTextarea(forms.Textarea):
+    """接收多行秘密，但任何重渲染都不把原值写回 HTML。"""
+
+    def format_value(self, value):  # noqa: ARG002
+        return ""
+
+
 class CredentialForm(forms.ModelForm):
     class Meta:
         model = Credential
         fields = ["name", "username", "password", "private_key", "remark"]
         widgets = {
-            "password": forms.PasswordInput(render_value=True),
-            "private_key": forms.Textarea(attrs={"rows": 8, "placeholder": "可拖入私钥文件，或直接粘贴内容"}),
+            "password": forms.PasswordInput(render_value=False),
+            "private_key": WriteOnlyTextarea(attrs={"rows": 8, "placeholder": "可拖入私钥文件，或直接粘贴内容"}),
             "remark": forms.Textarea(attrs={"rows": 3}),
         }
 

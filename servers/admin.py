@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from .forms import ServerForm
 from .models import Server
 
 
 @admin.register(Server)
 class ServerAdmin(admin.ModelAdmin):
+    form = ServerForm
     list_display = (
         "name",
         "host",
@@ -19,7 +21,18 @@ class ServerAdmin(admin.ModelAdmin):
     fieldsets = (
         (
             None,
-            {"fields": ("name", "host", "port", "credential", "default_group", "is_npu", "npu_groups")},
+            {
+                "fields": (
+                    "name",
+                    "host",
+                    "port",
+                    "ssh_host_key_fingerprint",
+                    "credential",
+                    "default_group",
+                    "is_npu",
+                    "npu_groups",
+                )
+            },
         ),
         ("时间", {"fields": ("created_at", "updated_at")}),
     )

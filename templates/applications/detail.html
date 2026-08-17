@@ -51,7 +51,7 @@
         </div>
         {% endif %}
 
-        {% if application.initial_password %}
+        {% if can_view_initial_password %}
         <div class="review-box alert alert-warning">
             <strong>初始密码</strong>（首次登录必须修改）
             <p style="margin:8px 0 0;">
@@ -60,7 +60,7 @@
                     服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。
                 </span>
             </p>
-            {% if application.status == 'approved' and application.provisioned_at %}
+            {% if can_resend_initial_password %}
             <form method="post" action="{% url 'applications:resend_mail' application.pk %}" style="margin-top:8px;" data-confirm="确定向 {{ application.email|default:'申请人邮箱' }} 重发开通邮件（含初始密码）吗？">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-warning btn-sm">重发邮件</button>
@@ -68,20 +68,30 @@
             </form>
             {% endif %}
         </div>
+        {% elif can_resend_initial_password %}
+        <div class="review-box alert alert-info">
+            <strong>初始凭据仅申请人本人可见。</strong>
+            <form method="post" action="{% url 'applications:resend_mail' application.pk %}" style="margin-top:8px;" data-confirm="确定向 {{ application.email|default:'申请人邮箱' }} 重发开通邮件（含初始密码）吗？">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-default btn-sm">向申请人重发凭据邮件</button>
+            </form>
+        </div>
         {% endif %}
 
-        {% if user.is_staff and application.status == "pending" %}
+        {% if can_review and application.status == "pending" %}
         <div class="review-box">
             <strong>审批操作</strong>
-            <form method="post" action="{% url 'applications:review' application.pk 'approve' %}" style="margin-top:8px;">
+            {% if can_approve %}<form method="post" action="{% url 'applications:review' application.pk 'approve' %}" style="margin-top:8px;">
                 {% csrf_token %}
                 <label for="comment">审批意见（可选）</label>
                 <textarea name="comment" id="comment" rows="3" class="form-control" placeholder="填写审批意见"></textarea>
                 <button type="submit" class="btn btn-success" style="margin-top:8px;">通过</button>
-            </form>
+            </form>{% else %}<p class="text-warning">该申请包含 root 级权限，仅超级管理员可以批准。</p>{% endif %}
             <form method="post" action="{% url 'applications:review' application.pk 'reject' %}" style="margin-top:8px;">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-danger">驳回</button>
+                <label for="reject-comment">驳回原因（必填）</label>
+                <textarea name="comment" id="reject-comment" rows="2" class="form-control" required></textarea>
+                <button type="submit" class="btn btn-danger" style="margin-top:8px;">驳回</button>
             </form>
         </div>
         {% endif %}

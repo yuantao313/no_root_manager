@@ -19,6 +19,7 @@ from servers.models import MachineUserBinding, Server
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
+TEST_HOST_FINGERPRINT = "SHA256:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE"
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,13 @@ def env():
         UserProfile.objects.create(user=applicant, employee_id="E100")
         admin = User.objects.create_user(username="su", password="x12345!", is_staff=True, is_superuser=True)
         cred = Credential.objects.create(name="e2e", username="root", password="p")
-        server = Server.objects.create(name="e2e-server", host="10.0.0.9", port=22, credential=cred)
+        server = Server.objects.create(
+            name="e2e-server",
+            host="10.0.0.9",
+            port=22,
+            credential=cred,
+            ssh_host_key_fingerprint=TEST_HOST_FINGERPRINT,
+        )
         yield {"applicant": applicant, "admin": admin, "server": server}
 
 

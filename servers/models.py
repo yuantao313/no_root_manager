@@ -3,6 +3,8 @@ from django.db import models
 
 from credentials.models import Credential
 
+ROOT_EQUIVALENT_GROUPS = frozenset({"sudo", "wheel", "docker"})
+
 
 class ServerAdminBinding(models.Model):
     """普通管理员与服务器的绑定关系（权限分配）。
@@ -90,6 +92,16 @@ class Server(models.Model):
     name = models.CharField("服务器名称", max_length=100)
     host = models.CharField("服务器地址", max_length=255, help_text="IP 地址或域名")
     port = models.PositiveIntegerField("端口", default=22)
+    ssh_host_key_fingerprint = models.CharField(
+        "SSH 主机指纹",
+        max_length=80,
+        blank=True,
+        default="",
+        help_text=(
+            "OpenSSH SHA256 指纹。首次请选“保存并测试连接”获取候选指纹，"
+            "通过可信渠道核对后填入；指纹变化时系统将拒绝连接。"
+        ),
+    )
     # 管理凭据（用户名/密码/密钥统一存放在凭据表，这里直接选择）
     # null=True 仅为迁移方便（DB 层可空），表单层强制必选
     credential = models.ForeignKey(

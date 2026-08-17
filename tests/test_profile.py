@@ -98,8 +98,8 @@ class TestMyWebhooks:
         return User.objects.create_user(username="other", password="x12345!", is_staff=True, is_superuser=True)
 
     def test_list_only_own(self, client, staff, other):
-        WebhookConfig.objects.create(name="feishu", url="http://example.com/mine", owner=staff)
-        WebhookConfig.objects.create(name="feishu", url="http://example.com/theirs", owner=other)
+        WebhookConfig.objects.create(name="feishu", url="https://example.com/mine", owner=staff)
+        WebhookConfig.objects.create(name="feishu", url="https://example.com/theirs", owner=other)
         client.force_login(staff)
         resp = client.get(reverse("accounts:profile"))
         html = resp.content.decode()
@@ -107,13 +107,13 @@ class TestMyWebhooks:
         assert "我的 Webhook" in html
         # 平台下拉展示飞书选项；他人的 webhook 不可见
         assert "飞书" in html
-        assert "http://example.com/theirs" not in html
+        assert "https://example.com/theirs" not in html
 
     def test_create_sets_owner(self, client, staff):
         client.force_login(staff)
         resp = client.post(
             reverse("accounts:profile"),
-            {"add_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "enabled": "on"},
+            {"add_webhook": "1", "name": "feishu", "url": "https://example.com/hook", "enabled": "on"},
         )
         assert resp.status_code == 302
         hook = WebhookConfig.objects.get(name="feishu")
@@ -126,14 +126,14 @@ class TestMyWebhooks:
         assert "我的 Webhook" not in html
 
     def test_delete_own(self, client, staff):
-        hook = WebhookConfig.objects.create(name="hook1", url="http://example.com/hook", owner=staff)
+        hook = WebhookConfig.objects.create(name="hook1", url="https://example.com/hook", owner=staff)
         client.force_login(staff)
         resp = client.post(reverse("notifications:delete", args=[hook.pk]))
         assert resp.status_code == 302
         assert not WebhookConfig.objects.filter(pk=hook.pk).exists()
 
     def test_delete_others_404(self, client, staff, other):
-        hook = WebhookConfig.objects.create(name="theirs", url="http://example.com/theirs", owner=other)
+        hook = WebhookConfig.objects.create(name="theirs", url="https://example.com/theirs", owner=other)
         client.force_login(staff)
         resp = client.post(reverse("notifications:delete", args=[hook.pk]))
         assert resp.status_code == 404  # 他人数据受保护
@@ -145,10 +145,10 @@ class TestMyWebhooks:
         with patch("accounts.views.send_webhook_to", return_value=(True, "推送成功（HTTP 200）")) as mock:
             resp = client.post(
                 reverse("accounts:profile"),
-                {"test_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "secret": ""},
+                {"test_webhook": "1", "name": "feishu", "url": "https://example.com/hook", "secret": ""},
             )
         assert resp.status_code == 302
-        mock.assert_called_once_with("http://example.com/hook", "", platform="feishu")
+        mock.assert_called_once_with("https://example.com/hook", "", platform="feishu")
         assert not WebhookConfig.objects.filter(owner=staff).exists()  # 测试不落库
 
     def test_test_webhook_failure_message(self, client, staff):
@@ -157,7 +157,7 @@ class TestMyWebhooks:
         with patch("accounts.views.send_webhook_to", return_value=(False, "推送失败：connection refused")):
             resp = client.post(
                 reverse("accounts:profile"),
-                {"test_webhook": "1", "name": "feishu", "url": "http://example.com/hook", "secret": ""},
+                {"test_webhook": "1", "name": "feishu", "url": "https://example.com/hook", "secret": ""},
             )
         assert resp.status_code == 302
         assert not WebhookConfig.objects.filter(owner=staff).exists()

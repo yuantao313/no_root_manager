@@ -52,7 +52,7 @@ class TestToggleSwitch:
 
     def test_toggle_webhook(self, client):
         client.force_login(_superuser())
-        WebhookConfig.objects.create(name="h", url="http://example.com/hook", enabled=True)
+        WebhookConfig.objects.create(name="h", url="https://example.com/hook", enabled=True)
         resp = client.post(reverse("accounts:toggle_switch"), {"switch": "webhook", "enabled": "0"})
         assert resp.json()["ok"] is True
         assert WebhookConfig.objects.get().enabled is False
@@ -146,6 +146,7 @@ class TestSettingsPageSwitches:
     def test_enabled_state_renders_enabled_fieldset(self, client):
         """开关开启时 fieldset 不带 disabled。"""
         client.force_login(_superuser())
+        WebhookConfig.objects.create(name="generic", url="https://example.com/hook", enabled=False)
         # 全部开关开启
         for switch in ("gitcode", "email", "webhook"):
             client.post(reverse("accounts:toggle_switch"), {"switch": switch, "enabled": "1"})

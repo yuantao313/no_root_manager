@@ -109,6 +109,8 @@ static/            # 自研 css/js（app.css / app.js）
 - **SECRET_KEY 不可变更**：变更后历史密文无法解密（`InvalidSignature`），需数据迁移
 - **MAILERS 陷阱**：Django 6.1 的 MAILERS 接管邮件入口，`get_connection(backend)` 不可用；邮件发送必须直接实例化 `EmailBackend` 或走 `send_email_with_config`
 - **SSH 提权**：非 root 连接时特权命令自动加 `sudo -n`（`_sudo_wrap` 按管道分段，**不误拆 `||`**）；目标机脚本统一经 SFTP 上传后 root 执行
+- **SSH 主机身份**：服务器必须保存管理员核对过的 OpenSSH `SHA256:` 指纹；禁止 `AutoAddPolicy`，禁止隐式使用本机 SSH agent/密钥
+- **Webhook 出站**：仅允许公网 HTTPS，拒绝内网/回环/保留地址；发送时固定到同次 DNS 校验得到的公网 IP
 - **脚本必须 LF 行尾**：`.gitattributes` 锁定 `*.sh text eol=lf`，CRLF 会让 Linux 目标机 bash 报错
 - **HTML 禁止嵌套 form**：表单内不能再放 `<form>`，否则浏览器忽略内层表单
 - **session 序列化**：session 只能存 JSON 可序列化数据（datetime 需转时间戳存）

@@ -6,11 +6,13 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
+from django.views.decorators.http import require_POST
 
 from .models import WebhookConfig
 
 
 @login_required
+@require_POST
 def webhook_delete(request, pk):
     """删除我的 Webhook（仅本人，404 保护他人数据）。"""
     hook = get_object_or_404(WebhookConfig, pk=pk, owner=request.user)

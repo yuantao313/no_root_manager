@@ -6,6 +6,8 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from applications.models import Application
+from credentials.models import Credential
+from servers.models import Server
 
 pytestmark = pytest.mark.django_db
 
@@ -224,6 +226,11 @@ class TestProfileGate:
         SocialAccount.objects.create(user=user, provider="gitcode", uid="42")
         return user
 
+    @pytest.fixture
+    def server(self):
+        credential = Credential.objects.create(name="oauth-test", username="root", password="p")
+        return Server.objects.create(name="oauth-test", host="10.0.0.8", credential=credential)
+
     def test_cannot_apply_without_name(self, client):
         user = self._gc_user()
         client.force_login(user)
@@ -243,7 +250,7 @@ class TestProfileGate:
         assert "请先设置姓名" in resp.content.decode()
         assert not Application.objects.exists()
 
-    def test_can_apply_after_setting_name(self, client):
+    def test_can_apply_after_setting_name(self, client, server):
         user = self._gc_user()
         client.force_login(user)
         client.post(reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": ""})
@@ -255,7 +262,7 @@ class TestProfileGate:
                 "username": "m1",
                 "employee_id": "E1",
                 "apply_type": "create",
-                "target_server": "",
+                "target_server": str(server.pk),
                 "title": "t",
                 "description": "测试申请",
                 "applied_groups": [],
@@ -265,7 +272,7 @@ class TestProfileGate:
         assert resp.status_code == 302
         assert resp.url.endswith("/applications/my/")
 
-    def test_normal_user_not_blocked(self, client):
+    def test_normal_user_not_blocked(self, client, server):
         user = User.objects.create_user(username="normal", password="x12345!", first_name="李四")
         client.force_login(user)
         resp = client.post(
@@ -274,7 +281,7 @@ class TestProfileGate:
                 "username": "m1",
                 "employee_id": "E1",
                 "apply_type": "create",
-                "target_server": "",
+                "target_server": str(server.pk),
                 "title": "t",
                 "description": "测试申请",
                 "applied_groups": [],

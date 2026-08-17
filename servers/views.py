@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
 
@@ -31,25 +32,17 @@ from .models import MachineUserBinding, Server
 from .ssh import test_server_connection
 
 
+@login_required
 def server_groups_api(request, pk):
     """返回服务器的分组配置、设备信息与机器用户列表，供申请表单前端联动。
 
     - extra_groups：NPU 卡组（npu + npuN），仅 NPU 服务器（读内存缓存，不 SSH 卡顿）
     - device：设备信息（CPU/内存/硬盘/NPU 卡型号），走 get_device_info 的 TTL 缓存
       + 数据库快照回退，目标机不可达时仍展示最近一次成功采集的数据
-    - users：目标机器可接管的用户列表（/etc/passwd uid≥1000），供转移类型下拉
-    单接口一次返回，前端一次 fetch 即可渲染卡组按钮与设备信息，避免多次请求。
+    接口不枚举目标机用户，避免普通用户借服务器 ID 探测账号。
     """
     server = get_object_or_404(Server, pk=pk)
     extra = get_npu_state_cached(server)["groups"] if server.is_npu else []
-    users = []
-    if server.credential:
-        try:
-            ok, users, _ = list_system_users(server)
-            if not ok:
-                users = []
-        except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
-            users = []
     try:
         # 申请页只读模式：绝不实时 SSH（SSH 错误永不透出到申请页），
         # 返回内存缓存/数据库快照；设备信息在详情页手动刷新时才实时采集
@@ -62,7 +55,6 @@ def server_groups_api(request, pk):
             "default_groups": server.default_groups_list(),
             "extra_groups": extra,
             "is_npu": server.is_npu,
-            "users": users,
             "device": device,
         },
         json_dumps_params={"ensure_ascii": False},
@@ -124,6 +116,7 @@ def server_edit(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_test(request, pk):
     """对已保存的服务器执行连接测试（仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
@@ -138,12 +131,12 @@ def server_test(request, pk):
     return redirect("servers:detail", pk=pk)
 
 
-@login_required
+@superuser_required
 def server_device_api(request, pk):
-    """设备信息 API（登录用户）：供详情页与申请页前端异步 fetch 填充。
+    """设备信息 API（仅超级管理员）：供服务器详情页异步 fetch 填充。
 
     走 get_device_info 的 TTL 缓存；目标机不可达时回退数据库快照（页面不空白）。
-    设备信息仅含硬件信息（CPU/内存/硬盘/NPU 型号），不暴露凭据，登录用户可读。
+    该入口可能触发实时 SSH 探测，不向普通用户开放，避免越权探测或被滥用放大连接压力。
     """
     server = get_object_or_404(Server, pk=pk)
     try:
@@ -174,9 +167,7 @@ def server_detail(request, pk):
                 b.username: b.user
                 for b in MachineUserBinding.objects.filter(server=server, username__in=managed_members)
             }
-            managed_users = [
-                {"username": u, "user": bindings.get(u)} for u in managed_members
-            ]
+            managed_users = [{"username": u, "user": bindings.get(u)} for u in managed_members]
             # 用户所属组（内存缓存批量查询，失败不影响列表展示，组信息可为空）
             try:
                 groups_map = get_user_groups_cached(server, managed_members)
@@ -212,6 +203,7 @@ def server_detail(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_sync_users(request, pk):
     """刷新目标机器状态（仅超级管理员）：清空受管用户与设备信息缓存并重新扫描。"""
     server = get_object_or_404(Server, pk=pk)
@@ -231,6 +223,7 @@ def server_sync_users(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_takeover_user(request, pk):
     """将指定用户加入目标机器 nrm_managed 组（接管，仅超级管理员）。
 
@@ -238,7 +231,7 @@ def server_takeover_user(request, pk):
     """
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
-    if request.method != "POST" or not username:
+    if not username:
         messages.error(request, "请填写要接管的用户名。")
         return redirect("servers:detail", pk=pk)
     ok, msg = take_over_user(server, username)
@@ -260,11 +253,12 @@ def server_takeover_user(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_lock_user(request, pk):
     """禁用目标机器用户（passwd -l，仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
-    if request.method != "POST" or not username:
+    if not username:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     ok, msg = lock_user(server, username)
@@ -273,12 +267,13 @@ def server_lock_user(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_add_user_group(request, pk):
     """将受管用户加入指定用户组（usermod -aG，组不存在自动创建，仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     group = request.POST.get("group", "").strip()
-    if request.method != "POST" or not username or not group:
+    if not username or not group:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     ok, msg = add_user_group(server, username, group)
@@ -291,12 +286,13 @@ def server_add_user_group(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_remove_user_group(request, pk):
     """将受管用户从指定用户组移除（仅超级管理员；nrm_managed 标识组不可移除）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     group = request.POST.get("group", "").strip()
-    if request.method != "POST" or not username or not group:
+    if not username or not group:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     if group == NRM_GROUP:
@@ -312,6 +308,7 @@ def server_remove_user_group(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_update_user_groups(request, pk):
     """按目标组全集更新受管用户所属组（仅超级管理员）。
 
@@ -320,7 +317,7 @@ def server_update_user_groups(request, pk):
     """
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
-    if request.method != "POST" or not username:
+    if not username:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     target = {g.strip() for g in request.POST.get("groups", "").split(",") if g.strip()}
@@ -348,11 +345,12 @@ def server_update_user_groups(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_unlock_user(request, pk):
     """启用目标机器用户（passwd -u，仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
-    if request.method != "POST" or not username:
+    if not username:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     ok, msg = unlock_user(server, username)
@@ -361,22 +359,20 @@ def server_unlock_user(request, pk):
 
 
 @superuser_required
+@require_POST
 def server_run_init(request, pk):
     """执行服务器初始化脚本（远程 get 并在目标机运行，仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
-    if request.method != "POST":
-        return redirect("servers:detail", pk=pk)
     ok, msg = run_init_script(server)
     messages.success(request, msg) if ok else messages.error(request, msg)
     return redirect("servers:detail", pk=pk)
 
 
 @superuser_required
+@require_POST
 def server_configure_npu(request, pk):
     """NPU 服务器：检测目标机 NPU 卡组并保存（仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
-    if request.method != "POST":
-        return redirect("servers:detail", pk=pk)
     ok, groups, msg = detect_npu_groups(server)
     if ok:
         server.is_npu = True
