@@ -440,6 +440,35 @@ class TestReviewProvision:
 
         provision.assert_not_called()
 
+    def test_create_provision_uses_server_default_groups(self, staff, server, normal):
+        """服务器配置的默认组只在创建新账号时传入开通服务。"""
+        from applications.services import provision_application_by_pk
+
+        server.default_group = "dev,ops"
+        server.save(update_fields=["default_group"])
+        application = Application.objects.create(
+            applicant=normal,
+            reviewer=staff,
+            username="default-group-user",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            apply_type=Application.ApplyType.CREATE,
+        )
+
+        with (
+            patch("applications.services.write_server_motd"),
+            patch(
+                "applications.services.provision_user",
+                return_value=(True, "Pass123", "已开通"),
+            ) as provision,
+            patch("applications.services.send_provision_credentials"),
+        ):
+            provision_application_by_pk(application.pk)
+
+        provision.assert_called_once()
+        assert provision.call_args.args[:2] == (server, "default-group-user")
+        assert provision.call_args.kwargs == {"groups": ["dev", "ops"], "with_home": True}
+
     def test_unknown_apply_type_never_falls_back_to_create(self, staff, server, normal):
         from applications.services import provision_application_by_pk
 

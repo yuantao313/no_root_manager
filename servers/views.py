@@ -1,10 +1,14 @@
+import re
+
 from django.contrib import messages
 from django.contrib.auth.models import User
+from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
+from credentials.models import Credential
 
 from .devices import clear_device_info_cache, get_device_info
 from .forms import ServerForm
@@ -32,11 +36,31 @@ def _message_result(request, ok, message):
     (messages.success if ok else messages.error)(request, message)
 
 
+def _candidate_fingerprint(message):
+    """从首次只读探测结果提取候选指纹，仅供页面填入，绝不自动保存。"""
+    match = re.search(r"SHA256:[A-Za-z0-9+/]+={0,2}", message or "")
+    return match.group(0) if match else ""
+
+
 @superuser_required
 def server_list(request):
-    """服务器列表（仅超级管理员）。"""
-    servers = Server.objects.all()
-    return render(request, "servers/list.html", {"servers": servers})
+    """服务器与凭据的统一管理入口（仅超级管理员）。"""
+    active_tab = request.GET.get("tab", "servers")
+    if active_tab not in {"servers", "credentials"}:
+        active_tab = "servers"
+    servers = Server.objects.select_related("credential")
+    credentials = Credential.objects.only("pk", "name", "username", "updated_at").annotate(
+        server_count=Count("servers")
+    )
+    return render(
+        request,
+        "servers/list.html",
+        {
+            "servers": servers,
+            "credentials": credentials,
+            "active_tab": active_tab,
+        },
+    )
 
 
 @superuser_required
@@ -64,7 +88,15 @@ def _server_form(request, server=None):
                 ok, test_msg = test_server_connection(server)
                 if not ok:
                     messages.error(request, f"连接测试未通过，未保存：{test_msg}")
-                    return render(request, "servers/form.html", {"form": form, "editing": editing})
+                    return render(
+                        request,
+                        "servers/form.html",
+                        {
+                            "form": form,
+                            "editing": editing,
+                            "candidate_fingerprint": _candidate_fingerprint(test_msg),
+                        },
+                    )
             server.save()
             form.save_m2m()
             messages.success(request, ("服务器已更新。" if editing else "服务器已添加。") + (test_msg or ""))

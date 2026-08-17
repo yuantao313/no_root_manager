@@ -52,5 +52,47 @@ class TestCredentialEncryption:
         )
 
         assert response.status_code == 302
+        assert response.url == f"{reverse('servers:list')}?tab=credentials"
         cred.refresh_from_db()
         assert (cred.name, cred.password, cred.private_key) == ("新名称", "password", "key")
+
+    def test_admin_add_returns_to_safe_next_page(self, client):
+        admin = get_user_model().objects.create_superuser("next-admin", "admin@example.com", "x12345!")
+        client.force_login(admin)
+        add_url = reverse("admin:credentials_credential_add")
+        next_url = reverse("servers:create")
+
+        response = client.post(
+            f"{add_url}?next={next_url}",
+            {"name": "返回测试", "username": "root", "password": "secret", "private_key": "", "remark": ""},
+        )
+
+        assert response.status_code == 302
+        assert response.url == next_url
+        assert Credential.objects.filter(name="返回测试").exists()
+
+    def test_admin_add_page_is_renderable_from_server_form(self, client):
+        admin = get_user_model().objects.create_superuser("page-admin", "admin@example.com", "x12345!")
+        client.force_login(admin)
+
+        response = client.get(
+            reverse("admin:credentials_credential_add"),
+            {"next": reverse("servers:create")},
+        )
+
+        html = response.content.decode()
+        assert response.status_code == 200
+        for field_name in ("name", "username", "password", "private_key", "remark"):
+            assert f'id="id_{field_name}"' in html
+
+    def test_admin_add_rejects_external_next_page(self, client):
+        admin = get_user_model().objects.create_superuser("safe-next-admin", "admin@example.com", "x12345!")
+        client.force_login(admin)
+
+        response = client.post(
+            f"{reverse('admin:credentials_credential_add')}?next=https://evil.example/",
+            {"name": "外链测试", "username": "root", "password": "secret", "private_key": "", "remark": ""},
+        )
+
+        assert response.status_code == 302
+        assert response.url == f"{reverse('servers:list')}?tab=credentials"

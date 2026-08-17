@@ -1,3 +1,5 @@
+import re
+
 from django import forms
 
 from credentials.models import Credential
@@ -30,12 +32,18 @@ class ServerForm(forms.ModelForm):
         widgets = {
             "port": forms.NumberInput(attrs={"min": 1, "max": 65535}),
         }
+        labels = {
+            "default_group": "新账号默认用户组",
+        }
         help_texts = {
-            "default_group": "多个分组用英文逗号分隔，如：dev,ops；禁止配置 sudo、wheel、docker 等 root 级权限组",
+            "default_group": (
+                "仅在“申请服务器账号”审批开通时自动加入；多个分组用英文逗号分隔，如：dev,ops。"
+                "转移已有账号不自动加组；sudo、wheel、docker 等高危权限必须单独申请。"
+            ),
         }
 
     def clean_default_group(self):
-        """默认组会自动授予每个新账号，禁止夹带 root 级权限。"""
+        """默认组会自动授予每个新账号，校验并规范化配置。"""
         value = self.cleaned_data.get("default_group", "")
         groups = [group.strip() for group in value.split(",") if group.strip()]
         dangerous = sorted(set(groups) & ROOT_EQUIVALENT_GROUPS)
@@ -43,7 +51,13 @@ class ServerForm(forms.ModelForm):
             raise forms.ValidationError(
                 f"默认用户组不能包含 root 级权限组：{', '.join(dangerous)}；请改走独立权限申请。"
             )
-        return ",".join(groups)
+        invalid = [group for group in groups if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", group)]
+        if invalid:
+            raise forms.ValidationError(
+                f"用户组名称不合法：{', '.join(invalid)}；请使用小写字母、数字、下划线或连字符。"
+            )
+        # 保持管理员填写顺序，同时避免脚本重复处理同一分组。
+        return ",".join(dict.fromkeys(groups))
 
     def clean_ssh_host_key_fingerprint(self):
         """仅接受 OpenSSH SHA256 指纹。

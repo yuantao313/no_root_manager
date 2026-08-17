@@ -227,6 +227,18 @@
         });
     });
 
+    /* ===== 服务器表单：填入已核对的候选 SSH 主机指纹 ===== */
+    var fillHostKey = document.querySelector("[data-fill-host-key]");
+    if (fillHostKey) {
+        fillHostKey.addEventListener("click", function () {
+            var field = document.getElementById("id_ssh_host_key_fingerprint");
+            if (field) {
+                field.value = fillHostKey.dataset.fillHostKey;
+                field.focus();
+            }
+        });
+    }
+
     /* ===== 凭据表单：私钥拖拽上传 ===== */
     var dropzone = document.getElementById("dropzone");
     if (dropzone) {

@@ -6,24 +6,34 @@
         <h3 class="panel-title">{% if editing %}编辑服务器{% else %}新增服务器{% endif %}</h3>
     </div>
     <div class="panel-body">
+        {% if candidate_fingerprint %}
+        <div class="alert alert-warning">
+            <strong>已读取候选 SSH 主机指纹：</strong>
+            <code id="candidate-host-key">{{ candidate_fingerprint }}</code>
+            <button type="button" class="btn btn-warning btn-xs" data-fill-host-key="{{ candidate_fingerprint }}">填入指纹字段</button>
+            <p style="margin:8px 0 0;">请先通过机器控制台或运维人员等可信渠道核对。确认一致后填入并再次测试，系统不会自动信任该指纹。</p>
+        </div>
+        {% endif %}
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
-                {% if field.name not in form.advanced_fields %}
                 <p>
                     {{ field.label_tag }} {{ field }}
                     {% if field.help_text %}<span class="help-block" style="font-size:13px;">{{ field.help_text }}</span>{% endif %}
                     {{ field.errors }}
                 </p>
-                {% endif %}
             {% endfor %}
-            <p class="text-muted"><a href="{% url 'admin:credentials_credential_add' %}">还没有凭据？去 Django Admin 新建</a></p>
+            {% url 'servers:create' as server_create_url %}
+            <p class="text-muted">
+                还没有凭据？<a href="{% url 'admin:credentials_credential_add' %}?next={{ server_create_url|urlencode }}">新增凭据</a>
+                · <a href="{% url 'servers:list' %}?tab=credentials">查看已有凭据</a>
+            </p>
             <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
             {% if editing %}
-            <button type="submit" name="action" value="test" class="btn btn-success">保存并测试连接</button>
+            <button type="submit" name="action" value="test" class="btn btn-success">获取指纹 / 测试并保存</button>
             <a href="{% url 'servers:detail' form.instance.pk %}" class="btn btn-default">取消</a>
             {% else %}
-            <button type="submit" name="action" value="test" class="btn btn-success">保存并测试连接</button>
+            <button type="submit" name="action" value="test" class="btn btn-success">获取指纹 / 测试并保存</button>
             <a href="{% url 'servers:list' %}" class="btn btn-default">取消</a>
             {% endif %}
         </form>

@@ -6,7 +6,10 @@
         <div class="col-xs-6"><h2>服务器详情</h2></div>
         <div class="col-xs-6 text-right">
             <a href="{% url 'servers:edit' server.pk %}" class="btn btn-primary">编辑</a>
-            <a href="{% url 'servers:test' server.pk %}" class="btn btn-success">测试连接</a>
+            <form method="post" action="{% url 'servers:test' server.pk %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success">测试连接</button>
+            </form>
             <a href="{% url 'servers:list' %}" class="btn btn-default">返回列表</a>
         </div>
     </div>
@@ -19,6 +22,7 @@
                 <tr><th>名称</th><td>{{ server.name }}</td></tr>
                 <tr><th>服务器地址</th><td>{{ server.host }}</td></tr>
                 <tr><th>端口</th><td>{{ server.port }}</td></tr>
+                <tr><th>新账号默认分组</th><td>{{ server.default_group|default:"未配置" }}</td></tr>
                 <tr>
                     <th>管理凭据</th>
                     <td>
@@ -71,7 +75,10 @@
         <div class="row">
             <div class="col-xs-6"><h3 class="panel-title">受管用户（nrm_managed 组）</h3></div>
             <div class="col-xs-6 text-right">
-                <a href="{% url 'servers:sync_users' server.pk %}" class="btn btn-default btn-xs">刷新</a>
+                <form method="post" action="{% url 'servers:sync_users' server.pk %}" style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-default btn-xs">刷新</button>
+                </form>
             </div>
         </div>
     </div>
