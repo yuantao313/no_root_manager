@@ -122,7 +122,8 @@ class EmailVerification(models.Model):
     ]
 
     email = models.EmailField("目标邮箱")
-    code = models.CharField("验证码", max_length=6)
+    # 复用 Django 密码哈希格式，数据库泄露时不暴露仍在有效期内的 6 位验证码。
+    code = models.CharField("验证码哈希", max_length=128)
     purpose = models.CharField("用途", max_length=20, choices=PURPOSE_CHOICES)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -143,4 +144,4 @@ class EmailVerification(models.Model):
         verbose_name_plural = "邮箱验证码"
 
     def __str__(self):
-        return f"{self.email} {self.get_purpose_display()} ({self.code})"
+        return f"{self.email} {self.get_purpose_display()}"

@@ -11,7 +11,8 @@
       ↓
 3. 实现改动，本地验证：
       uv run pytest          # 测试必须全部通过
-      uv run pyflakes .      # 静态检查零告警（忽略 .venv/）
+      uv run ruff check .    # 静态检查零告警
+      uv run ruff format --check .
       uv run python manage.py check
       uv run python manage.py makemigrations --check --dry-run  # 迁移一致
       ↓
@@ -40,6 +41,7 @@
 ## 代码规范
 
 - 新增代码需配套 pytest 用例（关键路径必须覆盖）
-- 不引入未使用的导入/变量（pyflakes 零告警）
+- 不引入未使用的导入/变量（ruff 零告警）
 - 敏感信息（密钥/密码）严禁硬编码与入库，使用环境变量
 - 保持"不过度设计"：不做需求外的扩展
+- 验证必须使用 pytest 隔离数据库和 mock SSH/邮件，禁止写入开发数据库

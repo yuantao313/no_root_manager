@@ -22,11 +22,7 @@ TEST_HOST_FINGERPRINT = "SHA256:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE"
 
 @pytest.fixture(autouse=True)
 def sync_background_tasks(monkeypatch):
-    """测试环境：后台任务同步执行（不真正起线程，避免 SQLite 锁与时序问题）。
-
-    生产代码中开通/通知走 run_in_background 后台线程；
-    测试里直接同步调用，保证断言时机确定。
-    """
+    """测试环境仅把非关键通知同步执行；SSH 开通在生产代码中已同步。"""
     monkeypatch.setattr(
         "applications.views.run_in_background",
         lambda func, *args: func(*args),
@@ -290,11 +286,26 @@ class TestRegister:
 class TestPermission:
     def test_normal_user_cannot_see_admin_list(self, client, normal):
         client.force_login(normal)
-        assert client.get(reverse("applications:list")).status_code == 302
+        assert client.get(reverse("applications:list")).status_code == 403
 
     def test_staff_can_see_list(self, client, staff):
         client.force_login(staff)
         assert client.get(reverse("applications:list")).status_code == 200
+
+    def test_deleting_applicant_preserves_audit_record(self, normal, server):
+        app = Application.objects.create(
+            applicant=normal,
+            applicant_name="历史申请人",
+            username="audit-user",
+            target_server=server,
+        )
+
+        normal.delete()
+
+        app.refresh_from_db()
+        assert app.applicant is None
+        assert app.applicant_name == "历史申请人"
+        assert app.username == "audit-user"
 
     def test_my_applications_only_own(self, client, normal, staff):
         Application.objects.create(applicant=normal, applicant_name="甲", username="a", email="a@x.com", title="我的")
@@ -514,6 +525,7 @@ class TestReviewProvision:
         assert "重发邮件" in html
         assert "label-success" in html
         assert "no-store" in resp.headers["Cache-Control"]
+        assert reverse("servers:detail", args=[server.pk]) not in html
 
         client.force_login(staff)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
@@ -566,6 +578,42 @@ class TestReviewProvision:
         mock.assert_not_called()
         app.refresh_from_db()
         assert app.status == Application.Status.REJECTED
+
+    def test_failed_approved_application_can_be_retried(self, client, staff, normal, server):
+        app = Application.objects.create(
+            applicant=normal,
+            username="retry-user",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            reviewer=staff,
+            provision_note="连接失败",
+        )
+        client.force_login(staff)
+
+        with patch("applications.services.provision_user", return_value=(True, "NewPass123", "已开通")):
+            response = client.post(reverse("applications:retry_provision", args=[app.pk]))
+
+        assert response.status_code == 302
+        app.refresh_from_db()
+        assert app.provisioned_at is not None
+        assert app.initial_password == "NewPass123"
+
+    def test_retry_provision_is_post_only_and_permission_scoped(self, client, staff, normal, server):
+        app = Application.objects.create(
+            applicant=normal,
+            username="retry-guard",
+            target_server=server,
+            status=Application.Status.APPROVED,
+            reviewer=staff,
+        )
+        client.force_login(staff)
+        assert client.get(reverse("applications:retry_provision", args=[app.pk])).status_code == 405
+
+        client.force_login(normal)
+        with patch("applications.views.provision_application_by_pk") as provision:
+            response = client.post(reverse("applications:retry_provision", args=[app.pk]))
+        assert response.status_code == 403
+        provision.assert_not_called()
 
     def test_transfer_approve_creates_machine_user_binding(self, client, staff, server, normal):
         """转移类型审批通过：自动建立机器用户 ↔ 平台用户绑定。"""

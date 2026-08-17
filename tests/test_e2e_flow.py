@@ -24,7 +24,7 @@ TEST_HOST_FINGERPRINT = "SHA256:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE"
 
 @pytest.fixture(autouse=True)
 def sync_background_tasks(monkeypatch):
-    """测试环境：后台任务（开通/通知）同步执行，保证断言时机确定。"""
+    """测试环境仅把后台通知同步执行，保证断言时机确定。"""
     monkeypatch.setattr(
         "applications.views.run_in_background",
         lambda func, *args: func(*args),

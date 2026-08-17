@@ -26,7 +26,7 @@
             <dd>{{ application.get_apply_type_display }}</dd>
             {% if application.target_server %}
             <dt>目标服务器</dt>
-            <dd><a href="{% url 'servers:detail' application.target_server.pk %}">{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）</a></dd>
+            <dd>{% if user.is_superuser %}<a href="{% url 'servers:detail' application.target_server.pk %}">{% endif %}{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）{% if user.is_superuser %}</a>{% endif %}</dd>
             {% endif %}
             <dt>申请内容</dt>
             <dd>{{ application.description|linebreaks }}</dd>
@@ -59,6 +59,17 @@
         <div class="review-box alert alert-info">
             <strong>初始凭据仅申请人本人可见。</strong>
             {% include "applications/_resend_credentials_form.html" with button_class="btn btn-default btn-sm" button_label="向申请人重发凭据邮件" %}
+        </div>
+        {% endif %}
+
+        {% if can_retry_provision %}
+        <div class="review-box alert alert-danger">
+            <strong>机器操作尚未完成。</strong>
+            {% if application.provision_note %}<p style="margin-top:8px;">{{ application.provision_note }}</p>{% endif %}
+            <form method="post" action="{% url 'applications:retry_provision' application.pk %}" data-confirm="确定重试目标机器操作吗？">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger btn-sm">重试开通</button>
+            </form>
         </div>
         {% endif %}
 

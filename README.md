@@ -1,62 +1,45 @@
 # NRM · No Root Manager
 
-面向中小团队（几台服务器、几十到几百用户）的**目标机器用户申请与接管管理系统**。
+NRM 是面向中小团队的轻量服务器账号申请与接管平台。它解决的不是资产监控或自动化运维，而是一个明确闭环：**用户申请 → 管理员审批 → 通过 SSH 在目标机执行账号操作 → 留下平台记录与通知**。
 
-## 背景
+## 当前能力
 
-服务器以前靠"全员 root 登录、谁都能改"来协作，容易互相踩踏、乱改环境、资源被单个用户耗尽。NRM 提供一个轻量平台：**用户登录后提交申请 → 管理员审批（或按需自动开通）→ 系统在目标机器上自动创建普通用户**，全程无需人工登录机器操作。
+| 能力 | 当前实现 |
+|------|----------|
+| 账号与登录 | Django 账号注册/登录/找回密码；可选 GitCode OAuth；django-axes 登录限流 |
+| 申请工单 | 新建账号、接管已有账号、申请 sudo/docker 组、申请服务器管理员权限；支持撤回、筛选和审批意见 |
+| 审批边界 | 普通管理员仅审批绑定服务器；root 等价权限只允许超级管理员批准；越权访问返回 403/404 |
+| 机器操作 | Paramiko SSH；主机指纹固定；创建、接管、锁定/解锁、用户组调整、基础初始化、motd 公告 |
+| 设备概览 | 服务器详情按需读取 CPU、内存、磁盘信息并使用短期缓存与最近快照降级 |
+| 凭据 | 密码、私钥、SMTP 密码等使用 Fernet 加密；凭据管理复用 Django Admin |
+| 通知 | SMTP 或邮件 Webhook；申请事件支持全局/管理员 Webhook；出站地址限制为公网 HTTPS |
 
-> 设计原则：**不过度设计，也不能懒惰**。面向的场景是"用户没有少到可以手动管理，也没有多到必须上企业级平台"——所以不包含企业级认证、付费计费等重型能力，聚焦账号开通与权限审计。
+审批后的 SSH 操作在请求内完成，确保没有持久任务队列时不会因 Web 进程退出而丢失。失败会记录原因，并在工单详情提供“重试开通”。非关键通知仍采用进程内后台发送，失败只记录日志。
 
-## 核心能力
+## 明确边界
 
-| 能力 | 说明 |
-|------|------|
-| 用户申请 | 登录提交，可选"申请服务器账号 / 转移已有账号为受管用户 / 申请用户组 / 申请平台管理员"等类型；身份信息（姓名/工号/目标用户名）从账号自动带入，无需重复填写 |
-| 审批开通 | 管理员审批通过后自动在机器建用户、生成随机密码并发邮件 |
-| 机器接管 | 一键接管/禁用/启用目标机器用户，所有受管用户与系统账号一对一绑定 |
-| 设备信息 | 服务器详情展示 CPU、内存、硬盘信息，按需查询并缓存 |
-| 资源监控 | 同步采集受管用户的磁盘/内存/CPU 使用并展示（含同步时间） |
-| 通知 | SMTP 邮件（新申请/审批结果/密码下发）+ Webhook（申请创建/审批事件） |
-| 登录方式 | 账号密码 + GitCode OAuth（支持绑定已有账号/注册新账号） |
+- 不提供 NPU/GPU 管理、资源配额、监控告警、计费、企业级 IAM 或移动端。
+- 默认使用 SQLite，适合几台服务器、几十到几百用户的单实例部署。
+- 不引入 Redis、Celery 等额外基础设施；需要多实例或高并发时，应重新评估数据库、共享缓存和任务队列。
 
 ## 快速开始
 
 ```bash
-# 1. 安装依赖
-uv sync
-
-# 2. 数据库迁移
+uv sync --locked
 uv run python manage.py migrate
-
-# 3. 创建管理员
 uv run python manage.py createsuperuser
-
-# 4. 启动
 uv run python manage.py runserver
 ```
 
-访问 http://127.0.0.1:8000/ ，注册登录后提交申请；管理员登录 `/accounts/login/` 审批。
+访问 <http://127.0.0.1:8000/>。完整步骤见 [快速开始](docs/quickstart.md) 和 [部署指南](docs/deploy.md)。
 
-## 测试与检查
+## 开发检查
 
 ```bash
-uv run pytest              # 单元测试（含 E2E 流程测试）
-uv run ruff check .        # 静态检查
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
 uv run python manage.py check
+uv run python manage.py makemigrations --check --dry-run
+uv run mkdocs build --strict
 ```
-
-## 文档
-
-完整文档见 [docs/](docs/)，或运行 `uv run mkdocs serve` 本地预览：
-- [使用指南](docs/usage/index.md)：普通用户 / 管理员 / 超级管理员操作说明
-- [快速开始](docs/quickstart.md)
-- [部署指南](docs/deploy.md)：安装、配置、启动、定时任务、备份恢复
-- [架构设计](docs/architecture.md)
-- [运维手册](docs/operations.md)
-
-## 技术栈
-
-- Python 3.13 / Django 6.1 / SQLite
-- paramiko（SSH 执行）、pypinyin（用户名拼音）、cryptography（密钥加密存储）
-- Bootstrap 3.4（前端）、mkdocs（文档）

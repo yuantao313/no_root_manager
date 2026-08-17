@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
@@ -15,6 +17,8 @@ from servers.models import Server
 from .forms import ApplicationForm, ApplicationReviewForm
 from .models import Application
 from .services import notify_application_by_pk, provision_application_by_pk
+
+logger = logging.getLogger(__name__)
 
 
 def _get_visible_application(user, pk):
@@ -38,6 +42,24 @@ def _filter_applications(request, applications, *, include_server=False):
         if filters["f_server"].isdigit():
             applications = applications.filter(target_server_id=filters["f_server"])
     return applications, filters
+
+
+def _provision_and_report(request, application, *, retried=False):
+    """可靠执行机器开通并把稳定结果反馈给操作者。"""
+    try:
+        provision_application_by_pk(application.pk)
+    except Exception:  # noqa: BLE001 —— 异常必须落库并给用户稳定反馈
+        logger.exception("工单开通异常：application=%s", application.pk)
+        Application.objects.filter(pk=application.pk, provisioned_at__isnull=True).update(
+            provision_note="开通异常：请检查服务日志后重试或人工处理。",
+            updated_at=timezone.now(),
+        )
+    application.refresh_from_db(fields=["provisioned_at", "provision_note"])
+    if application.provisioned_at:
+        prefix = "重试成功" if retried else "申请已通过"
+        messages.success(request, f"{prefix}，目标机器操作已完成。")
+    else:
+        messages.error(request, f"机器操作未完成：{application.provision_note or '未知错误'}")
 
 
 @login_required
@@ -140,6 +162,9 @@ def application_detail(request, pk):
     can_resend_initial_password = has_initial_password and (request.user.is_superuser or is_applicant)
     can_review = Application.objects.reviewable_by(request.user).filter(pk=application.pk).exists()
     can_approve = can_review and not (application.requires_superuser_approval and not request.user.is_superuser)
+    can_retry_provision = (
+        can_approve and application.status == Application.Status.APPROVED and not application.provisioned_at
+    )
     return render(
         request,
         "applications/detail.html",
@@ -149,6 +174,7 @@ def application_detail(request, pk):
             "can_resend_initial_password": can_resend_initial_password,
             "can_review": can_review,
             "can_approve": can_approve,
+            "can_retry_provision": can_retry_provision,
         },
     )
 
@@ -217,14 +243,32 @@ def application_review(request, pk, action):
     if not updated:
         messages.warning(request, "该申请已处理，不能重复审批。")
         return redirect("applications:detail", pk=pk)
-    # 审批通过且指定目标服务器时：后台自动开通账号（SSH 耗时，不阻塞审批请求）。
-    # 必须放在 application.save() 之后：后台任务按 pk 重新取数并回写工单字段，
-    # 若在 save() 之前调度，旧实例的 save() 会把后台写入的 provisioned_at 覆盖回 None。
+    # SSH 开通属于关键控制操作：当前项目没有持久任务队列，因此同步执行，
+    # 避免 Web 进程退出时 daemon 线程静默丢任务。通知仍可后台发送。
     if action == "approve":
-        run_in_background(provision_application_by_pk, application.pk)
-        messages.success(request, "已通过申请，账号将在后台自动开通，稍后刷新详情页查看结果。")
+        _provision_and_report(request, application)
     else:
         messages.success(request, f"已驳回申请：{application.description[:30] or application.username}")
     # 审批结果通知（webhook+邮件）后台执行，不阻塞审批请求
     run_in_background(notify_application_by_pk, application.pk, True)
+    return redirect("applications:detail", pk=pk)
+
+
+@staff_required
+@require_POST
+def application_retry_provision(request, pk):
+    """重试已批准但尚未完成的机器操作，权限范围与审批保持一致。"""
+    application = get_object_or_404(Application.objects.with_context().reviewable_by(request.user), pk=pk)
+    if application.status != Application.Status.APPROVED or application.provisioned_at:
+        messages.error(request, "仅能重试已通过但尚未完成的机器操作。")
+        return redirect("applications:detail", pk=pk)
+    if application.requires_superuser_approval and not request.user.is_superuser:
+        raise Http404
+    if not application.target_server or not application.target_server.credential:
+        messages.error(request, "目标服务器未关联管理凭据，不能重试。")
+        return redirect("applications:detail", pk=pk)
+    if not application.target_server.ssh_host_key_fingerprint:
+        messages.error(request, "目标服务器 SSH 主机指纹尚未核验，不能重试。")
+        return redirect("applications:detail", pk=pk)
+    _provision_and_report(request, application, retried=True)
     return redirect("applications:detail", pk=pk)

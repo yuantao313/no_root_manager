@@ -122,11 +122,15 @@ class TestProfileEdit:
         user.refresh_from_db()
         assert user.email == "old@x.com"
         # 正确验证码 -> 通过
-        with patch("accounts.email_verify.send_email", return_value=True):
+        with (
+            patch("accounts.email_verify.generate_code", return_value="654321"),
+            patch("accounts.email_verify.send_email", return_value=True),
+        ):
             send_user_email_code("new@x.com", user)
-        rec = EmailVerification.objects.get(email="new@x.com", purpose="user_email", user=user)
+        assert EmailVerification.objects.filter(email="new@x.com", purpose="user_email", user=user).exists()
         client.post(
-            reverse("accounts:profile"), {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": rec.code}
+            reverse("accounts:profile"),
+            {"save_profile": "1", "name": "张三", "email": "new@x.com", "code": "654321"},
         )
         user.refresh_from_db()
         assert user.email == "new@x.com"

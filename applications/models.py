@@ -52,7 +52,7 @@ class Application(models.Model):
     # 申请人（登录用户，地位平等；身份信息见 applicant_name/contact）
     applicant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="applications",
         verbose_name="申请人账号",
         null=True,

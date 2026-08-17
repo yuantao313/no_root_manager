@@ -56,20 +56,15 @@ SECRET_KEY = _SECRET_KEY or "django-insecure-er9k0na5u*y-71#f$a3=nd*1+2od&-3b1-s
 
 # ---------------------------------------------------------------------------
 # 运行模式行为
-#   开发模式(dev)  : DEBUG=True、ALLOWED_HOSTS=*（放行域名拦截）、
-#                    CSRF 来源宽松、日志详细（含 SQL/请求/SSH）
+#   开发模式(dev)  : DEBUG=True、默认仅允许本机访问；如需局域网联调，
+#                    显式配置 NRM_ALLOWED_HOSTS / NRM_CSRF_TRUSTED_ORIGINS
 #   部署模式(prod) : DEBUG 取 NRM_DEBUG、ALLOWED_HOSTS/CSRF 严格取自配置文件，
 #                    缺失即报错，不裸奔
 # ---------------------------------------------------------------------------
 if MODE == "dev":
     DEBUG = True
-    # 开发模式：任意 host 均可访问，不做域名拦截
-    ALLOWED_HOSTS = ["*"]
-    # CSRF 来源：通配符 + 环境变量显式来源。
-    # 注意：Django 6.1 对裸 "http://*" 通配匹配有限（实测不匹配具体 Origin），
-    # 反代/生产入口必须显式加入实际来源（如 http://192.168.9.216:18888），
-    # 因此在 dev 模式同样读取 .env 的 NRM_CSRF_TRUSTED_ORIGINS 并追加。
-    CSRF_TRUSTED_ORIGINS = ["http://*", "https://*", *_env_list("NRM_CSRF_TRUSTED_ORIGINS")]
+    ALLOWED_HOSTS = _env_list("NRM_ALLOWED_HOSTS") or ["localhost", "127.0.0.1", "[::1]"]
+    CSRF_TRUSTED_ORIGINS = _env_list("NRM_CSRF_TRUSTED_ORIGINS")
     LOG_LEVEL = "DEBUG"
 else:  # deploy
     DEBUG = _env_bool("NRM_DEBUG")
@@ -254,10 +249,16 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
+_db_path = Path(os.environ.get("NRM_DB_PATH", "db.sqlite3"))
+if not _db_path.is_absolute():
+    _db_path = BASE_DIR / _db_path
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": _db_path,
+        # 小团队部署仍使用 SQLite；短暂写竞争时等待而不是立即报 database is locked。
+        "OPTIONS": {"timeout": 20},
     }
 }
 

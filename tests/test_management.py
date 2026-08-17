@@ -338,14 +338,14 @@ class TestUserGroups:
         assert scan.call_count == 2
 
     def test_add_group_view_requires_superuser(self, client, ubuntu_server, django_user_model):
-        """非超级管理员访问加组接口 → 重定向登录（user_passes_test 默认行为）。"""
+        """已登录的非超级管理员访问加组接口时明确返回 403。"""
         normal = django_user_model.objects.create_user(username="norm2", password="x12345!")
         client.force_login(normal)
         resp = client.post(
             reverse("servers:add_user_group", args=[ubuntu_server.pk]),
             {"username": "alice", "group": "docker"},
         )
-        assert resp.status_code == 302
+        assert resp.status_code == 403
 
     def test_add_group_view_success(self, client, ubuntu_server, django_user_model):
         su = django_user_model.objects.create_user(username="su3", password="x12345!", is_staff=True, is_superuser=True)
@@ -462,14 +462,14 @@ class TestUserGroups:
         mock_remove.assert_called_once_with(ubuntu_server, "alice", "docker")
 
     def test_update_user_groups_requires_superuser(self, client, ubuntu_server, django_user_model):
-        """非超级管理员访问批量切换接口 → 重定向。"""
+        """已登录的非超级管理员访问批量切换接口时明确返回 403。"""
         normal = django_user_model.objects.create_user(username="norm3", password="x12345!")
         client.force_login(normal)
         resp = client.post(
             reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
             {"username": "alice", "groups": "sudo"},
         )
-        assert resp.status_code == 302
+        assert resp.status_code == 403
 
     def test_update_user_groups_no_change(self, client, ubuntu_server, django_user_model):
         """目标组与当前组一致：不调用 add/remove，只提示已更新。"""

@@ -1,62 +1,60 @@
 # 架构设计
 
-## 应用结构
+## 设计取舍
+
+NRM 采用 Django 单体、SQLite 和单进程部署，优先保证小团队可维护性。通用账号、权限、表单、后台管理、登录限流和 OAuth 分别复用 Django、django-axes 与 django-allauth；项目代码只保留服务器申请和 SSH 操作领域逻辑。
+
+## 应用职责
 
 | 应用 | 职责 |
 |------|------|
-| `accounts` | 用户注册/登录（用户与管理员地位平等）、用户名建议接口（pypinyin 复姓/多音字生成） |
-| `applications` | 申请单模型、登录申请、审批、开通联动、sudo 审计（SudoGrant） |
-| `servers` | 服务器/用户分组/受管用户模型、SSH 执行与接管/开通/迁移服务 |
-| `credentials` | 目标机器登录凭据（敏感字段加密存储） |
-| `notifications` | 邮件（SMTP 配置模型 + 发送服务）与 Webhook（配置模型 + 推送服务） |
-| `config` | Django 项目配置 |
+| `accounts` | 注册、个人资料、密码找回、GitCode 绑定、系统设置、公告、邮箱验证码 |
+| `applications` | 工单权限范围、申请/审批状态、开通编排、失败重试 |
+| `servers` | 服务器、管理员绑定、机器用户归属、SSH 与目标机脚本、设备概览 |
+| `credentials` | 加密保存目标机管理凭据；管理界面复用 Django Admin |
+| `notifications` | SMTP、邮件 Webhook、事件 Webhook 与出站地址安全校验 |
+| `config` | 运行模式、安全设置、根路由和角色装饰器 |
 
-## 关键模型
+## 数据关系
 
 ```mermaid
 erDiagram
-    Credential ||--o{ Server : 凭据
-    Server ||--o{ UserGroup : 分组
-    Server ||--o{ ManagedUser : 受管用户
-    Server ||--o{ Application : 目标
-    Application ||--o{ SudoGrant : 审计
-    Application }o--|| User : 申请人
+    User ||--o| UserProfile : profile
+    User o|--o{ Application : applicant
+    User o|--o{ Application : reviewer
+    Credential ||--o{ Server : credential
+    Server o|--o{ Application : target
+    User ||--o{ ServerAdminBinding : admin
+    Server ||--o{ ServerAdminBinding : server
+    User o|--o{ MachineUserBinding : owner
+    Server ||--o{ MachineUserBinding : server
 ```
 
-### 申请生命周期
+工单保存申请时的姓名、工号、邮箱和机器用户名快照。删除平台用户只会把 `applicant` 置空，不会删除历史工单。
 
+## 工单状态与机器结果
+
+```text
+pending ──通过──> approved ──SSH 成功──> provisioned_at 已记录
+   │                   └────SSH 失败──> provision_note 记录原因，可重试
+   ├──驳回──> rejected
+   └──撤回──> withdrawn
 ```
-登录提交(pending) → 审批通过(approved) → 机器开通(provisioned_at) → 到期(valid_until / sudo当日失效)
-```
 
-## SSH 执行层（servers/ssh.py + management.py）
+状态“已通过”和“机器操作已完成”是两个事实，分别由 `status` 与 `provisioned_at` 表示。审批更新通过条件更新避免重复审批；数据库唯一约束阻止同一服务器、同一用户名出现多个进行中工单。
 
-- `exec_command`：paramiko 执行命令，**校验退出码**（非零视为失败）
-- 连接前校验管理员确认的 OpenSSH `SHA256:` 主机指纹；不使用 `AutoAddPolicy`，也不读取本机 SSH agent/密钥
-- 目标机脚本上传到随机权限目录，执行结束后清理，避免固定临时路径被替换
-- `_sudo_wrap`：SSH 用户非 root 时，为特权命令自动加 `sudo -n`（按管道分段，不误拆 `||`）
-- `provision_user`：建用户 → 设密码 → `chage -d 0` 强制改密
-- `migrate_home_dir`：迁移目录（空目标先移除、`mv -T` 防嵌套、chown 失败回滚）
-- `grant_sudo`：授予 sudo/wheel 组（自动探测组名）
+## SSH 边界
 
-## 安全设计
+- 连接必须使用管理员经可信渠道确认的 OpenSSH `SHA256:` 主机指纹。
+- 禁止自动信任未知主机、SSH agent 和本机默认私钥。
+- 特权脚本经 SFTP 上传到随机 0700 临时目录，执行后清理。
+- 用户名和用户组在进入脚本前做白名单校验；密码通过标准输入传递，不进入命令行。
+- 审批时同步执行关键 SSH 操作。项目没有持久任务队列，不能把开通交给 daemon 线程。
 
-| 关注点 | 措施 |
-|--------|------|
-| 凭据落库 | Fernet 加密（密钥由 `SECRET_KEY` 派生），页面不展示明文 |
-| 机器权限 | 所有受管用户为普通用户，统一加入 `nrm_managed` 组 |
-| sudo 审计 | SudoGrant 记录授予人/时间，当日 23:59:59 失效，`expire_sudo` 命令撤销 |
-| 命令注入 | 目录迁移校验绝对路径与非法字符；用户名/路径不拼接未校验输入 |
-| 密码安全 | 16 位随机密码、强制首次登录修改；初始密码加密落库且仅申请人本人可见 |
-| Webhook SSRF | 仅公网 HTTPS；拒绝内网/回环/保留地址，连接固定到同次校验的 DNS 结果 |
-| 审批边界 | 目标机无凭据或未核验 SSH 指纹时禁止批准；sudo/docker 等 root 级权限仅超级管理员可批 |
+## 通知边界
 
-## 通知链路
+通知是非关键副作用：提交和审批完成后可在进程内后台发送，失败写日志但不回滚工单或机器操作。Webhook 仅允许公网 HTTPS，并在发送时重新解析、校验并固定目标 IP，防止 SSRF 与 DNS 重绑定。
 
-```
-申请提交 ──┬──> EmailConfig(SMTP) ──> 管理员
-           └──> WebhookConfig ──> POST JSON
-审批完成 ──┬──> EmailConfig ──> 申请者
-           └──> WebhookConfig ──> POST JSON
-开通成功 ──> EmailConfig ──> 申请者（用户名+随机密码）
-```
+## 部署边界
+
+LocMem 缓存用于 select2 状态和短期 SSH 查询缓存，因此推荐单 Gunicorn worker、多线程运行。多实例部署需要共享缓存、外部数据库和持久任务队列，不属于当前产品范围。

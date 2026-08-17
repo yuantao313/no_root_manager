@@ -9,6 +9,9 @@
 import secrets
 from datetime import timedelta
 
+from django.contrib.auth.hashers import check_password, make_password
+from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from notifications.services import send_email
@@ -24,18 +27,26 @@ def generate_code() -> str:
     return f"{secrets.randbelow(1000000):06d}"
 
 
-def _issue_code(email, purpose, user=None) -> str:
+@transaction.atomic
+def _issue_code(email, purpose, user=None) -> tuple[str, EmailVerification]:
     """作废同场景旧验证码并签发新验证码。"""
     code = generate_code()
     EmailVerification.objects.filter(email=email, purpose=purpose, user=user).update(used=True)
-    EmailVerification.objects.create(
+    record = EmailVerification.objects.create(
         email=email,
-        code=code,
+        code=make_password(code),
         purpose=purpose,
         user=user,
         expires_at=timezone.now() + timedelta(minutes=CODE_LIFETIME_MINUTES),
     )
-    return code
+    return code, record
+
+
+def _invalidate_if_send_failed(record, sent: bool) -> bool:
+    """发送失败时立即作废无法送达的验证码，避免留下可猜测的有效记录。"""
+    if not sent:
+        EmailVerification.objects.filter(pk=record.pk).update(used=True)
+    return sent
 
 
 def send_user_email_code(email, user) -> bool:
@@ -43,12 +54,13 @@ def send_user_email_code(email, user) -> bool:
 
     返回是否发送成功；发送前会使同邮箱+同用途的旧验证码全部作废。
     """
-    code = _issue_code(email, EmailVerification.PURPOSE_USER_EMAIL, user)
-    return send_email(
+    code, record = _issue_code(email, EmailVerification.PURPOSE_USER_EMAIL, user)
+    sent = send_email(
         "NRM 邮箱验证码",
         f"您的邮箱验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效，请勿泄露）。",
         [email],
     )
+    return _invalidate_if_send_failed(record, sent)
 
 
 def send_smtp_code(email, send_fn) -> bool:
@@ -57,12 +69,13 @@ def send_smtp_code(email, send_fn) -> bool:
     send_fn(subject, body, to_list)：使用"待验证的 SMTP 配置"发送，
     从而在配置写入数据库前即可确认可用性。
     """
-    code = _issue_code(email, EmailVerification.PURPOSE_SMTP_CONFIG)
-    return send_fn(
+    code, record = _issue_code(email, EmailVerification.PURPOSE_SMTP_CONFIG)
+    sent = send_fn(
         "NRM SMTP 配置验证",
         f"您的验证码为：{code}（{CODE_LIFETIME_MINUTES} 分钟内有效）。收到本邮件说明当前 SMTP 配置可以正常发信。",
         [email],
     )
+    return _invalidate_if_send_failed(record, sent)
 
 
 def verify_code(email, code, purpose, user=None, consume=True) -> tuple[bool, str]:
@@ -86,12 +99,12 @@ def verify_code(email, code, purpose, user=None, consume=True) -> tuple[bool, st
         rec.used = True
         rec.save(update_fields=["used"])
         return False, "验证码已过期，请重新获取。"
-    if rec.code != code:
-        rec.attempts += 1
-        rec.save(update_fields=["attempts"])
+    if not check_password(code, rec.code):
+        EmailVerification.objects.filter(pk=rec.pk, attempts__lt=MAX_ATTEMPTS).update(attempts=F("attempts") + 1)
         return False, "验证码错误，请重新输入。"
     # 校验通过：仅 consume=True 时标记已使用
     if consume:
-        rec.used = True
-        rec.save(update_fields=["used"])
+        consumed = EmailVerification.objects.filter(pk=rec.pk, used=False).update(used=True)
+        if not consumed:
+            return False, "该验证码已使用，请重新获取。"
     return True, ""

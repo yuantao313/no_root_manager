@@ -36,7 +36,8 @@ def _load(env_extra, cwd=None):
         "print(json.dumps({"
         "'MODE': s.MODE, 'DEBUG': s.DEBUG, 'ALLOWED_HOSTS': s.ALLOWED_HOSTS, "
         "'CSRF_TRUSTED_ORIGINS': s.CSRF_TRUSTED_ORIGINS, 'LOG_LEVEL': s.LOG_LEVEL, "
-        "'GITCODE_CALLBACK_BASE_URL': s.GITCODE_CALLBACK_BASE_URL}))\n"
+        "'GITCODE_CALLBACK_BASE_URL': s.GITCODE_CALLBACK_BASE_URL, "
+        "'DB_NAME': str(s.DATABASES['default']['NAME'])}))\n"
     )
     return subprocess.run(
         [sys.executable, "-c", code],
@@ -53,12 +54,12 @@ def _loads(proc):
 
 
 def test_dev_mode_default_loads_dotenv():
-    # 默认 NRM_ENV=dev -> 开发模式，加载 .env，放行域名 + 详细日志
+    # 默认 NRM_ENV=dev -> 开发模式，加载 .env，仅信任本机 + 详细日志
     cfg = _loads(_load({}))
     assert cfg["MODE"] == "dev"
     assert cfg["DEBUG"] is True
-    assert cfg["ALLOWED_HOSTS"] == ["*"]
-    assert set(cfg["CSRF_TRUSTED_ORIGINS"]) >= {"http://*", "https://*"}
+    assert cfg["ALLOWED_HOSTS"] == ["localhost", "127.0.0.1", "[::1]"]
+    assert cfg["CSRF_TRUSTED_ORIGINS"] == []
     assert cfg["LOG_LEVEL"] == "DEBUG"
     # 可选回调地址没有硬编码默认值。
     assert cfg["GITCODE_CALLBACK_BASE_URL"] == ""
@@ -70,12 +71,31 @@ def test_callback_url_read_from_env():
     assert cfg["GITCODE_CALLBACK_BASE_URL"] == "http://env.example.com:9000"
 
 
+def test_database_path_read_from_env():
+    cfg = _loads(_load({"NRM_DB_PATH": "/tmp/nrm-settings-test.sqlite3"}))
+    assert cfg["DB_NAME"] == "/tmp/nrm-settings-test.sqlite3"
+
+
 def test_dev_mode_explicit():
     cfg = _loads(_load({"NRM_ENV": "dev"}))
     assert cfg["MODE"] == "dev"
     assert cfg["DEBUG"] is True
-    assert cfg["ALLOWED_HOSTS"] == ["*"]
+    assert cfg["ALLOWED_HOSTS"] == ["localhost", "127.0.0.1", "[::1]"]
     assert cfg["LOG_LEVEL"] == "DEBUG"
+
+
+def test_dev_mode_can_explicitly_allow_lan_host_and_origin():
+    cfg = _loads(
+        _load(
+            {
+                "NRM_ENV": "dev",
+                "NRM_ALLOWED_HOSTS": "192.168.1.20,devbox.local",
+                "NRM_CSRF_TRUSTED_ORIGINS": "http://192.168.1.20:8000",
+            }
+        )
+    )
+    assert cfg["ALLOWED_HOSTS"] == ["192.168.1.20", "devbox.local"]
+    assert cfg["CSRF_TRUSTED_ORIGINS"] == ["http://192.168.1.20:8000"]
 
 
 def test_deploy_mode_loads_dotenv_prod():

@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-**NRM（No Root Manager）**：面向中小团队（几台服务器、几十到几百用户）的目标机器用户申请与接管管理系统。核心价值：替代"全员 root 登录"的混乱协作，提供**申请 → 审批 → 机器自动开通**的闭环，并强制普通用户 + 资源限额 + 权限审计。
+**NRM（No Root Manager）**：面向中小团队（几台服务器、几十到几百用户）的目标机器用户申请与接管管理系统。核心价值：替代“全员 root 登录”，提供**申请 → 审批 → SSH 开通/接管 → 结果记录**的闭环。
 
 - 技术栈：Python 3.13 / Django 6.1 / SQLite / uv
 - 前端：Bootstrap 3.4（CDN）+ crispy-forms；自研 CSS/JS 在 `static/css/app.css`、`static/js/app.js`
@@ -70,18 +70,19 @@ static/            # 自研 css/js（app.css / app.js）
 - **GitCode OAuth**（django-allauth）：配置存 **SocialApp**（系统设置页维护，含回调地址展示）；首次登录必须走 signup 确认页（注册新账号或绑定已有账号）；业务门禁：
   - GitCode 用户未设姓名不能提交申请
   - 无本地密码用户解绑前必须先设置密码（`gitcode_unbind` 视图）
-- **邮箱验证码**：用户改邮箱、SMTP 配置写库前验证（10 分钟有效、错误 5 次作废；AJAX 预检 consume=False 不消耗，保存时真正消耗）
+- **邮箱验证码**：用户改邮箱、SMTP 配置写库前验证（哈希存储，10 分钟有效、错误 5 次作废；AJAX 预检 consume=False 不消耗，保存时真正消耗）
 
 ## 核心业务流
 
 ### 申请 → 审批 → 开通 → 撤回
 1. 登录用户提交申请：四种类型（**申请服务器账号 / 转移已有账号为受管用户 / 申请用户组 / 申请平台管理员**），填**申请理由**；身份/工号从账号自动带入
-2. 管理员审批通过 → `_bg_provision` 后台在机器开通：
+2. 管理员审批通过 → 请求内可靠执行机器操作（没有持久任务队列，不把关键开通交给 daemon 线程）：
    - `provision_user`：建用户 + 随机密码 + `chage -d 0` 强制首改密
    - 账号归属写入 `MachineUserBinding`
    - 公告：写入目标机 motd（`/etc/motd.d/nrm_notifications`）+ 系统首页展示
    - 平台管理员类型：直接授予 sudo（不建账号，无审计表）
-3. 申请人可**撤回**待审批申请（状态 withdrawn）
+3. 开通失败写入 `provision_note`，有审批权的管理员可在详情页重试
+4. 申请人可**撤回**待审批申请（状态 withdrawn）
 
 ### 系统公告（markdown）
 - 公告为**单例**：`content` 存 markdown 源码（`# 标题 / **加粗** / *斜体* / {red}颜色{/red} / [链接](url)`）
@@ -115,11 +116,11 @@ static/            # 自研 css/js（app.css / app.js）
 ## 开发工作流
 
 ```bash
-uv sync                       # 安装依赖
+uv sync --locked              # 按锁文件安装依赖
 uv run python manage.py migrate
 uv run pytest                 # 测试（必须全部通过）
 uv run ruff check .           # 静态检查（import 排序等，--fix 自动修）
-uv run ruff format .          # 代码格式化
+uv run ruff format --check .  # 格式检查
 uv run python manage.py check
 uv run python manage.py makemigrations --check --dry-run   # 迁移一致
 uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）

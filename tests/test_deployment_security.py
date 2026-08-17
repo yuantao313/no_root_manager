@@ -79,5 +79,5 @@ def test_normal_user_cannot_trigger_device_ssh_probe(client):
     client.force_login(user)
     with patch("servers.views.get_device_info") as probe:
         response = client.get(reverse("servers:device_api", args=[server.pk]))
-    assert response.status_code == 302
+    assert response.status_code == 403
     probe.assert_not_called()

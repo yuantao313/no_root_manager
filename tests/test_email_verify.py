@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password, make_password
 from django.utils import timezone
 
 from accounts.email_verify import MAX_ATTEMPTS, send_user_email_code, verify_code
@@ -21,7 +22,7 @@ def user():
 def _record(user, **overrides):
     values = {
         "email": "user@example.com",
-        "code": "123456",
+        "code": make_password("123456"),
         "purpose": EmailVerification.PURPOSE_USER_EMAIL,
         "user": user,
         "expires_at": timezone.now() + timedelta(minutes=10),
@@ -39,13 +40,15 @@ def test_new_code_invalidates_previous_code(user):
         send_user_email_code("user@example.com", user)
 
     old, current = EmailVerification.objects.order_by("created_at")
-    assert (old.code, old.used) == ("111111", True)
-    assert (current.code, current.used) == ("222222", False)
+    assert old.used is True
+    assert current.used is False
+    assert old.code != "111111" and check_password("111111", old.code)
+    assert current.code != "222222" and check_password("222222", current.code)
 
 
 def test_preview_then_consume_code(user):
     record = _record(user)
-    args = (record.email, record.code, record.purpose)
+    args = (record.email, "123456", record.purpose)
 
     assert verify_code(*args, user=user, consume=False) == (True, "")
     record.refresh_from_db()
@@ -66,7 +69,7 @@ def test_wrong_code_reaches_attempt_limit(user):
 
 def test_expired_code_is_invalidated(user):
     record = _record(user, expires_at=timezone.now() - timedelta(seconds=1))
-    ok, message = verify_code(record.email, record.code, record.purpose, user=user)
+    ok, message = verify_code(record.email, "123456", record.purpose, user=user)
 
     record.refresh_from_db()
     assert ok is False and "已过期" in message
@@ -76,3 +79,12 @@ def test_expired_code_is_invalidated(user):
 def test_missing_code_uses_single_query(user, django_assert_num_queries):
     with django_assert_num_queries(1):
         assert verify_code("none@example.com", "123456", EmailVerification.PURPOSE_USER_EMAIL, user=user)[0] is False
+
+
+def test_failed_delivery_invalidates_issued_code(user):
+    with patch("accounts.email_verify.send_email", return_value=False):
+        assert send_user_email_code("user@example.com", user) is False
+
+    record = EmailVerification.objects.get()
+    assert record.used is True
+    assert "验证码" not in str(record)

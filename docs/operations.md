@@ -1,65 +1,52 @@
 # 运维手册
 
-## 定时任务（cron）
-
-### 撤销当日到期的 sudo 权限
-
-```cron
-0 1 * * * cd /path/to/project && uv run python manage.py expire_sudo
-```
-
-说明：sudo 申请"当天有效"，该命令将已过当日 23:59:59 的 SudoGrant
-标记为失效并撤销机器上的 sudo/wheel 组成员资格。
-
-### 到期账号提醒（可选）
-
-账号到期由机器侧 `usermod -e` 控制（到期自动失效），如需到期前提醒，
-可扩展管理命令或接入外部 cron 扫描 `valid_until`。
-
-## 目标机器侧规范
-
-### 接管用户
-
-所有受管用户统一加入 `nrm_managed` 组（系统自动创建该组）：
+## 日常检查
 
 ```bash
-getent group nrm_managed        # 查看成员
+NRM_ENV=prod uv run python manage.py check --deploy
+uv run python manage.py showmigrations
 ```
 
-### 删除用户（管理员在机器侧手动操作）
+同时检查应用日志中的 `SSH`、`开通异常`、`Webhook 推送失败` 和 `邮件发送失败`。通知失败不会回滚工单；SSH 失败会写入工单的“开通结果”。
+
+## 开通失败恢复
+
+1. 在工单详情读取失败原因。
+2. 到服务器详情测试连接，核对凭据、sudo 免密权限和 SSH 主机指纹。
+3. 修复目标机后，在工单详情点击“重试开通”。
+4. 若目标机操作已经部分完成，脚本会复用已有用户并补齐受管组；仍应人工核对目标机状态。
+
+## 目标机要求
+
+- 管理账号为 root，或具备 `sudo -n` 免密提权能力。
+- SSH 主机指纹必须通过可信渠道核验后录入。
+- 初始化操作会创建 `nrm_managed` 组和 `/etc/motd.d` 相关目录。
+- NRM 不负责操作系统补丁、监控、资源配额或账号自动到期。
+
+## SQLite 备份与恢复
+
+不要在服务写入期间直接复制数据库文件。推荐停服务后复制，或使用 SQLite 在线备份命令：
 
 ```bash
-sudo userdel -r <username>                      # 删除用户及 home
-sudo gpasswd -d <username> nrm_managed          # 若仍在组中则移出
+mkdir -p backups
+sqlite3 db.sqlite3 ".backup 'backups/nrm.sqlite3'"
 ```
 
-## 邮件配置验证
+同时备份生产环境配置中的 `NRM_SECRET_KEY`。该密钥用于解密凭据和通知秘密；丢失或随意轮换后，历史密文无法恢复。
 
-1. 后台新增 `EmailConfig` 并勾选启用
-2. 提交一条测试申请，观察管理员是否收到邮件
-3. 若未收到：查看日志（发送失败会记录 `邮件发送失败`），检查 SMTP 端口/认证/TLS
+恢复前停止服务，备份当前数据库，再替换数据库文件并执行：
+
+```bash
+uv run python manage.py migrate
+uv run python manage.py check
+```
 
 ## 常见问题
 
-### 开通失败："创建用户失败：连接失败"
-
-- 服务器凭据不可达，或凭据用户无 sudo 免密权限
-- 检查：服务器详情页"测试连接"；确认管理用户在 sudo 组且有 NOPASSWD
-
-### 迁移目录失败："目标目录已存在且非空"
-
-- 用户已存在同名 home 且非空，系统拒绝覆盖
-- 人工确认后手动处理，或清空目标后重新申请迁移
-
-### 用户无法登录机器
-
-- 首次登录需修改随机密码（`chage -d 0` 强制）
-- 密码丢失无法重发（不落库），需管理员在机器侧重置：`sudo passwd <username>`
-
-## 备份
-
-```bash
-cp db.sqlite3 backups/nrm-$(date +%F).sqlite3
-```
-
-数据库包含服务器/凭据（加密）/申请/审计记录，建议每日备份。
+| 现象 | 排查 |
+|------|------|
+| `database is locked` | 确认只运行一个 Gunicorn worker；缩短外部脚本之外的数据库事务；检查磁盘与备份任务 |
+| SSH 指纹不匹配 | 停止操作，通过可信渠道确认目标机是否更换；不要直接接受新指纹 |
+| `InvalidSignature` | 恢复原 `NRM_SECRET_KEY`，或对加密字段执行明确的数据迁移 |
+| 465 端口邮件断开 | 465 使用 SSL；587/25 使用 STARTTLS |
+| 登录被锁定 | 等待 15 分钟冷却；紧急情况下由运维人员使用 axes 管理命令处理 |
