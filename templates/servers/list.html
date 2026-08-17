@@ -26,7 +26,7 @@
                 <td>{{ server.name }}</td>
                 <td>{{ server.host }}</td>
                 <td>{{ server.port }}</td>
-                <td>{% if server.credential %}<a href="{% url 'credentials:detail' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>{% if server.credential %}<a href="{% url 'admin:credentials_credential_change' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>{{ server.updated_at|date:"Y-m-d H:i" }}</td>
                 <td>
                     <a href="{% url 'servers:detail' server.pk %}" class="btn btn-default btn-xs">查看</a>

@@ -32,6 +32,5 @@ urlpatterns = [
     path("select2/", include("django_select2.urls")),
     path("applications/", include("applications.urls")),
     path("servers/", include("servers.urls")),
-    path("credentials/", include("credentials.urls")),
     path("notifications/", include("notifications.urls")),
 ]

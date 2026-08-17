@@ -1,6 +1,8 @@
 """凭据模型测试：敏感字段加密落库、解密读取。"""
 
 import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from credentials.models import Credential
 
@@ -38,3 +40,17 @@ class TestCredentialEncryption:
     def test_str(self):
         cred = Credential.objects.create(name="生产", username="admin")
         assert "生产" in str(cred)
+
+    def test_admin_edit_keeps_write_only_secrets(self, client):
+        admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")
+        cred = Credential.objects.create(name="旧名称", username="root", password="password", private_key="key")
+        client.force_login(admin)
+
+        response = client.post(
+            reverse("admin:credentials_credential_change", args=[cred.pk]),
+            {"name": "新名称", "username": "root", "password": "", "private_key": "", "remark": ""},
+        )
+
+        assert response.status_code == 302
+        cred.refresh_from_db()
+        assert (cred.name, cred.password, cred.private_key) == ("新名称", "password", "key")

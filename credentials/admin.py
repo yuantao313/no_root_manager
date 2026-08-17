@@ -1,10 +1,12 @@
 from django.contrib import admin
 
+from .forms import CredentialForm
 from .models import Credential
 
 
 @admin.register(Credential)
 class CredentialAdmin(admin.ModelAdmin):
+    form = CredentialForm
     list_display = ("name", "username", "has_password", "has_private_key", "updated_at")
     list_filter = ("username",)
     search_fields = ("name", "username", "remark")
@@ -13,6 +15,8 @@ class CredentialAdmin(admin.ModelAdmin):
         "name",
         "username",
         "remark",
+        "password",
+        "private_key",
         "has_password",
         "has_private_key",
         "created_at",

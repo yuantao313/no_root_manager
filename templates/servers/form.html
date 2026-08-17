@@ -17,7 +17,7 @@
                 </p>
                 {% endif %}
             {% endfor %}
-            <p class="text-muted"><a href="{% url 'credentials:create' %}">还没有凭据？去新建一个管理凭据</a></p>
+            <p class="text-muted"><a href="{% url 'admin:credentials_credential_add' %}">还没有凭据？去 Django Admin 新建</a></p>
             <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
             {% if editing %}
             <button type="submit" name="action" value="test" class="btn btn-success">保存并测试连接</button>

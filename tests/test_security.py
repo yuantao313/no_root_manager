@@ -128,15 +128,15 @@ class TestCredentialVisibility:
     def test_normal_admin_cannot_see(self, client, setup):
         # 凭据为敏感全局资源：普通管理员完全不可访问（列表/详情均拒绝）
         client.force_login(setup["st"])
-        assert client.get(reverse("credentials:list")).status_code == 302
-        assert client.get(reverse("credentials:detail", args=[setup["c1"].pk])).status_code == 302
-        assert client.get(reverse("credentials:detail", args=[setup["c2"].pk])).status_code == 302
+        assert client.get(reverse("admin:credentials_credential_changelist")).status_code == 403
+        assert client.get(reverse("admin:credentials_credential_change", args=[setup["c1"].pk])).status_code == 403
+        assert client.get(reverse("admin:credentials_credential_change", args=[setup["c2"].pk])).status_code == 403
 
     def test_normal_admin_cannot_create(self, client, setup):
         client.force_login(setup["st"])
-        assert client.get(reverse("credentials:create")).status_code == 302
+        assert client.get(reverse("admin:credentials_credential_add")).status_code == 403
 
     def test_superuser_sees_all(self, client, setup):
         client.force_login(setup["su"])
-        html = client.get(reverse("credentials:list")).content.decode()
+        html = client.get(reverse("admin:credentials_credential_changelist")).content.decode()
         assert "c1" in html and "c2" in html

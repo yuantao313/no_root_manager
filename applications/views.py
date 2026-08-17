@@ -31,19 +31,14 @@ from .forms import ApplicationForm, ApplicationReviewForm
 from .models import Application
 
 
-def _bg_notify_new_application(application_pk):
-    """后台任务：新申请通知（webhook + 邮件），按 pk 重新取数。"""
+def _bg_notify(application_pk, reviewed=False):
+    """后台发送新申请或审批结果通知，按 pk 重新取数。"""
     application = Application.objects.get(pk=application_pk)
-    # 先推 webhook（5 秒超时兜底），再发邮件（SMTP 不可达时最多等 10 秒）
-    webhook_new_application(application)
-    notify_new_application(application)
-
-
-def _bg_notify_review_result(application_pk):
-    """后台任务：审批结果通知（webhook + 邮件），按 pk 重新取数。"""
-    application = Application.objects.get(pk=application_pk)
-    notify_review_result(application)
-    webhook_review_result(application)
+    handlers = (
+        (notify_review_result, webhook_review_result) if reviewed else (webhook_new_application, notify_new_application)
+    )
+    for handler in handlers:
+        handler(application)
 
 
 def _bg_provision(application_pk):
@@ -149,6 +144,17 @@ def _bg_provision(application_pk):
         # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
         send_provision_credentials(application, password)
     application.save()
+
+
+def _get_visible_application(user, pk):
+    """按角色收窄工单查询后取详情，供查看与重发邮件复用。"""
+    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
+    if not user.is_superuser:
+        if user.is_staff:
+            qs = qs.filter(Q(applicant=user) | Q(target_server__in=Server.visible_to(user))).distinct()
+        else:
+            qs = qs.filter(applicant=user)
+    return get_object_or_404(qs, pk=pk)
 
 
 @login_required
@@ -272,7 +278,7 @@ def my_applications(request):
                 return redirect("applications:my")
             messages.success(request, "申请已提交，等待管理员审批。")
             # 通知（webhook+邮件）后台执行，不阻塞提交请求
-            run_in_background(_bg_notify_new_application, application.pk)
+            run_in_background(_bg_notify, application.pk)
             return redirect("applications:my")
 
     return render(
@@ -298,17 +304,7 @@ def my_applications(request):
 def application_detail(request, pk):
     """申请详情：申请人本人可查看自己的工单；
     管理员（staff）按既有逻辑（超管全部，普通管理员仅绑定服务器的申请）。"""
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
-    if request.user.is_superuser:
-        application = get_object_or_404(qs, pk=pk)
-    elif request.user.is_staff:
-        application = get_object_or_404(
-            qs.filter(Q(applicant=request.user) | Q(target_server__in=Server.visible_to(request.user))).distinct(),
-            pk=pk,
-        )
-    else:
-        # 普通用户：只能查看自己的工单（他人工单 404，防止越权）
-        application = get_object_or_404(qs, pk=pk, applicant=request.user)
+    application = _get_visible_application(request.user, pk)
     can_view_initial_password = bool(
         application.initial_password
         and application.status == Application.Status.APPROVED
@@ -351,17 +347,7 @@ def application_resend_mail(request, pk):
     邮件正文由 send_provision_credentials 生成（含用户名/初始密码/强制改密提示），
     重发复用工单中加密存储的 initial_password，无需重新开通。
     """
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer")
-    if request.user.is_superuser:
-        application = get_object_or_404(qs, pk=pk)
-    elif request.user.is_staff:
-        application = get_object_or_404(
-            qs.filter(Q(applicant=request.user) | Q(target_server__in=Server.visible_to(request.user))).distinct(),
-            pk=pk,
-        )
-    else:
-        # 普通用户：只能重发自己的工单（他人工单 404，防止越权）
-        application = get_object_or_404(qs, pk=pk, applicant=request.user)
+    application = _get_visible_application(request.user, pk)
     if not (request.user.is_superuser or application.applicant_id == request.user.id):
         raise Http404
     if application.status != Application.Status.APPROVED or not application.provisioned_at:
@@ -428,5 +414,5 @@ def application_review(request, pk, action):
     else:
         messages.success(request, f"已驳回申请：{application.description[:30] or application.username}")
     # 审批结果通知（webhook+邮件）后台执行，不阻塞审批请求
-    run_in_background(_bg_notify_review_result, application.pk)
+    run_in_background(_bg_notify, application.pk, True)
     return redirect("applications:detail", pk=pk)

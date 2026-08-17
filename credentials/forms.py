@@ -20,6 +20,17 @@ class CredentialForm(forms.ModelForm):
             "remark": forms.Textarea(attrs={"rows": 3}),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._stored_password = self.instance.password if self.instance.pk else ""
+        self._stored_private_key = self.instance.private_key if self.instance.pk else ""
+
+    def clean_password(self):
+        return self.cleaned_data.get("password") or self._stored_password
+
+    def clean_private_key(self):
+        return self.cleaned_data.get("private_key") or self._stored_private_key
+
     def clean(self):
         cleaned = super().clean()
         if not cleaned.get("password") and not cleaned.get("private_key"):

@@ -154,7 +154,7 @@
                     <p><label>平台</label>
                         <select name="name" class="form-control">
                             {% for value, label in webhook_platform_choices %}
-                            <option value="{{ value }}"{% if hooks.first.name == value %} selected{% endif %}>{{ label }}</option>
+                            <option value="{{ value }}"{% if hook.name == value %} selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
                     </p>
@@ -204,7 +204,7 @@
                     <textarea id="announcement-content" name="content" class="form-control" rows="8"
                               style="font-family:Consolas,Menlo,monospace;"
                               placeholder="输入公告内容（markdown 子集）…">{{ announcement_initial }}</textarea>
-                    <p style="margin-top:8px;"><label><input type="checkbox" name="enabled" {% if not announcements or announcements.first.enabled %}checked{% endif %}> 启用</label></p>
+                    <p style="margin-top:8px;"><label><input type="checkbox" name="enabled" {% if not announcement or announcement.enabled %}checked{% endif %}> 启用</label></p>
                     <button type="submit" name="add_announcement" class="btn btn-primary">保存公告</button>
                 </form>
             </div>

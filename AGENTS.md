@@ -36,7 +36,7 @@ servers/           # 目标机器管理
   scripts/         # 目标机脚本（SFTP 上传 root 执行，见下）
   ssh.py           # paramiko 连接与命令执行（run_script 上传执行）
   fields.py        # EncryptedTextField（Fernet 加密字段）
-credentials/       # 机器凭据（密码/私钥，加密存储）
+credentials/       # 机器凭据（密码/私钥，加密存储；管理界面复用 Django admin）
 notifications/     # 通知（SMTP 邮件 + Webhook）
   services.py      # 发送逻辑（send_email / send_email_with_config）
 tests/             # pytest 测试（test_*.py）
@@ -60,7 +60,7 @@ static/            # 自研 css/js（app.css / app.js）
 | 普通管理员 | `is_staff` 且非 superuser | **仅审批**绑定服务器的申请（`Server.visible_to` 过滤） |
 | 普通用户 | 登录用户 | 提交/撤回自己的申请、查看进度 |
 
-- 服务器、凭据的所有视图均为 `superuser_required`（`config/decorators.py`）
+- 服务器视图均为 `superuser_required`；凭据管理复用 Django admin，仅超级管理员拥有模型权限
 - 审批视图（申请列表/详情/审批）对普通管理员按 `ServerAdminBinding` 过滤，无权限 404
 - **不自定义用户模型**：用户管理复用 Django admin 的 `is_staff`/`is_superuser`；工号等扩展信息存 `UserProfile`
 

@@ -116,6 +116,34 @@ class TestSiteBaseUrl:
         assert "example.com" not in link
 
 
+class TestGlobalWebhook:
+    def test_save_reuses_form_and_preserves_secret_and_switch(self, client):
+        client.force_login(_superuser())
+        hook = WebhookConfig.objects.create(
+            name="feishu", url="https://example.com/old", secret="keep-me", enabled=False
+        )
+
+        resp = client.post(
+            reverse("accounts:settings"),
+            {"add_webhook": "1", "name": "generic", "url": "", "secret": ""},
+        )
+
+        assert resp.status_code == 302
+        hook.refresh_from_db()
+        assert hook.name == "generic"
+        assert hook.url == "https://example.com/old"
+        assert hook.secret == "keep-me"
+        assert hook.enabled is False
+
+    def test_save_rejects_unsafe_url(self, client):
+        client.force_login(_superuser())
+        client.post(
+            reverse("accounts:settings"),
+            {"add_webhook": "1", "name": "generic", "url": "https://127.0.0.1/hook"},
+        )
+        assert not WebhookConfig.objects.exists()
+
+
 class TestSettingsPageSwitches:
     """设置页各 tab 内渲染开关，并按下开关状态禁用配置区。"""
 

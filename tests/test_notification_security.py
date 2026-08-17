@@ -262,7 +262,7 @@ def test_invalid_credential_form_does_not_echo_submitted_secrets(client):
     admin = User.objects.create_superuser("credential-admin", "admin@example.com", "x12345!")
     client.force_login(admin)
     response = client.post(
-        reverse("credentials:create"),
+        reverse("admin:credentials_credential_add"),
         {
             "name": "",
             "username": "root",

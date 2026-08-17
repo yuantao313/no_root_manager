@@ -23,7 +23,7 @@
                     <th>管理凭据</th>
                     <td>
                         {% if server.credential %}
-                            <a href="{% url 'credentials:detail' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>
+                            <a href="{% url 'admin:credentials_credential_change' server.credential.pk %}">{{ server.credential.name }}（{{ server.credential.username }}）</a>
                         {% else %}
                             <span class="text-muted">未关联</span>
                         {% endif %}

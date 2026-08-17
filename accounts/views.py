@@ -15,6 +15,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
@@ -307,8 +308,6 @@ class GitCodeLoginView(LoginView):
 
 def _email_code_cooldown(request):
     """邮箱验证码剩余冷却秒数（60 秒窗口）。"""
-    from django.utils import timezone
-
     sent_at = request.session.get("email_code_sent_at")
     if not sent_at:
         return 0
@@ -319,8 +318,6 @@ def _email_code_cooldown(request):
 @require_POST
 def send_email_code_ajax(request):
     """AJAX 发送邮箱验证码（修改邮箱前置）：60 秒冷却 + JSON 返回，不刷新页面。"""
-    from django.utils import timezone
-
     email = (request.POST.get("email") or "").strip()
     # 60 秒冷却（session 时间戳）
     sent_at = request.session.get("email_code_sent_at")
@@ -354,6 +351,36 @@ def verify_email_code_ajax(request):
     code = (request.POST.get("code") or "").strip()
     ok, err = verify_code(email, code, EmailVerification.PURPOSE_USER_EMAIL, user=request.user, consume=False)
     return JsonResponse({"ok": ok, "error": err})
+
+
+def _save_webhook(form, hook, owner):
+    """用统一表单保存个人或全局 Webhook，空密钥保留原值。"""
+    previous_secret = hook.secret if hook else ""
+    previous_enabled = hook.enabled if hook else True
+    if not form.is_valid():
+        return None
+    hook = hook or WebhookConfig(owner=owner)
+    hook.name = form.cleaned_data["name"]
+    hook.url = form.cleaned_data["url"]
+    if form.cleaned_data.get("secret"):
+        hook.secret = form.cleaned_data["secret"]
+    else:
+        hook.secret = previous_secret
+    if owner is not None:
+        hook.enabled = form.cleaned_data["enabled"]
+    else:
+        hook.enabled = previous_enabled
+    hook.save()
+    return hook
+
+
+def _test_webhook(request, hook):
+    """测试表单中的 Webhook；留空字段回退到已保存配置。"""
+    url = request.POST.get("url", "").strip() or (hook.url if hook else "")
+    secret = request.POST.get("secret", "").strip() or (hook.secret if hook else "")
+    platform = request.POST.get("name", "").strip() or (hook.name if hook else "")
+    ok, msg = send_webhook_to(url, secret, platform=platform)
+    (messages.success if ok else messages.error)(request, f"Webhook 测试：{msg}")
 
 
 @login_required
@@ -403,27 +430,12 @@ def profile(request):
                 return redirect("accounts:profile")
         elif "add_webhook" in request.POST and request.user.is_staff:
             webhook_form = WebhookForm(request.POST, instance=my_hook)
-            if webhook_form.is_valid():
-                # 个人 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
-                hook = WebhookConfig.objects.filter(owner=request.user).first() or WebhookConfig(owner=request.user)
-                hook.name = webhook_form.cleaned_data["name"]
-                hook.url = webhook_form.cleaned_data["url"]
-                if webhook_form.cleaned_data.get("secret"):
-                    hook.secret = webhook_form.cleaned_data["secret"]
-                hook.enabled = webhook_form.cleaned_data["enabled"]
-                hook.save()
+            hook = _save_webhook(webhook_form, my_hook, request.user)
+            if hook:
                 messages.success(request, f"Webhook「{hook.name}」已保存。")
                 return redirect("accounts:profile")
         elif "test_webhook" in request.POST and request.user.is_staff:
-            # 测试个人 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
-            test_url = request.POST.get("url", "").strip() or (my_hook.url if my_hook else "")
-            test_secret = request.POST.get("secret", "").strip() or (my_hook.secret if my_hook else "")
-            test_platform = request.POST.get("name", "").strip() or (my_hook.name if my_hook else "")
-            ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
-            if ok:
-                messages.success(request, f"Webhook 测试：{msg}")
-            else:
-                messages.error(request, f"Webhook 测试：{msg}")
+            _test_webhook(request, my_hook)
             return redirect("accounts:profile")
 
     return render(
@@ -442,12 +454,11 @@ def profile(request):
 
 @superuser_required
 def settings(request):
-    """系统设置（仅超级管理员）：GitCode 配置/邮件/全局 Webhook/管理员-服务器绑定。"""
-    from django.utils import timezone
-
+    """系统设置（仅超级管理员）：GitCode、邮件、全局 Webhook 与公告。"""
     syscfg = SystemConfig.get_singleton()
     email_cfg = EmailConfig.objects.first()
-    hooks = WebhookConfig.objects.filter(owner__isnull=True)
+    hook = WebhookConfig.objects.filter(owner__isnull=True).first()
+    announcement = Announcement.objects.first()
 
     # 发码冷却：距上次发送 <60 秒则剩余秒数 >0（模板禁用按钮）
     sent_at = request.session.get("smtp_code_sent_at")
@@ -599,45 +610,20 @@ def settings(request):
             request.session.pop("smtp_verified", None)
             messages.success(request, "SMTP 配置已通过验证并保存。")
         elif "add_webhook" in request.POST:
-            name = request.POST.get("name", "").strip()
-            hook = WebhookConfig.objects.filter(owner__isnull=True).first() or WebhookConfig(owner=None)
-            url = request.POST.get("url", "").strip() or hook.url
-            if name and url:
-                try:
-                    url = validate_webhook_url(url)
-                except UnsafeWebhookURL as exc:
-                    messages.error(request, f"Webhook 配置无效：{exc}")
-                    return redirect("accounts:settings")
-                # 全局 Webhook 单例：有则更新，无则新建（save 内自动清理旧的）
-                hook.name = name
-                hook.url = url
-                if request.POST.get("secret", "").strip():
-                    hook.secret = request.POST.get("secret", "").strip()
-                # 启停由标题栏总开关维护；保存表单不应把现有 Hook 意外关闭。
-                if not hook.pk:
-                    hook.enabled = True
-                hook.save()
+            webhook_form = WebhookForm(request.POST, instance=hook)
+            if _save_webhook(webhook_form, hook, None):
                 messages.success(request, "全局 Webhook 已保存。")
             else:
-                messages.error(request, "Webhook 名称与 URL 必填。")
+                messages.error(request, next(iter(webhook_form.errors.values()))[0])
         elif "test_webhook" in request.POST:
-            # 测试全局 Webhook：直接对表单填写的 URL 推送测试事件（不保存）
-            hook = WebhookConfig.objects.filter(owner__isnull=True).first()
-            test_url = request.POST.get("url", "").strip() or (hook.url if hook else "")
-            test_secret = request.POST.get("secret", "").strip() or (hook.secret if hook else "")
-            test_platform = request.POST.get("name", "").strip() or (hook.name if hook else "")
-            ok, msg = send_webhook_to(test_url, test_secret, platform=test_platform)
-            if ok:
-                messages.success(request, f"Webhook 测试：{msg}")
-            else:
-                messages.error(request, f"Webhook 测试：{msg}")
+            _test_webhook(request, hook)
         elif "add_announcement" in request.POST:
             # 公告内容为 markdown 子集（# 标题 / **加粗** / *斜体* / {颜色} / [链接](url)），
             # 保存后由转换器分别渲染到首页公告栏（HTML）与服务器 motd（ANSI）
             content = request.POST.get("content", "").strip()
             if content:
                 # 公告单例：有则更新，无则新建（save 内自动清理其他记录）
-                ann = Announcement.objects.first() or Announcement()
+                ann = announcement or Announcement()
                 ann.content = content
                 ann.enabled = "enabled" in request.POST
                 ann.save()
@@ -654,19 +640,18 @@ def settings(request):
         {
             "syscfg": syscfg,
             "gitcode_app": SocialApp.objects.filter(provider="gitcode").first(),
-            "announcements": Announcement.objects.all(),
-            # 公告编辑器初始内容：markdown 源码（模板内直接 .first.content 会抛 AttributeError，故视图预处理）
-            "announcement_initial": (Announcement.objects.first().content if Announcement.objects.first() else ""),
+            "announcement": announcement,
+            "announcement_initial": announcement.content if announcement else "",
             # 固定回调地址（与 provider 登录实际使用的 redirect_uri 一致，见 GitCodeOAuth2Adapter.get_callback_url）
             "gitcode_callback_url": f"{syscfg.get_site_base_url()}{reverse('gitcode_callback')}",
             "email_cfg": email_cfg,
-            "hooks": hooks,
+            "hook": hook,
             "cooldown_remaining": cooldown_remaining,
             "smtp_verified": smtp_verified,
             # 顶部功能开关状态（切换即时生效）
             "switch_gitcode": syscfg.gitcode_enabled,
             "switch_email": bool(email_cfg and email_cfg.enabled),
-            "switch_webhook": bool(hooks and hooks.first().enabled),
+            "switch_webhook": bool(hook and hook.enabled),
             # Webhook 平台选项（表单下拉）
             "webhook_platform_choices": WebhookConfig.PLATFORM_CHOICES,
         },
