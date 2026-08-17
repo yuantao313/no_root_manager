@@ -60,7 +60,6 @@ def test_full_flow_apply_approve_provision_withdraw(client, env):
             "target_server": str(env["server"].pk),
             "title": "E2E 开通",
             "description": "E2E 测试申请",
-            "applied_groups": [],
         },
     )
     app = Application.objects.filter(applicant=env["applicant"]).first()

@@ -35,7 +35,7 @@ dl dd { margin: 4px 0 0; }
 .announcement-box p { margin: 4px 0; font-size: 14px; }
 .announcement-box a { text-decoration: underline; }
 
-/* 详情页信息表格统一风格（机器信息 / 设备信息 / NPU 卡列表）：
+/* 详情页信息表格统一风格（机器信息 / 设备信息）：
    同一套字号/间距/表头，两列 key-value 表标题列固定宽 */
 .info-table { margin-bottom: 0; font-size: 14px; }
 .info-table > tbody > tr > th:first-child { width: 120px; }

@@ -185,31 +185,27 @@ class TestUserGroups:
         mock.assert_not_called()
 
     def test_sort_user_groups(self, ubuntu_server):
-        """组展示排序：排除用户本名组，nrm_managed 置顶、NPU 组其次、其他组排序。"""
+        """组展示排序：排除用户本名组，nrm_managed 置顶、其他组排序。"""
         from servers.management import sort_user_groups
 
-        npu_names = {"npu", "npu0", "npu1"}
-        priority, npu_in, others = sort_user_groups(
-            "alice", ["alice", "nrm_managed", "docker", "sudo", "npu1", "npu0"], npu_names
-        )
+        priority, others = sort_user_groups("alice", ["alice", "nrm_managed", "docker", "sudo"])
         assert priority == ["nrm_managed"]
-        assert npu_in == ["npu0", "npu1"]
         assert others == ["docker", "sudo"]
         # 本名组被排除
-        assert "alice" not in priority + npu_in + others
+        assert "alice" not in priority + others
 
     def test_sort_user_groups_empty(self, ubuntu_server):
         from servers.management import sort_user_groups
 
-        priority, npu_in, others = sort_user_groups("alice", [], set())
-        assert priority == [] and npu_in == [] and others == []
+        priority, others = sort_user_groups("alice", [])
+        assert priority == [] and others == []
 
     def test_sort_user_groups_nrm_only(self, ubuntu_server):
         from servers.management import sort_user_groups
 
-        priority, npu_in, others = sort_user_groups("alice", ["nrm_managed"], set())
+        priority, others = sort_user_groups("alice", ["nrm_managed"])
         assert priority == ["nrm_managed"]
-        assert npu_in == [] and others == []
+        assert others == []
 
     def test_add_user_group_uses_script(self, ubuntu_server):
         from servers.management import add_user_group
@@ -413,8 +409,6 @@ class TestUserGroups:
             resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
         html = resp.content.decode()
         assert "用户组" in html  # 列头
-        # 非 NPU 服务器不显示 NPU 卡组列
-        assert "NPU 卡组" not in html
         # nrm_managed 为标识组 label，不渲染成可切换按钮
         assert "nrm_managed" in html
         assert 'data-group="nrm_managed"' not in html

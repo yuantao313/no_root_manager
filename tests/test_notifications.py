@@ -197,13 +197,6 @@ class TestNotify:
         assert "状态：待审批" in text
         assert "工单链接" in text and f"applications/{application.pk}/" in text
 
-    def test_mail_body_omits_npu_for_plain_server(self, application):
-        """普通服务器：邮件正文不出现 NPU 卡组字段。"""
-        from notifications.services import _format_mail_details
-
-        text = _format_mail_details(application)
-        assert "NPU 卡组" not in text
-
     def test_email_settings_merged_single_tab(self):
         """设置页：SMTP 与邮件 Webhook 整合为单 tab，发送方式单选，保留总开关。"""
         from django.contrib.auth import get_user_model
@@ -303,39 +296,6 @@ class TestFeishuWebhook:
         assert "工号：t00967490" in text
         assert "审批链接" in text and "applications/15/" in text
         assert '"applicant_name"' not in text  # 不再直接展示原始 JSON
-
-    def test_feishu_text_shows_npu_groups(self):
-        """NPU 机器申请：飞书文本提示管理员用户申请的 NPU 卡组（过滤公共组 npu）。"""
-        import json as _json
-
-        from notifications.services import _build_webhook_body
-
-        body = _build_webhook_body(
-            "feishu",
-            "https://open.feishu.cn/open-apis/bot/v2/hook/abc",
-            "application.created",
-            {
-                "id": 16,
-                "applicant_name": "李四",
-                "username": "lisi",
-                "apply_type_display": "申请服务器账号",
-                "target_server": {"name": "NPU-910B3"},
-                "target_server_is_npu": True,
-                "applied_groups": "npu,npu0,npu1",
-                "status": "pending",
-            },
-        )
-        text = _json.loads(body)["content"]["text"]
-        assert "申请 NPU 卡组：npu0,npu1" in text
-        assert "申请 NPU 卡组：npu," not in text  # 公共组 npu 不展示
-
-    def test_application_payload_contains_npu_groups(self, application):
-        """webhook payload 包含 target_server_is_npu 与 applied_groups 字段。"""
-        from notifications.services import _application_payload
-
-        payload = _application_payload(application)
-        assert "target_server_is_npu" in payload
-        assert "applied_groups" in payload
 
     def test_non_feishu_platform_keeps_generic_format(self):
         import json as _json

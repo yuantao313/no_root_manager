@@ -63,7 +63,6 @@ export NRM_ENV=prod
 | `NRM_SECURE_HSTS_PRELOAD` | 部署可选 | 是否声明 HSTS preload；启用前需确认域名满足预加载要求 | `False` |
 | `NRM_TRUST_X_FORWARDED_PROTO` | 反向代理部署可选 | 仅当可信代理会覆盖 `X-Forwarded-Proto` 时启用 | `False` |
 | `NRM_GITCODE_CALLBACK_BASE_URL` | 全局 | GitCode OAuth 回调基准地址（无默认值，务必在 .env/.env.prod 中配置） | 空（由系统设置页的站点地址兜底） |
-| `NRM_SYNC_NPU` | 开发 | 设为 `1` 时开发模式也启动 NPU 状态同步（部署模式默认开启） | 关 |
 | `NRM_LOG_LEVEL` | 部署 | 日志级别（DEBUG/INFO/WARNING…） | `INFO` |
 | `NRM_LOG_FILE` | 部署可选 | 设置后追加滚动文件日志（10MB×5） | 无（仅控制台） |
 | `NRM_DB_PATH` | 全局 | 自定义 SQLite 路径 | 默认 `db.sqlite3` |

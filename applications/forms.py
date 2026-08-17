@@ -1,21 +1,9 @@
 from django import forms
 from django.core.validators import RegexValidator
-from django.urls import reverse
 
 from servers.models import Server
 
 from .models import Application
-
-
-class DynamicMultipleChoiceField(forms.MultipleChoiceField):
-    """选项由前端动态加载的多选框：choices 为空时不校验可用性，
-    合法性由业务层（clean_applied_groups）按所选服务器校验。
-    """
-
-    def valid_value(self, value):
-        if not self.choices:
-            return True  # 选项由前端动态加载，跳过 Django 可用性校验
-        return super().valid_value(value)
 
 
 class ApplicationForm(forms.ModelForm):
@@ -24,13 +12,6 @@ class ApplicationForm(forms.ModelForm):
         label="申请理由",
         required=True,
         widget=forms.Textarea(attrs={"rows": 5, "placeholder": "请说明申请理由，如需要使用哪些服务、用途等"}),
-    )
-    # NPU 卡组多选框：仅 NPU 服务器提供，选项由前端根据所选服务器动态填充（npu + npuN）
-    applied_groups = DynamicMultipleChoiceField(
-        required=False,
-        label="NPU 卡组（可选）",
-        help_text="NPU 服务器可选择授权使用的算力卡组",
-        widget=forms.CheckboxSelectMultiple(attrs={"class": "nrm-checkbox"}),
     )
     # 转移类型不枚举目标机账号，申请人只填写自己已知的用户名。
     transfer_username = forms.CharField(
@@ -57,13 +38,11 @@ class ApplicationForm(forms.ModelForm):
             "apply_type",
             "target_server",
             "description",
-            "applied_groups",
         ]
         labels = {
             "apply_type": "申请类型",
             "target_server": "目标服务器",
             "description": "申请理由",
-            "applied_groups": "NPU 卡组（可选）",
         }
 
     def __init__(self, *args, **kwargs):
@@ -72,29 +51,7 @@ class ApplicationForm(forms.ModelForm):
         self.fields["target_server"].queryset = Server.objects.all()
         self.fields["target_server"].required = True
         self.fields["target_server"].empty_label = "请选择目标服务器"
-        # 前端静态化：groups API 地址经 data-* 传给 app.js（JS 不写模板标签）
         self.fields["target_server"].widget.attrs["class"] = "form-control select2"
-        self.fields["target_server"].widget.attrs["data-groups-url"] = reverse("servers:groups_api", args=[0])
-        # 编辑回显：已有分组值作为初始选中项（前端 JS 会重建选项）
-        if self.instance and self.instance.applied_groups:
-            initial = [g.strip() for g in self.instance.applied_groups.split(",") if g.strip()]
-            self.fields["applied_groups"].initial = initial
-
-    def clean_applied_groups(self):
-        """校验勾选的分组：仅 NPU 服务器可选 NPU 卡组，普通服务器不可选分组。"""
-        groups = self.cleaned_data.get("applied_groups") or []
-        server = self.cleaned_data.get("target_server")
-        if not groups:
-            return ",".join([])
-        if server is None:
-            raise forms.ValidationError("请先选择目标服务器。")
-        if not server.is_npu:
-            raise forms.ValidationError("该服务器不支持分组选择（仅 NPU 服务器可选 NPU 卡组）。")
-        allowed = server.npu_groups_list()
-        invalid = [g for g in groups if g not in allowed]
-        if invalid:
-            raise forms.ValidationError(f"卡组 {', '.join(invalid)} 不属于所选服务器。")
-        return ",".join(groups)
 
     def clean(self):
         cleaned_data = super().clean()

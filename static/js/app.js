@@ -132,235 +132,36 @@
         startCooldown(parseInt(cooldownAttr, 10));
     }
 
-    /* ===== 申请页：类型条件显示 + NPU 卡组按钮组 ===== */
+    /* ===== 申请页：按申请类型显示对应字段 ===== */
     var serverSelect = document.querySelector('select[name="target_server"]');
     var applyTypeSelect = document.getElementById("id_apply_type");
-    var groupsUl = document.getElementById("id_applied_groups");
-    var npuField = document.getElementById("npu-field");
     var userGroupsField = document.getElementById("user-groups-field");
     var transferField = document.getElementById("transfer-field");
     var adminField = document.getElementById("admin-field");
 
     if (serverSelect) {
-        var groupsApiUrl = serverSelect.dataset.groupsUrl || "/servers/api/groups/";
-        // URL 模板带占位 pk=0（如 /servers/api/groups/0/），替换成真实 serverId
-        function apiUrl(tpl, serverId) {
-            return tpl.replace("/0/", "/" + serverId + "/");
-        }
-
-        // 按申请类型切换显示：
-        //   create  → NPU 卡组；transfer → 机器用户下拉；group → 用户组；admin → 提示文案（不选 NPU）
         function toggleTypeFields() {
             var t = applyTypeSelect && applyTypeSelect.value;
-            if (npuField) npuField.style.display = t === "create" ? "" : "none";
             if (userGroupsField) userGroupsField.style.display = t === "group" ? "" : "none";
             if (transferField) transferField.style.display = t === "transfer" ? "" : "none";
             if (adminField) adminField.style.display = t === "admin" ? "" : "none";
-            // 切回 create 时按当前服务器重新加载卡组按钮
-            if (t === "create" && groupsUl) loadGroups(serverSelect.value);
         }
-
-        var selected = [];
-        var npuCardCount = 0; // 当前服务器可选 NPU 卡组数（过滤公共组 npu 后），用于按需选择校验
-        // 渲染设备信息条（CPU/内存/硬盘），显示在目标服务器下方
-        function renderDeviceInfo(device) {
-            var strip = document.getElementById("device-info-strip");
-            if (!strip) return;
-            device = device || {};
-            var parts = [];
-            if (device.cpu) parts.push("CPU：" + escapeHtml(device.cpu));
-            if (device.memory) parts.push("内存：" + escapeHtml(device.memory));
-            if (device.disk) parts.push("硬盘：" + escapeHtml(device.disk));
-            if (parts.length) {
-                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + parts.join("　|　") + "</span>";
-                strip.style.display = "";
-            } else {
-                // 查询失败或空：显示提示而非静默隐藏（避免看起来像"没加载"）
-                var msg = (device && device.msg) ? device.msg : "设备信息获取失败";
-                strip.innerHTML = '<span class="text-muted" style="font-size:12px;">' + escapeHtml(msg) + "</span>";
-                strip.style.display = "";
-            }
-        }
-
-        // 设备信息加载中提示：fetch 前显示，renderDeviceInfo 会覆盖
-        function showDeviceLoading() {
-            var strip = document.getElementById("device-info-strip");
-            if (!strip) return;
-            strip.innerHTML = '<span class="text-muted" style="font-size:12px;">正在获取设备信息…</span>';
-            strip.style.display = "";
-        }
-
-        // 渲染卡组按钮：一行 4 个，选中变色（btn-primary），不渲染公共组 npu。
-        // NPU 卡按钮文案：<设备号> <型号> (<内存G>G)，型号/内存来自 device.npu（device_api）。
-        // 健康状态（npu-smi info 的 Health 列）：OK 不特殊显示；Warning 黄色字；
-        // Alarm 红色字；Critical 按钮整体变红（仍可选，仅提示卡可能异常）。
-        function renderGroups(groups, isNpu, device) {
-            var wrap = document.getElementById("npu-field");
-            if (!isNpu) { if (wrap) wrap.style.display = "none"; return; }
-            if (wrap) wrap.style.display = "";
-            // 公共组 npu 由后端授权时自动附带，前端不显示
-            var cards = groups.filter(function (g) { return g !== "npu"; });
-            npuCardCount = cards.length;
-            // 设备信息：NPU 卡按设备号匹配（npuN → 型号/内存/健康状态）
-            var npuInfo = {};
-            (device && device.npu || []).forEach(function (c) {
-                npuInfo["npu" + c.index] = c;
-            });
-            if (!cards.length) {
-                groupsUl.innerHTML = '<p class="text-muted" style="margin:4px 0;">该服务器无可用 NPU 卡组</p>';
-                return;
-            }
-            var html = '<div class="row">';
-            cards.forEach(function (g, i) {
-                var active = selected.indexOf(g) !== -1;
-                var info = npuInfo[g];
-                // 按钮文案：<设备号> <型号> <内存G>G（如 0 Ascend950PR 128G）
-                var label = info ? info.index + " " + info.soc_name + " " + info.mem_g + "G" : g;
-                var health = (info && info.health) || "";
-                var healthCls = "";   // 文字颜色（Warning/Alarm 时）
-                var critical = false; // Critical：按钮整体变红
-                var title = "卡组 " + g;
-                if (health === "Warning") { healthCls = "text-warning"; title += "（健康状态：Warning）"; }
-                else if (health === "Alarm") { healthCls = "text-danger"; title += "（健康状态：Alarm）"; }
-                else if (health === "Critical") { critical = true; title += "（健康状态：Critical，卡可能异常，请谨慎选择）"; }
-                // 选中时统一 btn-primary；Critical 卡未选中时为红色按钮
-                var btnCls = active ? " btn-primary" : (critical ? " btn-danger npu-card-critical" : " btn-default");
-                html += '<div class="col-xs-3" style="padding:2px;">' +
-                    '<button type="button" class="btn btn-block npu-card-btn' + btnCls +
-                    '" data-group="' + escapeHtml(g) + '" title="' + escapeHtml(title) + '" style="font-size:13px;padding:6px 0;font-weight:bold;">' +
-                    (healthCls ? '<span class="' + healthCls + '">' + escapeHtml(label) + "</span>" : escapeHtml(label)) + "</button></div>";
-            });
-            html += "</div>";
-            groupsUl.innerHTML = html;
-        }
-
-        // 按钮点击：切换选中态并变色（Critical 卡取消选中后恢复红色按钮）
-        groupsUl.addEventListener("click", function (e) {
-            var btn = e.target.closest ? e.target.closest(".npu-card-btn") : null;
-            if (!btn) return;
-            var g = btn.dataset.group;
-            var idx = selected.indexOf(g);
-            if (idx >= 0) {
-                selected.splice(idx, 1);
-                btn.classList.remove("btn-primary");
-                btn.classList.add(btn.classList.contains("npu-card-critical") ? "btn-danger" : "btn-default");
-            } else {
-                selected.push(g);
-                btn.classList.remove("btn-default", "btn-danger");
-                btn.classList.add("btn-primary");
-            }
-        });
-
-        // 设备信息条（CPU/内存/硬盘）由 groups_api 的 device 字段一次返回渲染，
-        // 不再单独请求 device_api（详情页仍用 device_api 异步填充）。
-
-        function loadGroups(serverId) {
-            if (!serverId) {
-                var wrap = document.getElementById("npu-field");
-                if (wrap) wrap.style.display = "none";
-                // 未选择服务器：隐藏设备信息条，不提示"获取信息失败"
-                var strip = document.getElementById("device-info-strip");
-                if (strip) strip.style.display = "none";
-                return;
-            }
-            // 加载中提示：fetch 期间先占位，拿到结果后由 renderDeviceInfo 覆盖
-            showDeviceLoading();
-            fetch(apiUrl(groupsApiUrl, serverId))
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    var device = data.device || {};
-                    var groups = data.extra_groups || [];
-                    var isNpu = !!data.is_npu;
-                    // 设备信息条（CPU/内存/硬盘）：所有服务器都显示
-                    renderDeviceInfo(device);
-                    // NPU 卡按钮：设备号+型号+内存G 一次渲染
-                    renderGroups(groups, isNpu, device);
-                    // 非 NPU 服务器：隐藏整个卡组区（含 label）
-                    if (!data.is_npu) {
-                        var wrap = document.getElementById("npu-field");
-                        if (wrap) wrap.style.display = "none";
-                    }
-                })
-                .catch(function () {
-                    var wrap = document.getElementById("npu-field");
-                    if (wrap) wrap.style.display = "none";
-                    renderDeviceInfo(null);
-                });
-        }
-        serverSelect.addEventListener("change", function () {
-            selected = [];
-            loadGroups(this.value);
-        });
         if (applyTypeSelect) applyTypeSelect.addEventListener("change", toggleTypeFields);
         toggleTypeFields();
-        loadGroups(serverSelect.value);
 
-        // 服务器下拉 select2 初始化（可搜索）。
-        // 注意：select2 隐藏原生 select 后不再触发原生 change 事件，
-        // 必须额外监听 select2:select 才能联动加载 NPU 卡组。
         if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
             window.jQuery(serverSelect).select2({ width: "100%" });
-            window.jQuery(serverSelect).on("select2:select", function () {
-                var val = window.jQuery(serverSelect).val();
-                selected = [];
-                loadGroups(val);
-            });
         }
 
-        // 提交前：将选中的卡组写入隐藏 input（name=applied_groups）
-        // npu 公共组由后端授权时自动附带，前端不写入（不暴露"公共组"概念）
         var appForm = document.getElementById("application-form");
         if (appForm) {
             appForm.addEventListener("submit", function (e) {
-                // 未选择目标服务器：禁止提交（select2 隐藏原生 select 后 value 仍可读）
-                var serverId = serverSelect ? serverSelect.value : "";
-                if (!serverId) {
+                if (!serverSelect.value) {
                     e.preventDefault();
                     window.alert("请先选择目标服务器。");
-                    return;
                 }
-                // NPU 按需选择校验：NPU 服务器未选或全选卡组时提示确认
-                if (npuCardCount > 0) {
-                    var npuFieldEl = document.getElementById("npu-field");
-                    var isNpuVisible = npuFieldEl && npuFieldEl.style.display !== "none";
-                    if (isNpuVisible) {
-                        if (selected.length === 0) {
-                            e.preventDefault();
-                            window.alert("请按需选择 NPU 卡组后再提交。");
-                            return;
-                        }
-                        if (selected.length >= npuCardCount) {
-                            if (!window.confirm("您选择了全部 NPU 卡组，请按需选择。确定继续提交吗？")) {
-                                e.preventDefault();
-                                return;
-                            }
-                        }
-                    }
-                }
-                // 清理可能残留的旧隐藏 input
-                var olds = appForm.querySelectorAll('input[name="applied_groups"]');
-                for (var i = 0; i < olds.length; i++) { olds[i].parentNode.removeChild(olds[i]); }
-                if (!selected.length) return;
-                selected.forEach(function (v) {
-                    var inp = document.createElement("input");
-                    inp.type = "hidden";
-                    inp.name = "applied_groups";
-                    inp.value = v;
-                    appForm.appendChild(inp);
-                });
             });
         }
-    }
-
-    /* ===== 服务器表单：勾选 NPU 服务器时显示卡组输入 ===== */
-    var npuCheckbox = document.querySelector('input[name="is_npu"]');
-    var npuGroupsField = document.getElementById("npu-groups-field");
-    if (npuCheckbox && npuGroupsField) {
-        function toggleNpuGroupsField() {
-            npuGroupsField.style.display = npuCheckbox.checked ? "" : "none";
-        }
-        npuCheckbox.addEventListener("change", toggleNpuGroupsField);
-        toggleNpuGroupsField();
     }
 
     /* ===== 邮件通知：发送方式单选（SMTP / 邮件 Webhook）显隐对应设置区 =====
@@ -503,23 +304,6 @@
         var deviceLoading = document.getElementById("device-loading");
         var deviceContent = document.getElementById("device-info-content");
         var deviceError = document.getElementById("device-error");
-        var npuList = document.getElementById("device-npu-list");
-
-        function renderNpuCards(cards) {
-            if (!npuList) return;
-            if (!cards || !cards.length) {
-                npuList.innerHTML = '<p class="text-muted" style="font-size:13px;">未检测到 NPU 卡（Ascend 驱动未加载或设备不可达）。</p>';
-                return;
-            }
-            var html = '<table class="table table-striped info-table">' +
-                "<thead><tr><th>设备号</th><th>型号</th><th>内存</th></tr></thead><tbody>";
-            cards.forEach(function (c) {
-                html += "<tr><td>" + escapeHtml(c.index) + "</td><td>" + escapeHtml(c.soc_name) + "</td><td>" + escapeHtml(c.mem_g) + "G</td></tr>";
-            });
-            html += "</tbody></table>";
-            npuList.innerHTML = html;
-        }
-
         function loadDeviceInfo() {
             // 显示加载中，隐藏内容区与错误
             if (deviceLoading) deviceLoading.style.display = "";
@@ -550,7 +334,6 @@
                         if (cpu) cpu.textContent = (data && data.cpu) || "未查询到";
                         if (memory) memory.textContent = (data && data.memory) || "未查询到";
                         if (disk) disk.textContent = (data && data.disk) || "未查询到";
-                        renderNpuCards(data && data.npu);
                         deviceContent.style.display = "";
                     }
                 })
@@ -616,7 +399,7 @@
         var row = form.closest("tr");
         var saveBtn = form.querySelector("[data-save-groups]");
         if (!row || !saveBtn) return;
-        row.querySelectorAll(".group-toggle, .npu-toggle").forEach(function (btn) {
+        row.querySelectorAll(".group-toggle").forEach(function (btn) {
             btn.addEventListener("click", function () {
                 // 切换灯状态：active=1 亮（btn-primary），active=0 灰（btn-default）
                 var active = btn.getAttribute("data-active") === "1";

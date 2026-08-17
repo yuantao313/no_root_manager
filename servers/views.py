@@ -1,5 +1,4 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -7,18 +6,15 @@ from django.views.decorators.http import require_POST
 
 from config.decorators import superuser_required
 
-from .devices import clear_device_info_cache, get_device_info, get_device_info_cached
+from .devices import clear_device_info_cache, get_device_info
 from .forms import ServerForm
 from .management import (
     NRM_GROUP,
     add_user_group,
     clear_managed_users_cache,
-    clear_npu_state_cache,
     clear_user_groups_cache,
-    detect_npu_groups,
     ensure_nrm_group,
     get_managed_users_cached,
-    get_npu_state_cached,
     get_user_groups_cached,
     list_system_users,
     lock_user,
@@ -30,35 +26,6 @@ from .management import (
 )
 from .models import MachineUserBinding, Server
 from .ssh import test_server_connection
-
-
-@login_required
-def server_groups_api(request, pk):
-    """返回服务器的分组配置、设备信息与机器用户列表，供申请表单前端联动。
-
-    - extra_groups：NPU 卡组（npu + npuN），仅 NPU 服务器（读内存缓存，不 SSH 卡顿）
-    - device：设备信息（CPU/内存/硬盘/NPU 卡型号），走 get_device_info 的 TTL 缓存
-      + 数据库快照回退，目标机不可达时仍展示最近一次成功采集的数据
-    接口不枚举目标机用户，避免普通用户借服务器 ID 探测账号。
-    """
-    server = get_object_or_404(Server, pk=pk)
-    extra = get_npu_state_cached(server)["groups"] if server.is_npu else []
-    try:
-        # 申请页只读模式：绝不实时 SSH（SSH 错误永不透出到申请页），
-        # 返回内存缓存/数据库快照；设备信息在详情页手动刷新时才实时采集
-        device = get_device_info_cached(server)
-    except Exception:  # noqa: BLE001 —— 设备查询失败不影响分组接口
-        device = {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": ""}
-    return JsonResponse(
-        {
-            "id": server.pk,
-            "default_groups": server.default_groups_list(),
-            "extra_groups": extra,
-            "is_npu": server.is_npu,
-            "device": device,
-        },
-        json_dumps_params={"ensure_ascii": False},
-    )
 
 
 @superuser_required
@@ -142,7 +109,7 @@ def server_device_api(request, pk):
     try:
         device = get_device_info(server)
     except Exception:  # noqa: BLE001 —— 设备查询失败不影响页面
-        device = {"npu": [], "gpu": [], "cpu": "", "memory": "", "disk": "", "msg": "设备信息获取失败"}
+        device = {"cpu": "", "memory": "", "disk": "", "msg": "设备信息获取失败"}
     return JsonResponse(device, json_dumps_params={"ensure_ascii": False})
 
 
@@ -171,17 +138,14 @@ def server_detail(request, pk):
             # 用户所属组（内存缓存批量查询，失败不影响列表展示，组信息可为空）
             try:
                 groups_map = get_user_groups_cached(server, managed_members)
-                npu_names = set(server.npu_groups_list())
                 for item in managed_users:
                     groups = groups_map.get(item["username"], [])
-                    priority, npu_in, others = sort_user_groups(item["username"], groups, npu_names)
+                    priority, others = sort_user_groups(item["username"], groups)
                     item["groups_priority"] = priority
-                    item["groups_npu"] = npu_in
                     item["groups_other"] = others
             except Exception:  # noqa: BLE001 —— 组查询失败降级为空组展示
                 for item in managed_users:
                     item["groups_priority"] = []
-                    item["groups_npu"] = []
                     item["groups_other"] = []
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
@@ -194,8 +158,6 @@ def server_detail(request, pk):
             "available_users": available_users,
             # 受管用户：机器用户名 + 归属系统用户（dict 列表，模板按 item.username/item.user 渲染）
             "managed_users": managed_users,
-            # NPU 卡组全量（按钮灯渲染用）：仅 NPU 服务器有值
-            "npu_group_names": server.npu_groups_list(),
             # 手动接管时可选绑定的平台用户（下拉）
             "sys_users": User.objects.order_by("username"),
         },
@@ -365,23 +327,4 @@ def server_run_init(request, pk):
     server = get_object_or_404(Server, pk=pk)
     ok, msg = run_init_script(server)
     messages.success(request, msg) if ok else messages.error(request, msg)
-    return redirect("servers:detail", pk=pk)
-
-
-@superuser_required
-@require_POST
-def server_configure_npu(request, pk):
-    """NPU 服务器：检测目标机 NPU 卡组并保存（仅超级管理员）。"""
-    server = get_object_or_404(Server, pk=pk)
-    ok, groups, msg = detect_npu_groups(server)
-    if ok:
-        server.is_npu = True
-        server.npu_groups = ",".join(groups)
-        server.save(update_fields=["is_npu", "npu_groups"])
-        # 同步内存缓存，申请界面直接读缓存不卡顿
-        get_npu_state_cached(server, force_refresh=True)
-        messages.success(request, f"NPU 检测完成并保存：{msg}")
-    else:
-        clear_npu_state_cache(server)
-        messages.error(request, f"NPU 检测失败：{msg}")
     return redirect("servers:detail", pk=pk)

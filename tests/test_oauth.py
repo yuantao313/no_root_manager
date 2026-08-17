@@ -242,7 +242,6 @@ class TestProfileGate:
                 "apply_type": "create",
                 "target_server": "",
                 "title": "t",
-                "applied_groups": [],
             },
         )
         # 未设姓名被拦截：页面渲染"请先设置姓名"提示且不创建申请
@@ -265,7 +264,6 @@ class TestProfileGate:
                 "target_server": str(server.pk),
                 "title": "t",
                 "description": "测试申请",
-                "applied_groups": [],
             },
         )
         # 设置姓名后可提交
@@ -284,7 +282,6 @@ class TestProfileGate:
                 "target_server": str(server.pk),
                 "title": "t",
                 "description": "测试申请",
-                "applied_groups": [],
             },
         )
         # 非 GitCode 用户不受门禁限制

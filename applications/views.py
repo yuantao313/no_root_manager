@@ -19,7 +19,6 @@ from notifications.services import (
     webhook_review_result,
 )
 from servers.management import (
-    grant_npu_access,
     grant_sudo,
     provision_user,
     take_over_user,
@@ -126,11 +125,6 @@ def _bg_provision(application_pk):
 
     # 创建类型：开通新账号
     groups = list(server.default_groups_list())
-    applied = [g.strip() for g in (application.applied_groups or "").split(",") if g.strip()]
-    for g in applied:
-        if g not in groups:
-            groups.append(g)
-
     # 开通后写入目标机 motd 公告（SSH 登录显示）
     _ok_notice, _msg_notice = write_server_motd(server)
 
@@ -151,13 +145,6 @@ def _bg_provision(application_pk):
             username=application.username,
             defaults={"user": application.applicant, "source": "create"},
         )
-
-        # NPU 服务器：分组选择即 NPU 卡组，用户开通后执行卡授权（usermod -aG npu,npuN）。
-        # 必须在 provision_user 之后：用户未创建时 usermod 会报"用户不存在"
-        if server.is_npu and applied:
-            # 自动附带 npu 公共组（前端提交时已附带，此处兜底防绕过）
-            npu_groups = applied if "npu" in applied else ["npu"] + applied
-            grant_npu_access(server, application.username, npu_groups)
 
         # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
         send_provision_credentials(application, password)

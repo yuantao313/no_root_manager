@@ -2,9 +2,6 @@
 # NRM 主机信息采集脚本：CPU / 内存 / 硬盘（所有服务器通用，root 执行）。
 # 由 NRM 平台经 SFTP 上传后以 root 一次性执行（servers/devices.py）。
 #
-# 与设备卡采集分离：本脚本只查主机基础信息；NPU 卡见 npu_info.sh，
-# GPU 卡见 gpu_info.sh（预留）——各设备类型独立维护、互不干扰。
-#
 # 输出约定（key=value，Python 侧解析）：
 #   CPU_VENDOR=<厂商>         （lscpu Vendor ID，如 GenuineIntel/AMD/HiSilicon）
 #   CPU_MODEL=<型号>          （lscpu 优先，兼容鲲鹏 ARM 无 model name）

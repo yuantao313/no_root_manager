@@ -17,7 +17,7 @@ class ServerAdmin(admin.ModelAdmin):
     )
     list_filter = ("port",)
     search_fields = ("name", "host", "credential__name", "credential__username")
-    readonly_fields = ("created_at", "updated_at", "npu_groups")
+    readonly_fields = ("created_at", "updated_at")
     fieldsets = (
         (
             None,
@@ -29,8 +29,6 @@ class ServerAdmin(admin.ModelAdmin):
                     "ssh_host_key_fingerprint",
                     "credential",
                     "default_group",
-                    "is_npu",
-                    "npu_groups",
                 )
             },
         ),

@@ -176,10 +176,6 @@ def _format_mail_details(application) -> str:
     lines.append(f"类型：{application.get_apply_type_display()}")
     if application.target_server:
         lines.append(f"目标服务器：{application.target_server.name}")
-    # NPU 机器申请：展示用户申请的 NPU 卡组（过滤公共组 npu，不暴露"用户组"概念）
-    groups = application.npu_groups_display()
-    if application.target_server and application.target_server.is_npu and groups:
-        lines.append(f"申请 NPU 卡组：{groups}")
     if application.description:
         lines.append(f"申请内容：{application.description}")
     lines.append(f"状态：{application.get_status_display()}")
@@ -294,11 +290,6 @@ def _format_feishu_text(event: str, payload: dict) -> str:
     server = payload.get("target_server") or {}
     if server.get("name"):
         lines.append(f"目标服务器：{server['name']}")
-    # NPU 机器申请：提示管理员用户申请的 NPU 卡组（过滤公共组 npu，不暴露"用户组"概念）
-    if payload.get("target_server_is_npu") and payload.get("applied_groups"):
-        groups = [g.strip() for g in payload["applied_groups"].split(",") if g.strip() and g.strip() != "npu"]
-        if groups:
-            lines.append(f"申请 NPU 卡组：{','.join(groups)}")
     if payload.get("description"):
         lines.append(f"申请内容：{payload['description']}")
     if payload.get("status"):
@@ -437,8 +428,6 @@ def _application_payload(application) -> dict:
             if application.target_server
             else None
         ),
-        "target_server_is_npu": bool(application.target_server and application.target_server.is_npu),
-        "applied_groups": application.applied_groups or "",
         "status": application.status,
         "description": application.description,
     }

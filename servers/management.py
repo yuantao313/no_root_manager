@@ -1,11 +1,10 @@
 """目标机器用户接管与开通服务：所有受管用户加入 nrm_managed 组。
 
-常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权）统一收敛到
+常用服务器操作（建用户/接管/锁定/解锁/sudo 授权）统一收敛到
 servers/scripts/nrm_mgmt.sh 脚本，经 SFTP 上传目标机后以 root 执行，
 不再在 Python 中散落字符串命令。
 """
 
-import logging
 import re
 import secrets
 import shlex
@@ -14,8 +13,6 @@ from pathlib import Path
 
 from .models import Server
 from .ssh import exec_command, run_script
-
-logger = logging.getLogger(__name__)
 
 NRM_GROUP = "nrm_managed"
 
@@ -105,7 +102,7 @@ def list_nrm_members(server):
 def take_over_user(server, username):
     """将用户加入 nrm_managed 组（接管）。返回 (ok, msg)。
 
-    接管同时剥离特权/驱动专用组（HwHiAiUser/sudo/wheel/npu 卡组），
+    接管同时剥离 root 级特权组（sudo/wheel/docker），
     只保留普通组 + nrm_managed——普通用户要普通，需要特权走正式申请。
     脚本内置容错：用户不存在时明确报错，不再由 usermod 报"用户不存在"。
     """
@@ -121,56 +118,9 @@ def take_over_user(server, username):
 # 受管用户内存缓存（进程内，避免每次访问都 SSH 扫描；刷新按钮清缓存）
 _MANAGED_USERS_CACHE: dict[int, tuple[list, str]] = {}
 
-# NPU 状态内存缓存：server_id -> {"is_npu": bool, "groups": list, "msg": str}
-# 添加服务器时与服务启动时同步，申请界面读取走缓存，避免每次 SSH 检测卡顿
-_NPU_STATE_CACHE: dict[int, dict] = {}
-
 # 用户组信息内存缓存：server_id -> {username: [groups]}
 # 详情页用户管理区展示所属组时批量查询，避免每用户一次 SSH
 _USER_GROUPS_CACHE: dict[int, dict[str, list[str]]] = {}
-
-
-def get_npu_state_cached(server, force_refresh=False):
-    """读取服务器 NPU 状态（内存缓存，未命中或强制刷新时才 SSH 检测）。
-
-    返回 {"is_npu": bool, "groups": list[str], "msg": str}。
-    非 NPU 服务器直接返回空缓存（不 SSH）；NPU 服务器首次/刷新时
-    调用 detect_npu_groups 检测并缓存，检测失败时降级用库内 npu_groups。
-    """
-    key = server.pk
-    if not force_refresh and key in _NPU_STATE_CACHE:
-        return _NPU_STATE_CACHE[key]
-    if not server.is_npu:
-        state = {"is_npu": False, "groups": [], "msg": ""}
-        _NPU_STATE_CACHE[key] = state
-        return state
-    ok, groups, msg = detect_npu_groups(server)
-    state = {
-        "is_npu": ok,
-        "groups": groups if ok else server.npu_groups_list(),
-        "msg": msg if ok else (msg or "NPU 检测失败，使用已保存配置"),
-    }
-    _NPU_STATE_CACHE[key] = state
-    return state
-
-
-def sync_npu_states():
-    """同步全部 NPU 服务器的状态到内存缓存（服务启动时调用，后台线程执行）。"""
-    from .models import Server
-
-    for server in Server.objects.filter(is_npu=True).only("pk", "is_npu", "npu_groups"):
-        try:
-            get_npu_state_cached(server, force_refresh=True)
-        except Exception:  # noqa: BLE001 —— 单台失败不影响其余
-            logger.exception("NPU 状态同步失败：%s", server)
-
-
-def clear_npu_state_cache(server=None):
-    """清空 NPU 状态内存缓存（服务器修改后调用）。"""
-    if server is None:
-        _NPU_STATE_CACHE.clear()
-    else:
-        _NPU_STATE_CACHE.pop(server.pk, None)
 
 
 def get_managed_users_cached(server, force_refresh=False):
@@ -373,62 +323,15 @@ def revoke_sudo(server, username):
 def run_init_script(server):
     """在目标机执行仓库内置初始化脚本（经 SFTP 上传后以 root 运行），返回 (ok, msg)。
 
-    初始化脚本独立维护于 servers/scripts/（与日常用户管理脚本 nrm_mgmt.sh 分工）：
-      - init_base.sh：基础准备（受管组 / motd 目录 / 工具链），所有服务器执行
-      - init_ascend_npu.sh：NPU 初始化（检测 davinci 卡并建卡组），仅 NPU 服务器执行
-    未来支持 GPU 时另建 init_gpu.sh，此处按服务器类型组合执行。
+    初始化脚本独立维护于 servers/scripts/（与日常用户管理脚本 nrm_mgmt.sh 分工）。
+    init_base.sh 负责基础准备（受管组 / motd 目录 / 工具链）。
     """
-    from .scripts import INIT_BASE_SCRIPT, INIT_NPU_SCRIPT  # 本函数内延迟导入避免循环
+    from .scripts import INIT_BASE_SCRIPT  # 本函数内延迟导入避免循环
 
-    results = []
     ok, out, err = run_script(server, INIT_BASE_SCRIPT, timeout=120)
     if not ok:
         return False, f"基础初始化失败：{err or out[:200]}"
-    results.append(out or "基础初始化完成")
-    if server.is_npu:
-        ok, out, err = run_script(server, INIT_NPU_SCRIPT, timeout=120)
-        if not ok:
-            return False, f"NPU 初始化失败：{err or out[:200]}"
-        results.append(out or "NPU 初始化完成")
-    return True, "；".join(results)
-
-
-def detect_npu_groups(server):
-    """检测目标机 NPU 卡组：返回 (ok, groups_list, msg)，groups 含公共组 npu + 卡组 npuN。
-
-    复用 npu_info.sh（目标机跑 ``npu-smi info`` 原样带回）解析 NPU ID，
-    与设备信息采集共用同一数据源，避免 ls /dev/davinciN 与 npu-smi 结果不一致。
-    """
-    from .npu_smi import parse_npu_smi_info
-    from .scripts import NPU_INFO_SCRIPT
-
-    ok, out, err = run_script(server, NPU_INFO_SCRIPT, timeout=150, connect_timeout=5)
-    if not ok:
-        return False, [], err or "NPU 检测失败（npu-smi info 执行失败）"
-    cards, npu_err = parse_npu_smi_info(out)
-    if npu_err:
-        return False, [], npu_err
-    if not cards:
-        return False, [], "未检测到 NPU 卡（npu-smi info 无设备输出）"
-    ids = sorted({c["index"] for c in cards})
-    groups = ["npu"] + [f"npu{i}" for i in ids]
-    return True, groups, f"检测到 {len(ids)} 张 NPU 卡：{ids}"
-
-
-def grant_npu_access(server, username, groups):
-    """授权用户 NPU 卡组（usermod -aG npu,npuN）。返回 (ok, msg)。
-
-    收敛到脚本 grant_npu 子命令：脚本内确保组存在并授权，
-    用户不存在时明确报错（容错，不再由 usermod 报"用户不存在"）。
-    """
-    username = (username or "").strip()
-    if not username or not groups:
-        return False, "参数错误"
-    group_args = ",".join(groups)
-    ok, out, err = _run_mgmt(server, ["grant_npu", username, group_args])
-    if ok:
-        return True, out or f"用户 {username} 已加入 NPU 卡组：{group_args}"
-    return False, err or f"NPU 授权失败：{username}"
+    return True, out or "基础初始化完成"
 
 
 def usermod_add_group(server, username, group):
@@ -470,18 +373,12 @@ def list_user_groups(server, usernames):
     return True, result, f"已查询 {len(result)} 个用户"
 
 
-def sort_user_groups(username, groups, npu_group_names):
-    """用户组展示排序：排除用户本名组，nrm_managed 置顶、NPU 组其次、其他组按序。
-
-    username: 目标机用户名（Linux 默认同名私有组不展示）。
-    npu_group_names: 服务器 NPU 卡组集合（npu + npuN）。
-    返回 (priority, npu_groups, others) 三个列表。
-    """
+def sort_user_groups(username, groups):
+    """用户组展示排序：排除用户本名组，nrm_managed 置顶、其他组按序。"""
     groups = [g for g in (groups or []) if g and g != username]
     priority = [g for g in groups if g == NRM_GROUP]
-    npu_in = sorted(g for g in groups if g in npu_group_names)
-    others = sorted(g for g in groups if g != NRM_GROUP and g not in npu_group_names)
-    return priority, npu_in, others
+    others = sorted(g for g in groups if g != NRM_GROUP)
+    return priority, others
 
 
 def get_user_groups_cached(server, usernames, force_refresh=False):

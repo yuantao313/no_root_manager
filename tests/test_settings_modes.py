@@ -36,8 +36,7 @@ def _load(env_extra, cwd=None):
         "print(json.dumps({"
         "'MODE': s.MODE, 'DEBUG': s.DEBUG, 'ALLOWED_HOSTS': s.ALLOWED_HOSTS, "
         "'CSRF_TRUSTED_ORIGINS': s.CSRF_TRUSTED_ORIGINS, 'LOG_LEVEL': s.LOG_LEVEL, "
-        "'GITCODE_CALLBACK_BASE_URL': s.GITCODE_CALLBACK_BASE_URL, "
-        "'NPU_SYNC_ON_STARTUP': s.NPU_SYNC_ON_STARTUP}))\n"
+        "'GITCODE_CALLBACK_BASE_URL': s.GITCODE_CALLBACK_BASE_URL}))\n"
     )
     return subprocess.run(
         [sys.executable, "-c", code],
@@ -63,8 +62,6 @@ def test_dev_mode_default_loads_dotenv():
     assert cfg["LOG_LEVEL"] == "DEBUG"
     # 可选回调地址没有硬编码默认值。
     assert cfg["GITCODE_CALLBACK_BASE_URL"] == ""
-    # 开发模式默认不启动 NPU 状态同步（避免启动即 SSH 探测真实机器）
-    assert cfg["NPU_SYNC_ON_STARTUP"] is False
 
 
 def test_callback_url_read_from_env():
@@ -100,14 +97,6 @@ def test_deploy_mode_loads_dotenv_prod():
     assert cfg["CSRF_TRUSTED_ORIGINS"] == ["https://your.domain.com"]
     assert cfg["LOG_LEVEL"] == "INFO"
     assert cfg["GITCODE_CALLBACK_BASE_URL"] == "https://your.domain.com"
-    # 部署模式默认启动 NPU 状态同步（预热内存缓存）
-    assert cfg["NPU_SYNC_ON_STARTUP"] is True
-
-
-def test_npu_sync_opt_in_via_env():
-    # 开发模式设置 NRM_SYNC_NPU=1 可显式开启启动同步
-    cfg = _loads(_load({"NRM_SYNC_NPU": "1"}))
-    assert cfg["NPU_SYNC_ON_STARTUP"] is True
 
 
 def test_deploy_mode_env_overrides_file():

@@ -30,13 +30,6 @@
             <dt>目标服务器</dt>
             <dd><a href="{% url 'servers:detail' application.target_server.pk %}">{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）</a></dd>
             {% endif %}
-            {% if application.target_server.is_npu and application.npu_groups_display %}
-            <dt>申请 NPU 卡组</dt>
-            <dd>
-                <span class="label label-info">{{ application.npu_groups_display }}</span>
-                <span class="text-muted" style="font-size:13px;">（NPU 服务器，用户申请的算力卡组，审批开通时自动授权）</span>
-            </dd>
-            {% endif %}
             <dt>申请内容</dt>
             <dd>{{ application.description|linebreaks }}</dd>
             <dt>提交时间</dt>

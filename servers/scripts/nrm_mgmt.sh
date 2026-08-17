@@ -2,7 +2,7 @@
 # NRM 目标机用户管理脚本（由 NRM 平台经 SFTP 上传到目标机后以 root 执行）。
 #
 # 设计原则：
-# - 所有常用服务器操作（建用户/接管/锁定/解锁/sudo/NPU 授权）收敛到本脚本，
+# - 所有常用服务器操作（建用户/接管/锁定/解锁/sudo 授权）收敛到本脚本，
 #   不散落在 Python 代码的字符串命令里
 # - 子命令模式：nrm_mgmt.sh <子命令> [参数...]
 # - 每个子命令成功输出 "OK <子命令> ..."，失败以非零退出码 + stderr 提示
@@ -110,18 +110,14 @@ case "${1:-}" in
 
     takeover)
         # takeover <username>：接管为受管用户（加入 nrm_managed 组）。
-        # 同时剥离特权/驱动专用组（HwHiAiUser/sudo/wheel/npu 卡组），只保留
+        # 同时剥离 root 级特权组（sudo/wheel/docker），只保留
         # 普通组 + nrm_managed——"普通用户要普通"，需要特权走正式申请流程。
         username="$2"
         [ -n "$username" ] || { log "用户名为空"; exit 2; }
         require_user "$username"
         ensure_group "$NRM_GROUP"
-        # 从固定特权/驱动组剥离；任何真实删除失败都阻止接管成功。
-        for g in HwHiAiUser sudo wheel docker; do
-            remove_group_membership "$username" "$g" || exit 6
-        done
-        # 剥离所有 NPU 卡组（npu、npuN），避免接管后残留算力访问权
-        for g in $(getent group 2>/dev/null | awk -F: '$1 ~ /^npu/ {print $1}'); do
+        # 从固定特权组剥离；任何真实删除失败都阻止接管成功。
+        for g in sudo wheel docker; do
             remove_group_membership "$username" "$g" || exit 6
         done
         usermod -aG "$NRM_GROUP" "$username"
@@ -181,16 +177,6 @@ case "${1:-}" in
         echo "OK revoke_sudo $username"
         ;;
 
-    grant_npu)
-        # grant_npu <username> <groups_csv>：授权 NPU 卡组（含公共组 npu）
-        username="$2"; groups_csv="$3"
-        [ -n "$username" ] && [ -n "$groups_csv" ] || { log "参数错误"; exit 2; }
-        require_user "$username"
-        ensure_groups "$groups_csv"
-        usermod -aG "$groups_csv" "$username"
-        echo "OK grant_npu $username groups=$groups_csv"
-        ;;
-
     list_groups)
         # list_groups <username_csv>：批量输出用户所属组（一次 SSH 完成，详情页展示用）
         # 输出约定：USER_GROUPS <username> <组1,组2,...>（每用户一行；不存在的用户标注）
@@ -234,7 +220,7 @@ case "${1:-}" in
         ;;
 
     *)
-        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|grant_docker|revoke_sudo|grant_npu|ensure_group|list_groups|add_group|del_group> [参数...]"
+        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|grant_docker|revoke_sudo|ensure_group|list_groups|add_group|del_group> [参数...]"
         exit 1
         ;;
 esac

@@ -33,18 +33,7 @@
                 <span class="helptext">{{ form.target_server.help_text }}</span>
                 {{ form.target_server.errors }}
             </p>
-            <!-- 设备信息（CPU/内存/硬盘）：选中服务器后由 app.js 经 groups_api 的 device 字段填充，所有类型都显示 -->
-            <div id="device-info-strip" data-field-for="all" style="margin-bottom:10px;display:none;"></div>
-            <!-- NPU 卡组：仅"申请服务器账号"类型显示；按钮由 app.js 渲染。
-                 注意用 div 而非 p：p 内嵌 div 会被浏览器自动闭合 p，导致
-                 JS 显隐只作用于 label、卡组按钮区不受控（表现为页面卡住）。 -->
-            <div data-field-for="create" id="npu-field" style="margin-bottom:10px;">
-                <label>NPU 卡组（可选）:</label>
-                <div id="id_applied_groups"></div>
-                <span class="helptext" id="id_applied_groups_helptext">选择所需的算力卡组</span>
-                {{ form.applied_groups.errors }}
-            </div>
-            <!-- 申请理由：位于目标服务器信息（设备信息 / NPU 卡组）之后 -->
+            <!-- 申请理由 -->
             <p data-field-for="all">
                 {{ form.description.label_tag }} {{ form.description|add_class:"form-control" }}
                 {{ form.description.errors }}
@@ -62,7 +51,7 @@
                 <span class="helptext">{{ form.transfer_username.help_text }}</span>
                 {{ form.transfer_username.errors }}
             </p>
-            <!-- 平台管理员：仅"申请平台管理员"类型显示（不选 NPU/用户组） -->
+            <!-- 平台管理员：仅"申请平台管理员"类型显示 -->
             <p data-field-for="admin" id="admin-field">
                 <span class="helptext">申请成为所选服务器的平台管理员（授予 sudo 权限），一次仅限一台机器。</span>
             </p>

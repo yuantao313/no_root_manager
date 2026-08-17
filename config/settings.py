@@ -45,17 +45,10 @@ try:
 except ImportError:
     pass
 
-# 测试环境标记：servers 等 app 的 ready() 据此跳过启动期后台任务（如 NPU 状态同步）。
+# 测试环境标记：应用可据此跳过启动期后台任务。
 # conftest.py 在测试进程设置环境变量 DJANGO_TESTING=1；此处转为 Django 设置供 app 读取
 # （此前仅设了环境变量、未定义对应设置，导致跳过逻辑从未生效）。
 DJANGO_TESTING = os.environ.get("DJANGO_TESTING", "") == "1"
-
-# NPU 状态启动同步：仅部署模式默认开启（预热内存缓存，避免申请页首次访问 SSH 卡顿）；
-# 开发模式默认关闭——启动即对全部 NPU 服务器 SSH 探测会干扰本地调测，
-# 开发态首次访问时由 get_npu_state_cached 懒加载，效果一致。
-# 如需在开发模式也启动同步：设置 NRM_SYNC_NPU=1。
-NPU_SYNC_ON_STARTUP = MODE == "deploy" or os.environ.get("NRM_SYNC_NPU", "").strip().lower() == "1"
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/

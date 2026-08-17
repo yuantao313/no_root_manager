@@ -24,14 +24,12 @@ class ServerForm(forms.ModelForm):
             "ssh_host_key_fingerprint",
             "credential",
             "default_group",
-            "is_npu",
         ]
         widgets = {
             "port": forms.NumberInput(attrs={"min": 1, "max": 65535}),
         }
         help_texts = {
             "default_group": "多个分组用英文逗号分隔，如：dev,ops；禁止配置 sudo、wheel、docker 等 root 级权限组",
-            "is_npu": "勾选后，用户申请的分组选择转换为 NPU 算力卡组选择；NPU 卡组由系统自动检测（详情页可重新检测）",
         }
 
     def clean_default_group(self):

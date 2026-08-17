@@ -113,7 +113,7 @@ class Server(models.Model):
         null=True,
         blank=True,
     )
-    # 用户分组配置：默认申请的分组 + 可附加申请的分组（均为逗号分隔字符串）
+    # 新账号默认加入的用户分组（逗号分隔字符串）
     default_group = models.CharField(
         "默认申请的用户分组",
         max_length=100,
@@ -121,33 +121,13 @@ class Server(models.Model):
         default="",
         help_text="用户申请账号时默认加入的分组，多个用英文逗号分隔",
     )
-    extra_groups = models.CharField(
-        "可附加申请的用户分组",
-        max_length=500,
-        blank=True,
-        default="",
-        help_text="用户申请时可附加选择加入的分组，多个用英文逗号分隔",
-    )
-    # NPU 服务器：勾选后分组选择升级为 NPU 卡组（npu + npuN），开通时执行卡授权
-    is_npu = models.BooleanField(
-        "NPU 服务器",
-        default=False,
-        help_text="勾选后，用户申请的分组选择转换为 NPU 算力卡组选择",
-    )
-    npu_groups = models.CharField(
-        "NPU 卡组（自动检测）",
-        max_length=500,
-        blank=True,
-        default="",
-        help_text="检测 /dev/davinciN 后生成，如 npu,npu0,npu1（逗号分隔）",
-    )
     # 设备信息快照（最近一次成功查询结果落库）：目标机不可达时回退展示，避免页面空白。
-    # 结构同 servers/devices.py 的 get_device_info 返回：{cpu, memory, disk, npu, gpu}
+    # 结构同 servers/devices.py 的 get_device_info 返回：{cpu, memory, disk}
     device_info_snapshot = models.JSONField(
         "设备信息快照",
         blank=True,
         default=dict,
-        help_text="最近一次成功采集的设备信息（CPU/内存/硬盘/NPU），查询失败时回退展示",
+        help_text="最近一次成功采集的设备信息（CPU/内存/硬盘），查询失败时回退展示",
     )
     device_info_updated_at = models.DateTimeField("设备信息更新时间", null=True, blank=True)
 
@@ -161,14 +141,6 @@ class Server(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.host}:{self.port})"
-
-    def extra_groups_list(self):
-        """解析可附加分组为列表。"""
-        return [g.strip() for g in self.extra_groups.split(",") if g.strip()]
-
-    def npu_groups_list(self):
-        """解析 NPU 卡组（含公共组 npu）为列表。"""
-        return [g.strip() for g in self.npu_groups.split(",") if g.strip()]
 
     def default_groups_list(self):
         """解析默认分组为列表。"""

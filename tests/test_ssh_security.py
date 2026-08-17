@@ -107,7 +107,6 @@ class TestServerFingerprintForm:
             "port": 22,
             "credential": credential.pk,
             "default_group": "",
-            "is_npu": "",
             "ssh_host_key_fingerprint": "",
             "action": "save",
         }

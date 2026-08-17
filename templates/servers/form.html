@@ -17,13 +17,6 @@
                 </p>
                 {% endif %}
             {% endfor %}
-            {% if form.instance.pk and form.instance.is_npu %}
-            <p class="text-muted" style="font-size:13px;">
-                NPU 卡组（自动检测结果）：<code>{{ form.instance.npu_groups|default:"未检测" }}</code>
-                — 可在服务器详情页执行"NPU 检测配置"自动检测更新。
-            </p>
-            {% endif %}
-
             <p class="text-muted"><a href="{% url 'credentials:create' %}">还没有凭据？去新建一个管理凭据</a></p>
             <button type="submit" name="action" value="save" class="btn btn-primary">保存</button>
             {% if editing %}

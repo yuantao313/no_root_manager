@@ -16,7 +16,7 @@
 
 ```
 config/            # Django 项目配置
-  settings.py      # 所有配置（含 AXES/allauth/CRISPY、运行模式、NPU 启动同步开关）
+  settings.py      # 所有配置（含 AXES/allauth/CRISPY、运行模式）
   urls.py          # 根路由（/ 跳转登录或我的申请）
   decorators.py    # staff_required / superuser_required
 accounts/          # 用户、认证、系统设置
@@ -30,9 +30,9 @@ applications/      # 申请工单（核心业务）
   models.py        # Application（申请单）
   views.py         # 申请/审批/开通/撤回联动
 servers/           # 目标机器管理
-  models.py        # Server（含 NPU 字段）、MachineUserBinding、ServerAdminBinding
+  models.py        # Server、MachineUserBinding、ServerAdminBinding
   management.py    # SSH 操作（provision/接管/锁定/授权/公告 motd）
-  devices.py       # 设备信息统一查询（NPU/CPU/内存/硬盘，LRU 缓存）
+  devices.py       # 基础设备信息统一查询（CPU/内存/硬盘，TTL 缓存）
   scripts/         # 目标机脚本（SFTP 上传 root 执行，见下）
   ssh.py           # paramiko 连接与命令执行（run_script 上传执行）
   fields.py        # EncryptedTextField（Fernet 加密字段）
@@ -48,12 +48,9 @@ static/            # 自研 css/js（app.css / app.js）
 
 | 脚本 | 职责 | 执行时机 |
 |------|------|----------|
-| `nrm_mgmt.sh` | 日常用户管理（建用户/接管/锁定/sudo/NPU 授权） | 各操作按子命令调用 |
+| `nrm_mgmt.sh` | 日常用户管理（建用户/接管/锁定/sudo 授权） | 各操作按子命令调用 |
 | `init_base.sh` | 基础初始化（受管组/motd 目录/工具链） | 服务器接入时 |
-| `init_ascend_npu.sh` | NPU 初始化（检测 davinci 卡、建 npu/npuN 卡组） | 仅 NPU 服务器接入时 |
-| `device_info.sh` | 设备信息采集（NPU 型号/内存、CPU、内存、硬盘），root 一次执行、结构化输出 | 设备信息查询（LRU 缓存） |
-
-新增设备类型（如 GPU）：另建独立脚本（如 `init_gpu.sh`），按服务器类型组合执行；设备信息输出命名空间隔离（`NPU_CARD` vs `GPU_CARD`），互不干扰。
+| `host_info.sh` | 基础设备信息采集（CPU、内存、硬盘），root 一次执行、结构化输出 | 设备信息查询（TTL 缓存） |
 
 ## 权限模型（三层）
 
@@ -79,13 +76,12 @@ static/            # 自研 css/js（app.css / app.js）
 
 ### 申请 → 审批 → 开通 → 撤回
 1. 登录用户提交申请：四种类型（**申请服务器账号 / 转移已有账号为受管用户 / 申请用户组 / 申请平台管理员**），填**申请理由**；身份/工号从账号自动带入
-2. 仅 **NPU 服务器**显示 NPU 卡组选择（npu + npuN，按钮展示 设备号+型号+内存G），同时展示 CPU/内存/硬盘；普通服务器无分组选项
-3. 管理员审批通过 → `_bg_provision` 后台在机器开通：
+2. 管理员审批通过 → `_bg_provision` 后台在机器开通：
    - `provision_user`：建用户 + 随机密码 + `chage -d 0` 强制首改密
-   - NPU 授权：`usermod -aG npu,npuN`（勾选的卡组）；归属绑定 `MachineUserBinding`
+   - 账号归属写入 `MachineUserBinding`
    - 公告：写入目标机 motd（`/etc/motd.d/nrm_notifications`）+ 系统首页展示
    - 平台管理员类型：直接授予 sudo（不建账号，无审计表）
-4. 申请人可**撤回**待审批申请（状态 withdrawn）
+3. 申请人可**撤回**待审批申请（状态 withdrawn）
 
 ### 系统公告（markdown）
 - 公告为**单例**：`content` 存 markdown 源码（`# 标题 / **加粗** / *斜体* / {red}颜色{/red} / [链接](url)`）
@@ -93,10 +89,9 @@ static/            # 自研 css/js（app.css / app.js）
 - 设置页用 textarea + 快捷按钮插入控制符（非富文本编辑器）
 
 ### 设备信息（servers/devices.py）
-- 所有设备信息查询统一走 `get_device_info(server)`：按 server.pk 做 **LRU 缓存**，避免每次访问 SSH 探测
-- 实际采集由 `device_info.sh` 在目标机 **root 一次性执行**（避免逐条 sudo + 非 root 免密问题），Python 侧解析 key=value 输出
-- NPU 型号 `acl.get_soc_name()`、内存 `acl.rt.get_mem_info(dev)[1]`；CPU 优先 lscpu（兼容鲲鹏无 model name）；GPU 预留未实现
-- 启动同步仅部署模式开启（`NPU_SYNC_ON_STARTUP`，开发模式靠首次访问懒加载；`NRM_SYNC_NPU=1` 可强制）
+- 所有设备信息查询统一走 `get_device_info(server)`：按 server.pk 做 **TTL 缓存**，避免每次访问 SSH 探测
+- 实际采集由 `host_info.sh` 在目标机 **root 一次性执行**，Python 侧解析 key=value 输出
+- CPU 优先使用 lscpu（兼容鲲鹏无 model name），同时采集内存与根分区用量
 
 ### SMTP 配置三步验证（写库前）
 1. 填配置 + 邮箱 → 发验证码（60 秒冷却，session 记录时间戳）
@@ -152,7 +147,7 @@ uv run mkdocs build --strict  # 文档构建（改了 docs/ 必须过）
 | 邮件发送 `Connection unexpectedly closed` | 465 端口用了 STARTTLS | 465 用 SSL（use_ssl=True），587/25 用 TLS |
 | 邮箱更换后邮箱没变 | 前端 `form.submit()` 不带按钮 name | 提交前手动追加 hidden `name="save_profile"` |
 | 目标机脚本报 `$'\r'` 错误 | 脚本被转成 CRLF | 用 LF 行尾（`.gitattributes` 已锁定 *.sh） |
-| 设备信息查不到 NPU/内存 | 逐条 sudo 失败或依赖缺失 | 走 `device_info.sh` 单脚本 root 执行 |
+| 设备信息查不到 CPU/内存 | 目标机不可达或系统命令缺失 | 检查 SSH 与 `host_info.sh` 输出 |
 | HTML 按钮无效 | 嵌套 `<form>` | 拆出独立表单 |
 | 登录被锁 | axes 15 分钟 5 次失败 | 清 `AccessAttempt` 或等冷却 |
 | 迁移交互式提问 EOFError | 非空字段无默认值 | 迁移加 `default` |

@@ -16,7 +16,6 @@ class Application(models.Model):
         ADMIN = "admin", "申请平台管理员"
 
     # 可申请的高危权限组；sudo/docker 都能取得 root 级能力，只允许超级管理员审批。
-    # 不给普通用户开放 HwHiAiUser 等驱动专用组。
     USER_GROUP_CHOICES = ["sudo", "docker"]
     PRIVILEGED_GROUPS = ROOT_EQUIVALENT_GROUPS
 
@@ -57,14 +56,6 @@ class Application(models.Model):
         related_name="applications",
         verbose_name="目标服务器",
         help_text="请选择申请要操作的目标服务器",
-    )
-    # 用户勾选的附加分组（来自服务器 extra_groups，逗号分隔）
-    applied_groups = models.CharField(
-        "附加分组",
-        max_length=500,
-        blank=True,
-        default="",
-        help_text="用户申请时勾选的可附加分组，逗号分隔",
     )
     # 申请的用户组（sudo/docker，逗号分隔；创建类型可选）
     user_groups = models.CharField(
@@ -114,14 +105,6 @@ class Application(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_status_display()})"
-
-    def npu_groups_display(self) -> str:
-        """NPU 卡组展示值：过滤公共组 npu，只返回用户实际所选卡组。
-
-        公共组 npu 由后端授权时自动附带，不对用户/管理员暴露"用户组"概念。
-        """
-        groups = [g.strip() for g in (self.applied_groups or "").split(",") if g.strip()]
-        return ",".join(g for g in groups if g != "npu")
 
     def requested_user_groups(self) -> set[str]:
         """返回规范化的用户组申请集合。"""
