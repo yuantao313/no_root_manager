@@ -11,12 +11,9 @@ from django.views.decorators.http import require_POST
 from accounts.models import Announcement
 from config.decorators import staff_required
 from notifications.services import (
-    notify_new_application,
-    notify_review_result,
+    notify_application,
     run_in_background,
     send_provision_credentials,
-    webhook_new_application,
-    webhook_review_result,
 )
 from servers.management import (
     grant_sudo,
@@ -33,12 +30,27 @@ from .models import Application
 
 def _bg_notify(application_pk, reviewed=False):
     """后台发送新申请或审批结果通知，按 pk 重新取数。"""
-    application = Application.objects.get(pk=application_pk)
-    handlers = (
-        (notify_review_result, webhook_review_result) if reviewed else (webhook_new_application, notify_new_application)
-    )
-    for handler in handlers:
-        handler(application)
+    application = Application.objects.select_related("target_server").get(pk=application_pk)
+    notify_application(application, reviewed)
+
+
+@transaction.atomic
+def _record_provision(application, ok, note, source, password=""):
+    """统一记录开通结果；成功时建立机器用户归属绑定。"""
+    application.provision_note = note
+    update_fields = ["provision_note", "updated_at"]
+    if ok:
+        application.provisioned_at = timezone.now()
+        update_fields.append("provisioned_at")
+        if password:
+            application.initial_password = password
+            update_fields.append("initial_password")
+        MachineUserBinding.objects.update_or_create(
+            server=application.target_server,
+            username=application.username,
+            defaults={"user": application.applicant, "source": source},
+        )
+    application.save(update_fields=update_fields)
 
 
 def _bg_provision(application_pk):
@@ -47,9 +59,9 @@ def _bg_provision(application_pk):
     按 pk 重新取数（后台线程内使用独立 DB 连接）；结果写入工单字段，
     管理员/申请人稍后刷新详情页可见。granted_by 取审批人（application.reviewer）。
     """
-    application = Application.objects.select_related("reviewer", "target_server", "target_server__credential").get(
-        pk=application_pk
-    )
+    application = Application.objects.select_related(
+        "applicant", "reviewer", "target_server", "target_server__credential"
+    ).get(pk=application_pk)
     if not application.target_server or not application.target_server.credential:
         application.provision_note = "未开通：未关联目标服务器或凭据"
         application.save(update_fields=["provision_note"])
@@ -65,38 +77,21 @@ def _bg_provision(application_pk):
     # 转移类型：将目标机器已有用户接管为受管用户（用户信息实时扫描，不落库）
     if application.apply_type == Application.ApplyType.TRANSFER:
         ok, msg = take_over_user(server, application.username)
-        application.provision_note = f"已接管：{msg}" if ok else f"接管失败：{msg}"
-        if ok:
-            application.provisioned_at = timezone.now()
-            # 归属绑定：机器用户 → 申请人（唯一约束防重复接管）
-            MachineUserBinding.objects.update_or_create(
-                server=server,
-                username=application.username,
-                defaults={"user": application.applicant, "source": "transfer"},
-            )
-        application.save()
+        _record_provision(application, ok, f"已接管：{msg}" if ok else f"接管失败：{msg}", "transfer")
         return
 
     # 平台管理员类型：不开新账号，直接授予所选服务器的 sudo 权限（username=登录用户名）
     if application.apply_type == Application.ApplyType.ADMIN:
         ok, group, msg = grant_sudo(server, application.username)
-        application.provision_note = f"已授予 sudo（{group}）：{msg}" if ok else f"授予 sudo 失败：{msg}"
-        if ok:
-            application.provisioned_at = timezone.now()
-            MachineUserBinding.objects.update_or_create(
-                server=server,
-                username=application.username,
-                defaults={"user": application.applicant, "source": "admin"},
-            )
-        application.save()
+        note = f"已授予 sudo（{group}）：{msg}" if ok else f"授予 sudo 失败：{msg}"
+        _record_provision(application, ok, note, "admin")
         return
 
     # 申请用户组类型：不建号不转移，把登录用户加入所选用户组（usermod -aG）
     if application.apply_type == Application.ApplyType.GROUP:
         group_list = [g.strip() for g in (application.user_groups or "").split(",") if g.strip()]
         if not group_list:
-            application.provision_note = "未选择用户组"
-            application.save(update_fields=["provision_note"])
+            _record_provision(application, False, "未选择用户组", "group")
             return
         ok = True
         errors = []
@@ -105,17 +100,8 @@ def _bg_provision(application_pk):
             if not g_ok:
                 ok = False
                 errors.append(f"{g}:{g_msg}")
-        application.provision_note = (
-            f"已加入用户组：{','.join(group_list)}" if ok else f"加入用户组失败：{'；'.join(errors)}"
-        )
-        if ok:
-            application.provisioned_at = timezone.now()
-            MachineUserBinding.objects.update_or_create(
-                server=server,
-                username=application.username,
-                defaults={"user": application.applicant, "source": "group"},
-            )
-        application.save()
+        note = f"已加入用户组：{','.join(group_list)}" if ok else f"加入用户组失败：{'；'.join(errors)}"
+        _record_provision(application, ok, note, "group")
         return
 
     # 创建类型：开通新账号
@@ -129,21 +115,10 @@ def _bg_provision(application_pk):
         groups=groups,
         with_home=True,
     )
-    application.provision_note = msg
+    _record_provision(application, ok, msg, "create", password)
     if ok:
-        application.provisioned_at = timezone.now()
-        # 初始密码同步写入工单（加密存储）：邮件不可用时管理员/申请人可从工单获取
-        application.initial_password = password
-        # 大一统归属绑定：创建类型开通的机器用户也入表（机器用户 → 申请人）
-        MachineUserBinding.objects.update_or_create(
-            server=server,
-            username=application.username,
-            defaults={"user": application.applicant, "source": "create"},
-        )
-
         # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
         send_provision_credentials(application, password)
-    application.save()
 
 
 def _get_visible_application(user, pk):
@@ -305,18 +280,14 @@ def application_detail(request, pk):
     """申请详情：申请人本人可查看自己的工单；
     管理员（staff）按既有逻辑（超管全部，普通管理员仅绑定服务器的申请）。"""
     application = _get_visible_application(request.user, pk)
-    can_view_initial_password = bool(
+    has_initial_password = bool(
         application.initial_password
         and application.status == Application.Status.APPROVED
         and application.provisioned_at
-        and application.applicant_id == request.user.id
     )
-    can_resend_initial_password = bool(
-        application.initial_password
-        and application.status == Application.Status.APPROVED
-        and application.provisioned_at
-        and (request.user.is_superuser or application.applicant_id == request.user.id)
-    )
+    is_applicant = application.applicant_id == request.user.id
+    can_view_initial_password = has_initial_password and is_applicant
+    can_resend_initial_password = has_initial_password and (request.user.is_superuser or is_applicant)
     can_review = bool(
         request.user.is_superuser
         or (

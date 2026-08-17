@@ -7,14 +7,17 @@ import urllib.request
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.mail import EmailMessage
 from django.core.mail.backends.smtp import EmailBackend
 from django.db.models import Q
+from django.urls import reverse
 
 from .models import EmailConfig, WebhookConfig
 from .security import UnsafeWebhookURL, open_webhook_request, validate_webhook_url
 
 logger = logging.getLogger(__name__)
+_WEBHOOK_PLATFORMS = {value for value, _label in WebhookConfig.PLATFORM_CHOICES}
 
 
 def run_in_background(func, *args):
@@ -96,7 +99,7 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
         logger.info("邮件未发送（未启用/未配置）：%s -> %s", subject, to_list)
         return False
     if cfg.send_via == EmailConfig.SEND_VIA_WEBHOOK:
-        return send_email_via_webhook(subject, body, to_list)
+        return _send_email_via_webhook(cfg, subject, body, to_list)
     if not cfg.host:
         logger.info("邮件未发送（未配置 SMTP）：%s -> %s", subject, to_list)
         return False
@@ -113,7 +116,7 @@ def send_email(subject: str, body: str, to_list: list[str]) -> bool:
     )
 
 
-def send_email_via_webhook(subject: str, body: str, to_list: list[str]) -> bool:
+def _send_email_via_webhook(cfg, subject: str, body: str, to_list: list[str]) -> bool:
     """通过邮件 Webhook 发送邮件（规避 SMTP 端口屏蔽）。
 
     请求格式：POST <mail_webhook_url>
@@ -123,8 +126,7 @@ def send_email_via_webhook(subject: str, body: str, to_list: list[str]) -> bool:
     to 为逗号分隔的收件人字符串（对齐外部端点格式，多收件人用逗号拼接）。
     仅当 send_via=webhook 且配置了 URL 时使用；失败不影响主流程（返回 False）。
     """
-    cfg = EmailConfig.objects.first()
-    url = (cfg.mail_webhook_url or "").strip() if cfg else ""
+    url = (cfg.mail_webhook_url or "").strip()
     if not url or not to_list:
         logger.info("邮件 Webhook 未发送（未配置 URL）：%s -> %s", subject, to_list)
         return False
@@ -150,8 +152,6 @@ def send_email_via_webhook(subject: str, body: str, to_list: list[str]) -> bool:
 
 def admin_emails(application=None) -> list[str]:
     """返回有权处理该工单的管理员邮箱；未传工单时保留通用查询。"""
-    from django.contrib.auth import get_user_model
-
     User = get_user_model()
     users = User.objects.filter(is_staff=True, is_active=True).exclude(email="")
     if application is not None:
@@ -167,8 +167,6 @@ def _format_mail_details(application) -> str:
 
     供 notify_new_application / notify_review_result 复用，避免邮件只有标题没有详情。
     """
-    from django.urls import reverse
-
     lines = [f"工单 #{application.pk}"]
     lines.append(f"申请人：{application.applicant_name}（{application.username}）")
     if application.employee_id:
@@ -211,6 +209,15 @@ def notify_review_result(application) -> bool:
         f"如有疑问请联系管理员。"
     )
     return send_email(subject, body, [application.email])
+
+
+def notify_application(application, reviewed=False):
+    """按事件阶段编排邮件与 Webhook，保持既有发送顺序。"""
+    handlers = (
+        (notify_review_result, webhook_review_result) if reviewed else (webhook_new_application, notify_new_application)
+    )
+    for handler in handlers:
+        handler(application)
 
 
 def send_provision_credentials(application, password) -> bool:
@@ -258,7 +265,10 @@ def _site_base_url() -> str:
     try:
         from accounts.models import SystemConfig
 
-        return SystemConfig.get_singleton().get_site_base_url()
+        config = SystemConfig.objects.first()
+        if config:
+            return config.get_site_base_url()
+        return settings.GITCODE_CALLBACK_BASE_URL.strip().rstrip("/")
     except Exception:  # noqa: BLE001 —— 取不到站点地址时链接留空
         return ""
 
@@ -268,8 +278,6 @@ def _review_link(payload: dict) -> str:
     app_id = payload.get("id")
     if not app_id:
         return ""
-    from django.urls import reverse
-
     return f"{_site_base_url()}{reverse('applications:detail', args=[app_id])}"
 
 
@@ -406,7 +414,7 @@ def send_webhook(event: str, payload: dict, *, application=None) -> bool:
         return False
     ok = True
     for hook in hooks:
-        platform = hook.name if hook.name in dict(WebhookConfig.PLATFORM_CHOICES) else WebhookConfig.PLATFORM_GENERIC
+        platform = hook.name if hook.name in _WEBHOOK_PLATFORMS else WebhookConfig.PLATFORM_GENERIC
         ok_send, _ = _post_webhook(hook.url, hook.secret, event, payload, platform)
         if not ok_send:
             ok = False

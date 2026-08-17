@@ -3,11 +3,14 @@
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 
+from accounts.models import SystemConfig
 from applications.models import Application
 from notifications.models import EmailConfig, WebhookConfig
 from notifications.services import (
     admin_emails,
+    notify_application,
     notify_new_application,
     notify_review_result,
     send_email,
@@ -45,14 +48,15 @@ class TestSendEmailWebhook:
         defaults.update(kw)
         return EmailConfig.objects.create(**defaults)
 
-    def test_webhook_mode_posts_json_with_token(self, application):
+    def test_webhook_mode_posts_json_with_token(self, application, django_assert_num_queries):
         """send_via=webhook：POST {to,subject,body} 且带 X-Webhook-Token 头。"""
         from notifications.services import send_email
 
         self._cfg()
         with patch("notifications.services.open_webhook_request") as mock:
             mock.return_value.__enter__.return_value.status = 200
-            ok = send_email("主题", "正文", ["a@b.com", "c@d.com"])
+            with django_assert_num_queries(1):
+                ok = send_email("主题", "正文", ["a@b.com", "c@d.com"])
         assert ok is True
         req = mock.call_args.args[0]
         # urllib 会把 header 名规范化为 X-webhook-token（HTTP 头大小写不敏感）
@@ -152,6 +156,35 @@ class TestNotify:
     def test_review_result_no_email_no_crash(self, application):
         assert notify_review_result(application) is False
 
+    @pytest.mark.parametrize("reviewed", [False, True])
+    def test_application_notification_keeps_channel_order(self, application, reviewed):
+        expected = (
+            ["notify_review_result", "webhook_review_result"]
+            if reviewed
+            else ["webhook_new_application", "notify_new_application"]
+        )
+        calls = []
+        with (
+            patch(
+                "notifications.services.notify_review_result",
+                side_effect=lambda app: calls.append("notify_review_result"),
+            ),
+            patch(
+                "notifications.services.webhook_review_result",
+                side_effect=lambda app: calls.append("webhook_review_result"),
+            ),
+            patch(
+                "notifications.services.webhook_new_application",
+                side_effect=lambda app: calls.append("webhook_new_application"),
+            ),
+            patch(
+                "notifications.services.notify_new_application",
+                side_effect=lambda app: calls.append("notify_new_application"),
+            ),
+        ):
+            notify_application(application, reviewed)
+        assert calls == expected
+
     def test_new_application_emails_admins_via_webhook(self, application):
         """工单申请通知：webhook 发送模式下收件人=管理员邮箱列表。"""
         EmailConfig.objects.create(
@@ -196,6 +229,14 @@ class TestNotify:
         assert "申请内容：需要登录使用" in text
         assert "状态：待审批" in text
         assert "工单链接" in text and f"applications/{application.pk}/" in text
+
+    def test_link_fallback_does_not_create_system_config(self):
+        from notifications.services import _site_base_url
+
+        SystemConfig.objects.all().delete()
+        with override_settings(GITCODE_CALLBACK_BASE_URL="https://nrm.example.com/"):
+            assert _site_base_url() == "https://nrm.example.com"
+        assert not SystemConfig.objects.exists()
 
     def test_email_settings_merged_single_tab(self):
         """设置页：SMTP 与邮件 Webhook 整合为单 tab，发送方式单选，保留总开关。"""

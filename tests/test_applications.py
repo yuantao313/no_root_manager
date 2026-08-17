@@ -173,6 +173,23 @@ class TestPermission:
 
 
 class TestReviewProvision:
+    def test_result_and_binding_commit_atomically(self, server, normal):
+        from applications.views import _record_provision
+        from servers.models import MachineUserBinding
+
+        app = Application.objects.create(
+            applicant=normal,
+            username="atomic-user",
+            target_server=server,
+        )
+        with (
+            patch.object(Application, "save", side_effect=RuntimeError("write failed")),
+            pytest.raises(RuntimeError, match="write failed"),
+        ):
+            _record_provision(app, True, "已开通", "create")
+
+        assert not MachineUserBinding.objects.filter(server=server, username="atomic-user").exists()
+
     def test_approve_provisions(self, client, staff, server):
         app = Application.objects.create(
             applicant_name="张三",
@@ -284,6 +301,26 @@ class TestReviewProvision:
         binding = MachineUserBinding.objects.get(server=server, username="machine_user")
         assert binding.user == normal
         assert binding.source == "transfer"
+
+    def test_admin_approve_records_result_and_binding(self, client, staff, server, normal):
+        from servers.models import MachineUserBinding
+
+        app = Application.objects.create(
+            applicant=normal,
+            applicant_name="甲",
+            username="zhangsan",
+            target_server=server,
+            apply_type=Application.ApplyType.ADMIN,
+        )
+        client.force_login(staff)
+        with patch("applications.views.grant_sudo", return_value=(True, "sudo", "已授权")):
+            client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
+
+        app.refresh_from_db()
+        binding = MachineUserBinding.objects.get(server=server, username="zhangsan")
+        assert app.provisioned_at is not None
+        assert app.provision_note == "已授予 sudo（sudo）：已授权"
+        assert (binding.user, binding.source) == (normal, "admin")
 
     def test_create_approve_creates_machine_user_binding(self, client, staff, server, normal):
         """创建类型开通成功：机器用户同样写入归属绑定（大一统）。"""
