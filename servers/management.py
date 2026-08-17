@@ -147,12 +147,6 @@ def clear_managed_users_cache(server=None):
         _MANAGED_USERS_CACHE.pop(server.pk, None)
 
 
-def sync_managed_users(server):
-    """兼容入口：不再写数据库，改为返回内存缓存扫描结果。返回 (ok, msg)。"""
-    members, msg = get_managed_users_cached(server, force_refresh=True)
-    return True, f"已扫描 {len(members)} 个受管用户：{msg}"
-
-
 def lock_user(server, username):
     """禁用目标机器用户（passwd -l）。返回 (ok, msg)。"""
     username = (username or "").strip()
@@ -193,51 +187,6 @@ def list_system_users(server):
     return True, available, f"共 {len(available)} 个可接管用户"
 
 
-def collect_user_usage(server, username):
-    """采集单个用户资源使用：磁盘占用、内存、CPU。
-
-    返回 (ok, dict(disk/mem/cpu), msg)。磁盘取 /home 大小（如 1.2G），
-    内存/CPU 由 ps 按用户汇总（如 256MB / 3.5%）。
-    """
-    username = (username or "").strip()
-    if not username:
-        return False, {}, "用户名为空"
-    cmd = (
-        f'echo "DISK=$(du -sh /home/{username} 2>/dev/null | cut -f1) '
-        f"USAGE=$(ps -u {username} -o rss=,%cpu= --no-headers 2>/dev/null | "
-        f'awk \'{{m+=$1;c+=$2}} END{{printf "%.0fMB %.1f%%", m/1024, c}}\')"'
-    )
-    ok, out, err = _exec(server, cmd)
-    if not ok:
-        return False, {}, err or "采集失败"
-    disk, mem, cpu = "", "", ""
-    m = re.search(r"DISK=(\S+)", out)
-    if m:
-        disk = m.group(1)
-    m = re.search(r"USAGE=(\S+)", out)
-    if m:
-        parts = m.group(1).split()
-        if len(parts) == 2:
-            mem, cpu = parts[0], parts[1]
-    return True, {"disk": disk, "mem": mem, "cpu": cpu}, out
-
-
-def sync_user_usage(server):
-    """兼容入口：采集受管用户资源使用（走内存缓存，不写数据库）。返回 (ok, msg)。
-
-    各用户资源使用直接采集并随缓存返回；如需持久化展示可自行调用 collect_user_usage。
-    """
-    members, _ = get_managed_users_cached(server, force_refresh=True)
-    if not members:
-        return True, "无受管用户可采集"
-    collected = 0
-    for name in members:
-        ok, data, _ = collect_user_usage(server, name)
-        if ok and data.get("disk"):
-            collected += 1
-    return True, f"资源采集完成：{collected}/{len(members)} 个用户"
-
-
 def provision_user(server, username, groups=None, with_home=True, force_pwd_change=True):
     """在目标机器开通用户：建用户、加入分组、设置随机密码。
 
@@ -275,19 +224,6 @@ def provision_user(server, username, groups=None, with_home=True, force_pwd_chan
     return True, password, out or f"用户 {username} 已开通（分组：{group_args}）"
 
 
-# sudo 组名：Debian/Ubuntu 为 sudo，RHEL/CentOS 为 wheel，这里按 sudo 优先探测
-SUDO_GROUPS = ("sudo", "wheel")
-
-
-def detect_sudo_group(server):
-    """探测目标机器的 sudo 组名。返回 (ok, group, msg)。"""
-    for group in SUDO_GROUPS:
-        ok, out, err = _exec(server, f"getent group {group}")
-        if ok and out:
-            return True, group, f"使用 {group} 组"
-    return False, "", "未找到 sudo/wheel 组"
-
-
 def grant_sudo(server, username):
     """授予用户 root/sudo 权限（加入 sudo 组）。返回 (ok, group, msg)。
 
@@ -304,20 +240,6 @@ def grant_sudo(server, username):
         group = match.group(1)
         return True, group, f"用户 {username} 已加入 {group} 组，获得 sudo 权限"
     return False, "", err or "授予 sudo 失败"
-
-
-def revoke_sudo(server, username):
-    """撤销用户 sudo 权限（从 sudo/wheel 组移除）。返回 (ok, msg)。
-
-    收敛到脚本 revoke_sudo 子命令：脚本从所有可能的 sudo 组移除。
-    """
-    username = (username or "").strip()
-    if not username:
-        return False, "用户名为空"
-    ok, out, err = _run_mgmt(server, ["revoke_sudo", username])
-    if ok:
-        return True, out or f"已撤销用户 {username} 的 sudo 权限"
-    return False, err or "撤销 sudo 失败"
 
 
 def run_init_script(server):

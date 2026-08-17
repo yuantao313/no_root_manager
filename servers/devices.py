@@ -6,7 +6,6 @@ from .ssh import run_script
 
 _DEVICE_CACHE: dict[int, tuple[float, dict]] = {}
 _SUCCESS_TTL = 1800.0
-_FAIL_TTL = 60.0
 
 
 def _host_script():
@@ -63,15 +62,12 @@ def _collect_device_info(server) -> dict:
 
 
 def _save_snapshot(server, info: dict) -> None:
-    from django.utils import timezone
-
     server.__class__.objects.filter(pk=server.pk).update(
         device_info_snapshot={
             "cpu": info.get("cpu", ""),
             "memory": info.get("memory", ""),
             "disk": info.get("disk", ""),
-        },
-        device_info_updated_at=timezone.now(),
+        }
     )
 
 
@@ -95,22 +91,17 @@ def get_device_info(server) -> dict:
     cached = _DEVICE_CACHE.get(server.pk)
     if cached is not None:
         ts, info = cached
-        ttl = _SUCCESS_TTL if not info.get("msg") else _FAIL_TTL
-        if now - ts < ttl:
+        if now - ts < _SUCCESS_TTL:
             return info
     fresh = Server.objects.get(pk=server.pk)
     info = _collect_device_info(fresh)
-    _DEVICE_CACHE[server.pk] = (now, info)
     if info.get("msg"):
-        _DEVICE_CACHE.pop(server.pk, None)
         return _fallback_to_snapshot(fresh, info)
     _save_snapshot(fresh, info)
+    _DEVICE_CACHE[server.pk] = (now, info)
     return info
 
 
-def clear_device_info_cache(server=None):
-    """清空全部或指定服务器的设备信息缓存。"""
-    if server is None:
-        _DEVICE_CACHE.clear()
-    else:
-        _DEVICE_CACHE.pop(server.pk, None)
+def clear_device_info_cache():
+    """清空设备信息缓存。"""
+    _DEVICE_CACHE.clear()

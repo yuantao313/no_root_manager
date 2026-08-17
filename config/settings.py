@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -46,9 +47,8 @@ except ImportError:
     pass
 
 # 测试环境标记：应用可据此跳过启动期后台任务。
-# conftest.py 在测试进程设置环境变量 DJANGO_TESTING=1；此处转为 Django 设置供 app 读取
-# （此前仅设了环境变量、未定义对应设置，导致跳过逻辑从未生效）。
-DJANGO_TESTING = os.environ.get("DJANGO_TESTING", "") == "1"
+# pytest-django 可能先于项目 conftest 加载设置，因此同时检查已加载模块。
+DJANGO_TESTING = os.environ.get("DJANGO_TESTING", "") == "1" or "pytest" in sys.modules
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/

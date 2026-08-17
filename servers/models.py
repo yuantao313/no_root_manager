@@ -129,8 +129,6 @@ class Server(models.Model):
         default=dict,
         help_text="最近一次成功采集的设备信息（CPU/内存/硬盘），查询失败时回退展示",
     )
-    device_info_updated_at = models.DateTimeField("设备信息更新时间", null=True, blank=True)
-
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 

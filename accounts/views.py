@@ -359,10 +359,9 @@ def verify_email_code_ajax(request):
 @login_required
 def profile(request):
     """个人中心：资料行内编辑 + 邮箱验证码确认 + 内嵌 Webhook（仅管理员）。"""
-    hooks = WebhookConfig.objects.filter(owner=request.user)
     form = ProfileForm(instance=request.user)
     # 个人 Webhook 单例：已有配置时预填表单（保存即覆盖）
-    my_hook = hooks.first()
+    my_hook = WebhookConfig.objects.filter(owner=request.user).first()
     webhook_form = WebhookForm(
         instance=my_hook,
         initial={"name": my_hook.name, "enabled": my_hook.enabled} if my_hook else None,
@@ -437,7 +436,6 @@ def profile(request):
             "email_code_cooldown": _email_code_cooldown(request),
             "form": form,
             "webhook_form": webhook_form,
-            "hooks": hooks,
         },
     )
 
@@ -633,11 +631,6 @@ def settings(request):
                 messages.success(request, f"Webhook 测试：{msg}")
             else:
                 messages.error(request, f"Webhook 测试：{msg}")
-        elif "del_webhook" in request.POST:
-            hook = WebhookConfig.objects.filter(pk=request.POST.get("webhook_id")).first()
-            if hook and hook.owner is None:
-                hook.delete()
-                messages.success(request, "Webhook 已删除。")
         elif "add_announcement" in request.POST:
             # 公告内容为 markdown 子集（# 标题 / **加粗** / *斜体* / {颜色} / [链接](url)），
             # 保存后由转换器分别渲染到首页公告栏（HTML）与服务器 motd（ANSI）
@@ -668,8 +661,6 @@ def settings(request):
             "gitcode_callback_url": f"{syscfg.get_site_base_url()}{reverse('gitcode_callback')}",
             "email_cfg": email_cfg,
             "hooks": hooks,
-            # 邮件发送方式选项（邮件 Webhook tab 下拉）
-            "email_send_via_choices": EmailConfig.SEND_VIA_CHOICES,
             "cooldown_remaining": cooldown_remaining,
             "smtp_verified": smtp_verified,
             # 顶部功能开关状态（切换即时生效）

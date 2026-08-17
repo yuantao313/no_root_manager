@@ -167,16 +167,6 @@ case "${1:-}" in
         echo "OK grant_docker $username group=docker"
         ;;
 
-    revoke_sudo)
-        # revoke_sudo <username>：从所有 sudo 组移除
-        username="$2"
-        require_user "$username"
-        for g in sudo wheel; do
-            remove_group_membership "$username" "$g" || exit 6
-        done
-        echo "OK revoke_sudo $username"
-        ;;
-
     list_groups)
         # list_groups <username_csv>：批量输出用户所属组（一次 SSH 完成，详情页展示用）
         # 输出约定：USER_GROUPS <username> <组1,组2,...>（每用户一行；不存在的用户标注）
@@ -220,7 +210,7 @@ case "${1:-}" in
         ;;
 
     *)
-        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|grant_docker|revoke_sudo|ensure_group|list_groups|add_group|del_group> [参数...]"
+        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|grant_docker|ensure_group|list_groups|add_group|del_group> [参数...]"
         exit 1
         ;;
 esac

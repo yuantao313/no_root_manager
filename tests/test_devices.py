@@ -101,7 +101,6 @@ def test_device_info_failure_not_pinned(server):
     server.refresh_from_db()
     assert recovered["cpu"] == "HiSilicon Kunpeng 920 @2.6GHz 192核"
     assert server.device_info_snapshot["cpu"] == recovered["cpu"]
-    assert server.device_info_updated_at is not None
 
 
 def test_device_info_fallback_to_snapshot(server):

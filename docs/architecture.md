@@ -37,7 +37,7 @@ erDiagram
 - `_sudo_wrap`：SSH 用户非 root 时，为特权命令自动加 `sudo -n`（按管道分段，不误拆 `||`）
 - `provision_user`：建用户 → 设密码 → `chage -d 0` 强制改密
 - `migrate_home_dir`：迁移目录（空目标先移除、`mv -T` 防嵌套、chown 失败回滚）
-- `grant_sudo` / `revoke_sudo`：sudo/wheel 组授予与撤销（自动探测组名）
+- `grant_sudo`：授予 sudo/wheel 组（自动探测组名）
 
 ## 安全设计
 
