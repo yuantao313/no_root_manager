@@ -101,6 +101,21 @@ class TestHostKeyPinning:
             ssh._connect(server)
         client_cls.assert_not_called()
 
+    def test_operational_connect_reuses_common_client_factory(self, pinned_server):
+        client = MagicMock()
+        with patch("servers.ssh._open_client", return_value=client) as open_client:
+            assert ssh._connect(pinned_server, timeout=6) is client
+
+        open_client.assert_called_once_with(
+            host=pinned_server.host,
+            port=pinned_server.port,
+            username=pinned_server.credential.username,
+            password=pinned_server.credential.password,
+            private_key=pinned_server.credential.private_key,
+            host_key_fingerprint=pinned_server.ssh_host_key_fingerprint,
+            timeout=6,
+        )
+
 
 class TestServerFingerprintForm:
     def _data(self, credential, **overrides):
@@ -225,6 +240,12 @@ class _Stream:
 
 
 class TestRemoteScriptLifecycle:
+    def test_command_result_preserves_output_and_exit_message(self):
+        stdout = _Stream(b"partial", status=9)
+        stderr = _Stream()
+
+        assert ssh._read_command_result(stdout, stderr, "命令") == (False, "partial", "命令退出码 9")
+
     def test_upload_uses_random_private_directory(self):
         sftp = MagicMock()
         client = MagicMock()

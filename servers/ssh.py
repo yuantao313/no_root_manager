@@ -93,6 +93,26 @@ def _load_key(private_key: str, password: str | None = None):
     raise paramiko.SSHException("无法解析私钥：" + "；".join(errors))
 
 
+def _open_client(*, host, port, username, password, private_key, host_key_fingerprint, timeout):
+    """按统一的主机密钥、认证来源和超时策略建立 SSH 客户端。"""
+    host_key_policy = PinnedHostKeyPolicy(host_key_fingerprint)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(host_key_policy)
+    try:
+        auth = {"pkey": _load_key(private_key, password)} if private_key else {"password": password}
+        client.connect(
+            host,
+            port=port,
+            username=username,
+            **auth,
+            **_connect_kwargs(timeout),
+        )
+    except Exception:
+        client.close()
+        raise
+    return client
+
+
 def test_connection(
     host,
     port,
@@ -116,23 +136,21 @@ def test_connection(
         )
 
     try:
-        host_key_policy = PinnedHostKeyPolicy(host_key_fingerprint)
+        client = _open_client(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            private_key=private_key,
+            host_key_fingerprint=host_key_fingerprint,
+            timeout=timeout,
+        )
     except ValueError as e:
         return False, f"SSH 主机指纹无效：{e}"
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(host_key_policy)
-    try:
-        kwargs = _connect_kwargs(timeout)
-        if private_key:
-            key = _load_key(private_key, password)
-            client.connect(host, port=port, username=username, pkey=key, **kwargs)
-        else:
-            client.connect(host, port=port, username=username, password=password, **kwargs)
-        return True, f"SSH 连接成功（{username}@{host}:{port}）"
     except Exception as e:  # noqa: BLE001 —— 测试连接需要兜底展示所有失败原因
         return False, f"连接失败：{e}"
-    finally:
-        client.close()
+    client.close()
+    return True, f"SSH 连接成功（{username}@{host}:{port}）"
 
 
 def test_server_connection(server):
@@ -153,25 +171,25 @@ def _connect(server, timeout=8):
     cred = server.credential
     if not server.ssh_host_key_fingerprint:
         raise paramiko.SSHException("SSH 主机指纹未确认：请在服务器编辑页先获取、核对并保存 SHA256 指纹。")
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(PinnedHostKeyPolicy(server.ssh_host_key_fingerprint))
-    kwargs = _connect_kwargs(timeout)
-    try:
-        if cred.private_key:
-            key = _load_key(cred.private_key, cred.password)
-            client.connect(server.host, port=server.port, username=cred.username, pkey=key, **kwargs)
-        else:
-            client.connect(
-                server.host,
-                port=server.port,
-                username=cred.username,
-                password=cred.password,
-                **kwargs,
-            )
-    except Exception:
-        client.close()
-        raise
-    return client
+    return _open_client(
+        host=server.host,
+        port=server.port,
+        username=cred.username,
+        password=cred.password,
+        private_key=cred.private_key,
+        host_key_fingerprint=server.ssh_host_key_fingerprint,
+        timeout=timeout,
+    )
+
+
+def _read_command_result(stdout, stderr, operation):
+    """统一解码远程输出并把非零退出码转换为三元组结果。"""
+    out = stdout.read().decode("utf-8", errors="replace").strip()
+    err = stderr.read().decode("utf-8", errors="replace").strip()
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status != 0:
+        return False, out, err or f"{operation}退出码 {exit_status}"
+    return True, out, err
 
 
 def exec_command(server, command, timeout=10):
@@ -182,12 +200,7 @@ def exec_command(server, command, timeout=10):
         return False, "", f"连接失败：{e}"
     try:
         _, stdout, stderr = client.exec_command(command, timeout=timeout)
-        out = stdout.read().decode("utf-8", errors="replace").strip()
-        err = stderr.read().decode("utf-8", errors="replace").strip()
-        exit_status = stdout.channel.recv_exit_status()
-        if exit_status != 0:
-            return False, out, err or f"命令退出码 {exit_status}"
-        return True, out, err
+        return _read_command_result(stdout, stderr, "命令")
     except Exception as e:  # noqa: BLE001 —— 需兜底返回失败原因
         return False, "", str(e)
     finally:
@@ -279,12 +292,7 @@ def run_script(
         if stdin_data:
             stdin.write(stdin_data + "\n")
         stdin.close()
-        out = stdout.read().decode("utf-8", errors="replace").strip()
-        err = stderr.read().decode("utf-8", errors="replace").strip()
-        exit_status = stdout.channel.recv_exit_status()
-        if exit_status != 0:
-            return False, out, err or f"脚本退出码 {exit_status}"
-        return True, out, err
+        return _read_command_result(stdout, stderr, "脚本")
     except Exception as e:  # noqa: BLE001 —— 需兜底返回失败原因
         return False, "", str(e)
     finally:
