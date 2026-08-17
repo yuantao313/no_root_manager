@@ -69,7 +69,7 @@ def test_full_flow_apply_approve_provision_withdraw(client, env):
 
     # ② 管理员审批通过 → mock SSH 开通 + 归属绑定
     c.force_login(env["admin"])
-    with patch("applications.views.provision_user", return_value=(True, "ok", "P@ssw0rd")) as m_prov:
+    with patch("applications.services.provision_user", return_value=(True, "ok", "P@ssw0rd")) as m_prov:
         resp = c.post(reverse("applications:review", args=[app.pk, "approve"]))
     app.refresh_from_db()
     assert app.status == Application.Status.APPROVED

@@ -6,8 +6,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
+from accounts.forms import ProfileForm, RegisterForm
 from accounts.models import UserProfile
-from accounts.views import ProfileForm, RegisterForm
 from notifications.models import WebhookConfig
 
 pytestmark = pytest.mark.django_db
@@ -63,7 +63,7 @@ class TestProfileEdit:
 
         assert form.is_valid()
         with (
-            patch("accounts.views.UserProfile.objects.update_or_create", side_effect=RuntimeError),
+            patch("accounts.forms.UserProfile.objects.update_or_create", side_effect=RuntimeError),
             pytest.raises(RuntimeError),
         ):
             form.save()

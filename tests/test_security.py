@@ -29,7 +29,7 @@ class TestPasswordReset:
     def test_reset_email_sent_via_smtp_config(self, client):
         User.objects.create_user(username="u1", password="old123", email="u1@x.com")
         EmailConfig.objects.create(host="smtp.x.com", port=465, username="nrm", enabled=True)
-        with patch("accounts.views.send_email", return_value=True) as mock:
+        with patch("accounts.forms.send_email", return_value=True) as mock:
             resp = client.post(reverse("accounts:password_reset"), {"email": "u1@x.com"})
         assert resp.status_code == 302
         assert mock.call_count == 1

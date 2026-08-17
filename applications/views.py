@@ -9,116 +9,12 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import Announcement
 from config.decorators import staff_required
-from notifications.services import (
-    notify_application,
-    run_in_background,
-    send_provision_credentials,
-)
-from servers.management import (
-    grant_sudo,
-    provision_user,
-    take_over_user,
-    usermod_add_group,
-    write_server_motd,
-)
-from servers.models import MachineUserBinding, Server
+from notifications.services import run_in_background, send_provision_credentials
+from servers.models import Server
 
 from .forms import ApplicationForm, ApplicationReviewForm
 from .models import Application
-
-
-def _bg_notify(application_pk, reviewed=False):
-    """后台发送新申请或审批结果通知，按 pk 重新取数。"""
-    application = Application.objects.select_related("target_server").get(pk=application_pk)
-    notify_application(application, reviewed)
-
-
-@transaction.atomic
-def _record_provision(application, ok, note, password=""):
-    """统一记录开通结果；成功时建立机器用户归属绑定。"""
-    application.provision_note = note
-    update_fields = ["provision_note", "updated_at"]
-    if ok:
-        application.provisioned_at = timezone.now()
-        update_fields.append("provisioned_at")
-        if password:
-            application.initial_password = password
-            update_fields.append("initial_password")
-        MachineUserBinding.objects.update_or_create(
-            server=application.target_server,
-            username=application.username,
-            defaults={"user": application.applicant, "source": application.apply_type},
-        )
-    application.save(update_fields=update_fields)
-
-
-def _provision_existing_user(application, server):
-    """执行不创建账号的申请，返回结果；未知类型返回 None。"""
-    if application.apply_type == Application.ApplyType.TRANSFER:
-        ok, message = take_over_user(server, application.username)
-        return ok, f"已接管：{message}" if ok else f"接管失败：{message}"
-
-    if application.apply_type == Application.ApplyType.ADMIN:
-        ok, group, message = grant_sudo(server, application.username)
-        return ok, f"已授予 sudo（{group}）：{message}" if ok else f"授予 sudo 失败：{message}"
-
-    if application.apply_type != Application.ApplyType.GROUP:
-        return None
-    groups = application.requested_user_groups()
-    if not groups:
-        return False, "未选择用户组"
-    errors = []
-    for group in groups:
-        ok, message = usermod_add_group(server, application.username, group)
-        if not ok:
-            errors.append(f"{group}:{message}")
-    if errors:
-        return False, f"加入用户组失败：{'；'.join(errors)}"
-    return True, f"已加入用户组：{','.join(groups)}"
-
-
-def _bg_provision(application_pk):
-    """后台任务：审批通过后开通账号（SSH 操作耗时，不阻塞审批请求）。
-
-    按 pk 重新取数（后台线程内使用独立 DB 连接）；结果写入工单字段，
-    管理员/申请人稍后刷新详情页可见。granted_by 取审批人（application.reviewer）。
-    """
-    application = Application.objects.select_related(
-        "applicant", "reviewer", "target_server", "target_server__credential"
-    ).get(pk=application_pk)
-    if application.status != Application.Status.APPROVED or application.provisioned_at:
-        return
-    if not application.target_server or not application.target_server.credential:
-        _record_provision(application, False, "未开通：未关联目标服务器或凭据")
-        return
-
-    server = application.target_server
-    if application.requires_superuser_approval and not (application.reviewer and application.reviewer.is_superuser):
-        _record_provision(application, False, "开通失败：该申请包含 root 级权限，但审批人不是超级管理员。")
-        return
-
-    if application.apply_type != Application.ApplyType.CREATE:
-        result = _provision_existing_user(application, server)
-        if result is None:
-            result = False, f"不支持的申请类型：{application.apply_type}"
-        _record_provision(application, *result)
-        return
-
-    # 创建类型：开通新账号
-    groups = list(server.default_groups_list())
-    # 开通后写入目标机 motd 公告（SSH 登录显示）
-    write_server_motd(server)
-
-    ok, password, msg = provision_user(
-        server,
-        application.username,
-        groups=groups,
-        with_home=True,
-    )
-    _record_provision(application, ok, msg, password)
-    if ok:
-        # 邮件（开启时）与工单同步通知：密码 + 首次必须改密提示
-        send_provision_credentials(application, password)
+from .services import notify_application_by_pk, provision_application_by_pk
 
 
 def _get_visible_application(user, pk):
@@ -209,7 +105,7 @@ def my_applications(request):
                 return redirect("applications:my")
             messages.success(request, "申请已提交，等待管理员审批。")
             # 通知（webhook+邮件）后台执行，不阻塞提交请求
-            run_in_background(_bg_notify, application.pk)
+            run_in_background(notify_application_by_pk, application.pk)
             return redirect("applications:my")
 
     return render(
@@ -325,10 +221,10 @@ def application_review(request, pk, action):
     # 必须放在 application.save() 之后：后台任务按 pk 重新取数并回写工单字段，
     # 若在 save() 之前调度，旧实例的 save() 会把后台写入的 provisioned_at 覆盖回 None。
     if action == "approve":
-        run_in_background(_bg_provision, application.pk)
+        run_in_background(provision_application_by_pk, application.pk)
         messages.success(request, "已通过申请，账号将在后台自动开通，稍后刷新详情页查看结果。")
     else:
         messages.success(request, f"已驳回申请：{application.description[:30] or application.username}")
     # 审批结果通知（webhook+邮件）后台执行，不阻塞审批请求
-    run_in_background(_bg_notify, application.pk, True)
+    run_in_background(notify_application_by_pk, application.pk, True)
     return redirect("applications:detail", pk=pk)

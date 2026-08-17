@@ -350,7 +350,7 @@ class TestPermission:
 
 class TestReviewProvision:
     def test_result_and_binding_commit_atomically(self, server, normal):
-        from applications.views import _record_provision
+        from applications.services import _record_provision
         from servers.models import MachineUserBinding
 
         app = Application.objects.create(
@@ -367,7 +367,7 @@ class TestReviewProvision:
         assert not MachineUserBinding.objects.filter(server=server, username="atomic-user").exists()
 
     def test_background_provision_skips_non_approved_and_completed(self, server, normal):
-        from applications.views import _bg_provision
+        from applications.services import provision_application_by_pk
 
         rejected = Application.objects.create(
             applicant=normal,
@@ -383,14 +383,14 @@ class TestReviewProvision:
             provisioned_at=timezone.now(),
         )
 
-        with patch("applications.views.provision_user") as provision:
-            _bg_provision(rejected.pk)
-            _bg_provision(completed.pk)
+        with patch("applications.services.provision_user") as provision:
+            provision_application_by_pk(rejected.pk)
+            provision_application_by_pk(completed.pk)
 
         provision.assert_not_called()
 
     def test_unknown_apply_type_never_falls_back_to_create(self, staff, server, normal):
-        from applications.views import _bg_provision
+        from applications.services import provision_application_by_pk
 
         application = Application.objects.create(
             applicant=normal,
@@ -402,10 +402,10 @@ class TestReviewProvision:
         )
 
         with (
-            patch("applications.views.write_server_motd") as write_motd,
-            patch("applications.views.provision_user") as provision,
+            patch("applications.services.write_server_motd") as write_motd,
+            patch("applications.services.provision_user") as provision,
         ):
-            _bg_provision(application.pk)
+            provision_application_by_pk(application.pk)
 
         application.refresh_from_db()
         assert application.provisioned_at is None
@@ -414,7 +414,7 @@ class TestReviewProvision:
         provision.assert_not_called()
 
     def test_missing_credential_failure_uses_shared_result_recording(self, normal):
-        from applications.views import _bg_provision
+        from applications.services import provision_application_by_pk
 
         server = Server.objects.create(name="no-credential", host="10.0.0.9")
         application = Application.objects.create(
@@ -426,7 +426,7 @@ class TestReviewProvision:
         previous = timezone.now() - timedelta(days=1)
         Application.objects.filter(pk=application.pk).update(updated_at=previous)
 
-        _bg_provision(application.pk)
+        provision_application_by_pk(application.pk)
 
         application.refresh_from_db()
         assert application.provision_note == "未开通：未关联目标服务器或凭据"
@@ -442,7 +442,7 @@ class TestReviewProvision:
             target_server=server,
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "用户已开通")):
+        with patch("applications.services.provision_user", return_value=(True, "Pass123", "用户已开通")):
             resp = client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         assert resp.status_code == 302
         app.refresh_from_db()
@@ -518,7 +518,7 @@ class TestReviewProvision:
             target_server=server,
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user") as mock:
+        with patch("applications.services.provision_user") as mock:
             client.post(reverse("applications:review", args=[app.pk, "reject"]), {"comment": "no"})
         mock.assert_not_called()
         app.refresh_from_db()
@@ -538,7 +538,7 @@ class TestReviewProvision:
             apply_type=Application.ApplyType.TRANSFER,
         )
         client.force_login(staff)
-        with patch("applications.views.take_over_user", return_value=(True, "已接管")):
+        with patch("applications.services.take_over_user", return_value=(True, "已接管")):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         binding = MachineUserBinding.objects.get(server=server, username="machine_user")
         assert binding.user == normal
@@ -555,7 +555,7 @@ class TestReviewProvision:
             apply_type=Application.ApplyType.ADMIN,
         )
         client.force_login(staff)
-        with patch("applications.views.grant_sudo", return_value=(True, "sudo", "已授权")):
+        with patch("applications.services.grant_sudo", return_value=(True, "sudo", "已授权")):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
 
         app.refresh_from_db()
@@ -578,7 +578,7 @@ class TestReviewProvision:
             apply_type=Application.ApplyType.CREATE,
         )
         client.force_login(staff)
-        with patch("applications.views.provision_user", return_value=(True, "Pass123", "已开通")):
+        with patch("applications.services.provision_user", return_value=(True, "Pass123", "已开通")):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         binding = MachineUserBinding.objects.get(server=server, username="zhangsan")
         assert binding.user == normal
@@ -599,7 +599,7 @@ class TestReviewProvision:
             user_groups="sudo,docker",
         )
         client.force_login(staff)
-        with patch("applications.views.usermod_add_group", return_value=(True, "已加入")) as mock:
+        with patch("applications.services.usermod_add_group", return_value=(True, "已加入")) as mock:
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         assert mock.call_count == 2  # sudo + docker 各一次
         app.refresh_from_db()
@@ -621,7 +621,7 @@ class TestReviewProvision:
             user_groups="sudo",
         )
         client.force_login(staff)
-        with patch("applications.views.usermod_add_group", return_value=(False, "用户不存在")):
+        with patch("applications.services.usermod_add_group", return_value=(False, "用户不存在")):
             client.post(reverse("applications:review", args=[app.pk, "approve"]), {"comment": "ok"})
         app.refresh_from_db()
         assert app.provisioned_at is None
