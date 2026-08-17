@@ -8,6 +8,7 @@ import logging
 import os
 import posixpath
 import secrets
+import shlex
 import socket
 
 import paramiko
@@ -271,9 +272,9 @@ def run_script(
         return False, "", f"连接失败：{e}"
     try:
         remote_path = _upload_script(client, local_script, script_name)
-        quoted = " ".join(shlex_quote(a) for a in args)
+        quoted = shlex.join(map(str, args))
         shell = "bash" if server.credential.username == "root" else "sudo -n bash"
-        command = f"{shell} {shlex_quote(remote_path)} {quoted}".strip()
+        command = f"{shell} {shlex.quote(remote_path)} {quoted}".strip()
         stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         if stdin_data:
             stdin.write(stdin_data + "\n")
@@ -290,8 +291,3 @@ def run_script(
         if remote_path:
             _cleanup_remote_script(client, remote_path)
         client.close()
-
-
-def shlex_quote(s: str) -> str:
-    """单引号包裹参数，防止注入（远端经 bash 执行）。"""
-    return "'" + str(s).replace("'", "'\\''") + "'"

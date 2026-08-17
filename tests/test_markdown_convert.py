@@ -42,6 +42,10 @@ def test_link_unsafe_scheme_renders_text_only():
     assert "点我" in out
 
 
+def test_malformed_link_renders_text_only():
+    assert markdown_to_html("[坏链接](http://[)") == "<p>坏链接</p>"
+
+
 def test_ansi_headings_use_yellow_shades():
     """终端标题映射：h1 亮黄(93)、h2 暗黄(33)、h3 灰(90)。"""
     assert markdown_to_ansi("# 一级") == "\x1b[93m一级\x1b[0m"

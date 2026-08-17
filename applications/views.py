@@ -64,7 +64,7 @@ def _provision_existing_user(application, server):
 
     if application.apply_type != Application.ApplyType.GROUP:
         return None
-    groups = [group.strip() for group in (application.user_groups or "").split(",") if group.strip()]
+    groups = application.requested_user_groups()
     if not groups:
         return False, "未选择用户组"
     errors = []
@@ -123,8 +123,25 @@ def _bg_provision(application_pk):
 
 def _get_visible_application(user, pk):
     """按角色收窄工单查询后取详情，供查看与重发邮件复用。"""
-    qs = Application.objects.select_related("applicant", "target_server", "reviewer").visible_to(user)
+    qs = Application.objects.with_context().visible_to(user)
     return get_object_or_404(qs, pk=pk)
+
+
+def _filter_applications(request, applications, *, include_server=False):
+    """统一处理工单列表的状态、类型及可选服务器筛选。"""
+    filters = {
+        "f_status": request.GET.get("status", "").strip(),
+        "f_type": request.GET.get("apply_type", "").strip(),
+    }
+    if filters["f_status"] in Application.Status.values:
+        applications = applications.filter(status=filters["f_status"])
+    if filters["f_type"] in Application.ApplyType.values:
+        applications = applications.filter(apply_type=filters["f_type"])
+    if include_server:
+        filters["f_server"] = request.GET.get("server", "").strip()
+        if filters["f_server"].isdigit():
+            applications = applications.filter(target_server_id=filters["f_server"])
+    return applications, filters
 
 
 @login_required
@@ -149,29 +166,15 @@ def application_list(request):
 
     支持 URL query 筛选：status / apply_type / server（均可选）。
     """
-    applications = Application.objects.select_related("applicant", "target_server", "reviewer").reviewable_by(
-        request.user
-    )
-
-    # 筛选参数
-    f_status = request.GET.get("status", "").strip()
-    f_type = request.GET.get("apply_type", "").strip()
-    f_server = request.GET.get("server", "").strip()
-    if f_status in Application.Status.values:
-        applications = applications.filter(status=f_status)
-    if f_type in Application.ApplyType.values:
-        applications = applications.filter(apply_type=f_type)
-    if f_server.isdigit():
-        applications = applications.filter(target_server_id=f_server)
+    applications = Application.objects.with_context().reviewable_by(request.user)
+    applications, filters = _filter_applications(request, applications, include_server=True)
 
     return render(
         request,
         "applications/list.html",
         {
             "applications": applications,
-            "f_status": f_status,
-            "f_type": f_type,
-            "f_server": f_server,
+            **filters,
             "status_choices": Application.Status.choices,
             "type_choices": Application.ApplyType.choices,
             "servers": Server.visible_to(request.user).order_by("name"),
@@ -186,17 +189,8 @@ def my_applications(request):
     任何登录用户可用；GitCode 绑定用户须先设置姓名才能提交。
     我的申请列表支持 URL query 筛选：status / apply_type（可选）。
     """
-    applications = Application.objects.select_related("applicant", "target_server", "reviewer").filter(
-        applicant=request.user
-    )
-
-    # 我的申请筛选参数（状态/类型）
-    f_status = request.GET.get("status", "").strip()
-    f_type = request.GET.get("apply_type", "").strip()
-    if f_status in Application.Status.values:
-        applications = applications.filter(status=f_status)
-    if f_type in Application.ApplyType.values:
-        applications = applications.filter(apply_type=f_type)
+    applications = Application.objects.with_context().filter(applicant=request.user)
+    applications, filters = _filter_applications(request, applications)
 
     # GitCode 绑定用户必须先完善个人信息（设置姓名）才能提交申请，
     # 避免以 gc<id> 占位身份进入系统
@@ -227,9 +221,7 @@ def my_applications(request):
             "needs_name": needs_name,
             # 系统首页同步显示启用中的公告
             "announcements": Announcement.objects.filter(enabled=True),
-            # 我的申请筛选上下文
-            "f_status": f_status,
-            "f_type": f_type,
+            **filters,
             "status_choices": Application.Status.choices,
             "type_choices": Application.ApplyType.choices,
         },
@@ -294,11 +286,7 @@ def application_resend_mail(request, pk):
 def application_review(request, pk, action):
     """审批：action 为 approve（通过）或 reject（驳回），
     普通管理员仅能审批绑定服务器的申请。"""
-    application_qs = (
-        Application.objects.select_related("applicant", "target_server", "reviewer")
-        .reviewable_by(request.user)
-        .filter(pk=pk)
-    )
+    application_qs = Application.objects.with_context().reviewable_by(request.user).filter(pk=pk)
     application = get_object_or_404(application_qs)
     if action not in {"approve", "reject"}:
         messages.error(request, "无效的审批操作。")

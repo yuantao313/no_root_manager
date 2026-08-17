@@ -7,7 +7,6 @@ from django.urls import reverse
 
 from credentials.models import Credential
 from servers.management import (
-    _random_password,
     _sudo_wrap,
     provision_user,
     take_over_user,
@@ -27,16 +26,6 @@ def root_server():
 def ubuntu_server():
     cred = Credential.objects.create(name="ubuntu", username="ubuntu", password="")
     return Server.objects.create(name="ubuntu机", host="10.0.0.2", port=22, credential=cred)
-
-
-class TestRandomPassword:
-    def test_length_and_alphabet(self):
-        pwd = _random_password()
-        assert len(pwd) == 16
-        assert pwd.isalnum()
-
-    def test_custom_length(self):
-        assert len(_random_password(8)) == 8
 
 
 class TestSudoWrap:
@@ -248,7 +237,7 @@ class TestUserGroups:
     def test_get_user_groups_cached(self, ubuntu_server):
         from servers.management import clear_user_groups_cache, get_user_groups_cached
 
-        clear_user_groups_cache()
+        clear_user_groups_cache(ubuntu_server)
         out = "USER_GROUPS alice nrm_managed\nUSER_GROUPS bob nrm_managed\n"
         with patch("servers.management._run_mgmt", return_value=(True, out, "")) as mock:
             groups_map = get_user_groups_cached(ubuntu_server, ["alice", "bob"])
@@ -257,6 +246,17 @@ class TestUserGroups:
             groups_map2 = get_user_groups_cached(ubuntu_server, ["alice"])
         assert mock.call_count == 1
         assert groups_map2["alice"] == ["nrm_managed"]
+
+    def test_get_managed_users_cached_and_clear(self, ubuntu_server):
+        from servers.management import clear_managed_users_cache, get_managed_users_cached
+
+        clear_managed_users_cache(ubuntu_server)
+        with patch("servers.management.list_nrm_members", return_value=(True, ["alice"], "ok")) as scan:
+            assert get_managed_users_cached(ubuntu_server) == (["alice"], "ok")
+            assert get_managed_users_cached(ubuntu_server) == (["alice"], "ok")
+            clear_managed_users_cache(ubuntu_server)
+            assert get_managed_users_cached(ubuntu_server) == (["alice"], "ok")
+        assert scan.call_count == 2
 
     def test_add_group_view_requires_superuser(self, client, ubuntu_server, django_user_model):
         """非超级管理员访问加组接口 → 重定向登录（user_passes_test 默认行为）。"""

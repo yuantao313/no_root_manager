@@ -163,9 +163,9 @@ def server_sync_users(request, pk):
     if not ok:
         messages.error(request, msg)
         return redirect("servers:detail", pk=pk)
-    # 强制刷新内存缓存（受管用户 + 设备信息）
+    # 强制刷新缓存（受管用户 + 设备信息）
     clear_managed_users_cache(server)
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     members, scan_msg = get_managed_users_cached(server, force_refresh=True)
     messages.success(request, f"已刷新：扫描到 {len(members)} 个受管用户（{scan_msg}）")
     return redirect("servers:detail", pk=pk)

@@ -9,6 +9,9 @@ from servers.models import ROOT_EQUIVALENT_GROUPS, Server
 class ApplicationQuerySet(models.QuerySet):
     """集中定义工单的查看与审批权限范围。"""
 
+    def with_context(self):
+        return self.select_related("applicant", "target_server", "reviewer")
+
     def reviewable_by(self, user):
         if user.is_superuser:
             return self
@@ -129,16 +132,16 @@ class Application(models.Model):
     def __str__(self):
         return f"{self.title} ({self.get_status_display()})"
 
-    def requested_user_groups(self) -> set[str]:
-        """返回规范化的用户组申请集合。"""
-        return {group.strip() for group in (self.user_groups or "").split(",") if group.strip()}
+    def requested_user_groups(self) -> tuple[str, ...]:
+        """按申请顺序返回规范化的用户组。"""
+        return tuple(group.strip() for group in (self.user_groups or "").split(",") if group.strip())
 
     @property
     def requires_superuser_approval(self) -> bool:
         """sudo、docker 及服务器管理员授权必须由超级管理员批准。"""
         if self.apply_type == self.ApplyType.ADMIN:
             return True
-        if self.requested_user_groups() & self.PRIVILEGED_GROUPS:
+        if set(self.requested_user_groups()) & self.PRIVILEGED_GROUPS:
             return True
         return bool(
             self.apply_type == self.ApplyType.CREATE

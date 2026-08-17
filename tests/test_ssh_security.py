@@ -1,6 +1,7 @@
 """SSH 主机身份、认证来源和临时脚本安全回归测试。"""
 
 import base64
+import shlex
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -265,9 +266,7 @@ class TestRemoteScriptLifecycle:
 
         assert (ok, out, err) == (True, "done", "")
         command = client.exec_command.call_args.args[0]
-        assert command.startswith(command_prefix)
-        assert "'/tmp/nrm-random/script.sh'" in command
-        assert "'arg with space'" in command
+        assert command == f"{command_prefix}{shlex.join([remote_path, 'arg with space'])}"
         assert stdin.written == "secret-input\n"
         cleanup.assert_called_once_with(client, remote_path)
         client.close.assert_called_once()

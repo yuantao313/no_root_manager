@@ -6,15 +6,20 @@ servers/scripts/nrm_mgmt.sh 脚本，经 SFTP 上传目标机后以 root 执行�
 """
 
 import re
-import secrets
 import shlex
-import string
 from pathlib import Path
+
+from django.core.cache import cache
+from django.utils.crypto import get_random_string
 
 from .models import Server
 from .ssh import exec_command, run_script
 
 NRM_GROUP = "nrm_managed"
+_CACHE_TIMEOUT = 1800
+_FAILURE_CACHE_TIMEOUT = 30
+_MANAGED_USERS_CACHE_KEY = "nrm:managed-users:{}"
+_USER_GROUPS_CACHE_KEY = "nrm:user-groups:{}"
 
 # 服务器管理脚本（代码库内，经 SFTP 上传目标机执行）
 MGMT_SCRIPT = str(Path(__file__).parent / "scripts" / "nrm_mgmt.sh")
@@ -70,12 +75,6 @@ def _exec(server, command: str):
     return exec_command(server, _sudo_wrap(server, command))
 
 
-def _random_password(length=16):
-    """生成随机密码（字母+数字，排除易混淆字符）。"""
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
 def ensure_nrm_group(server):
     """确保目标机器存在 nrm_managed 组，不存在则创建。返回 (ok, msg)。"""
     ok, out, err = _run_mgmt(server, ["ensure_group", NRM_GROUP])
@@ -115,36 +114,24 @@ def take_over_user(server, username):
     return False, err or f"接管失败：{username}"
 
 
-# 受管用户内存缓存（进程内，避免每次访问都 SSH 扫描；刷新按钮清缓存）
-_MANAGED_USERS_CACHE: dict[int, tuple[list, str]] = {}
-
-# 用户组信息内存缓存：server_id -> {username: [groups]}
-# 详情页用户管理区展示所属组时批量查询，避免每用户一次 SSH
-_USER_GROUPS_CACHE: dict[int, dict[str, list[str]]] = {}
-
-
 def get_managed_users_cached(server, force_refresh=False):
-    """扫描目标机 nrm_managed 组成员并缓存到内存（不落库）。
+    """扫描目标机 nrm_managed 组成员并通过 Django cache 缓存（不落库）。
 
     返回 (members:list[str], msg)。force_refresh=True 时强制重新扫描。
     """
-    key = server.pk
-    if not force_refresh and key in _MANAGED_USERS_CACHE:
-        return _MANAGED_USERS_CACHE[key]
+    key = _MANAGED_USERS_CACHE_KEY.format(server.pk)
+    cached = None if force_refresh else cache.get(key)
+    if cached is not None:
+        return cached
     ok, members, msg = list_nrm_members(server)
-    if not ok:
-        _MANAGED_USERS_CACHE[key] = ([], msg)
-        return [], msg
-    _MANAGED_USERS_CACHE[key] = (members, msg)
-    return members, msg
+    result = (members if ok else [], msg)
+    cache.set(key, result, _CACHE_TIMEOUT if ok else _FAILURE_CACHE_TIMEOUT)
+    return result
 
 
-def clear_managed_users_cache(server=None):
-    """清空受管用户内存缓存（刷新按钮调用）。"""
-    if server is None:
-        _MANAGED_USERS_CACHE.clear()
-    else:
-        _MANAGED_USERS_CACHE.pop(server.pk, None)
+def clear_managed_users_cache(server):
+    """清空指定服务器的受管用户缓存（刷新按钮调用）。"""
+    cache.delete(_MANAGED_USERS_CACHE_KEY.format(server.pk))
 
 
 def lock_user(server, username):
@@ -209,7 +196,7 @@ def provision_user(server, username, groups=None, with_home=True, force_pwd_chan
     group_args = ",".join(groups)
 
     # 生成随机密码，经 stdin 传给脚本（避免出现在命令行参数里）
-    password = _random_password()
+    password = get_random_string(16)
     args = [
         "provision",
         username,
@@ -304,29 +291,25 @@ def sort_user_groups(username, groups):
 
 
 def get_user_groups_cached(server, usernames, force_refresh=False):
-    """读取目标机用户所属组（内存缓存，未命中或强制刷新时批量 SSH 查询）。
+    """读取目标机用户所属组（Django cache，未命中或强制刷新时批量 SSH 查询）。
 
     返回 {username: [groups]}；查询失败返回空 dict（详情页展示降级为空组）。
     """
     names = [u for u in (usernames or []) if u]
-    key = server.pk
-    if not force_refresh and key in _USER_GROUPS_CACHE:
-        cache = _USER_GROUPS_CACHE[key]
-        if all(u in cache for u in names):
-            return cache
+    key = _USER_GROUPS_CACHE_KEY.format(server.pk)
+    cached = None if force_refresh else cache.get(key)
+    if cached is not None and all(username in cached for username in names):
+        return cached
     ok, groups_map, _ = list_user_groups(server, names)
     if ok:
-        _USER_GROUPS_CACHE[key] = groups_map
+        cache.set(key, groups_map, _CACHE_TIMEOUT)
         return groups_map
     return {}
 
 
-def clear_user_groups_cache(server=None):
-    """清空用户组信息内存缓存（增删组后或刷新时调用）。"""
-    if server is None:
-        _USER_GROUPS_CACHE.clear()
-    else:
-        _USER_GROUPS_CACHE.pop(server.pk, None)
+def clear_user_groups_cache(server):
+    """清空指定服务器的用户组缓存（增删组后或刷新时调用）。"""
+    cache.delete(_USER_GROUPS_CACHE_KEY.format(server.pk))
 
 
 def add_user_group(server, username, group):

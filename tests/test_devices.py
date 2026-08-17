@@ -90,7 +90,7 @@ def test_collect_device_info_failure(server):
 def test_device_info_cache(server):
     from servers.devices import clear_device_info_cache, get_device_info
 
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     with patch("servers.devices.run_script", side_effect=_fake_run_script) as mocked:
         get_device_info(server)
         get_device_info(server)
@@ -100,12 +100,12 @@ def test_device_info_cache(server):
 def test_device_info_failure_not_pinned(server):
     from servers.devices import clear_device_info_cache, get_device_info
 
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     with patch("servers.devices.run_script", return_value=(False, "", "连接失败")):
         info = get_device_info(server)
     assert info["cpu"] == "" and "连接失败" in info["msg"]
 
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     with patch("servers.devices.run_script", side_effect=_fake_run_script):
         recovered = get_device_info(server)
     server.refresh_from_db()
@@ -116,10 +116,10 @@ def test_device_info_failure_not_pinned(server):
 def test_device_info_fallback_to_snapshot(server):
     from servers.devices import clear_device_info_cache, get_device_info
 
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     with patch("servers.devices.run_script", side_effect=_fake_run_script):
         get_device_info(server)
-    clear_device_info_cache()
+    clear_device_info_cache(server)
     with patch("servers.devices.run_script", return_value=(False, "", "连接失败")):
         info = get_device_info(server)
     assert info["cpu"] == "HiSilicon Kunpeng 920 @2.6GHz 192核"

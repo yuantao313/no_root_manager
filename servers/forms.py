@@ -35,13 +35,13 @@ class ServerForm(forms.ModelForm):
     def clean_default_group(self):
         """默认组会自动授予每个新账号，禁止夹带 root 级权限。"""
         value = self.cleaned_data.get("default_group", "")
-        groups = {group.strip() for group in value.split(",") if group.strip()}
-        dangerous = sorted(groups & ROOT_EQUIVALENT_GROUPS)
+        groups = [group.strip() for group in value.split(",") if group.strip()]
+        dangerous = sorted(set(groups) & ROOT_EQUIVALENT_GROUPS)
         if dangerous:
             raise forms.ValidationError(
                 f"默认用户组不能包含 root 级权限组：{', '.join(dangerous)}；请改走独立权限申请。"
             )
-        return ",".join(group.strip() for group in value.split(",") if group.strip())
+        return ",".join(groups)
 
     def clean_ssh_host_key_fingerprint(self):
         """仅接受 OpenSSH SHA256 指纹。

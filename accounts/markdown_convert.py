@@ -15,6 +15,8 @@ HTML 输出仅产生受控标签（h1~h3/p/strong/em/span/a/br），可安全 ``
 """
 
 import re
+from html import escape
+from urllib.parse import urlsplit
 
 # 颜色名 → 终端 SGR 前景色码（含亮色 90~97）
 _COLOR_ANSI = {
@@ -45,8 +47,6 @@ _HEADING_ANSI = {"1": 93, "2": 33, "3": 90}
 
 # 允许的链接协议（其余如 javascript: / data: 一律禁用，只渲染文字）
 _ALLOWED_SCHEMES = {"http", "https", "mailto"}
-_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):")
-
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 _ITALIC_RE = re.compile(r"\*([^*]+)\*")
@@ -54,22 +54,14 @@ _COLOR_RE = re.compile(r"\{([A-Za-z]+)\}(.*?)\{/\1\}")
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
 
 
-def _escape_html(text: str) -> str:
-    """HTML 转义（先 & 后其余，避免双重转义）。"""
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#39;")
-    )
-
-
 def _safe_url(url: str) -> str:
     """校验链接协议：危险协议返回空串（仅渲染文字），否则返回原 URL。"""
     url = url.strip()
-    m = _SCHEME_RE.match(url)
-    if m and m.group(1).lower() not in _ALLOWED_SCHEMES:
+    try:
+        scheme = urlsplit(url).scheme.lower()
+    except ValueError:
+        return ""
+    if scheme not in _ALLOWED_SCHEMES | {""}:
         return ""
     return url
 
@@ -101,7 +93,7 @@ def _convert_basic(text: str, html: bool) -> str:
         if not url:
             return placeholder(label)
         if html:
-            return placeholder(_link_html(_escape_html(label), _escape_html(url)))
+            return placeholder(_link_html(escape(label), escape(url)))
         return placeholder(_link_ansi(label, url))
 
     text = _LINK_RE.sub(link_sub, text)
@@ -121,7 +113,7 @@ def _convert_basic(text: str, html: bool) -> str:
 def _convert_inline(text: str, html: bool) -> str:
     """行内完整转换：先转义/链接/颜色（颜色内部可含加粗斜体链接），再基础转换。"""
     if html:
-        text = _escape_html(text)
+        text = escape(text)
 
     def color_sub(m: re.Match) -> str:
         color = m.group(1).lower()
@@ -133,10 +125,10 @@ def _convert_inline(text: str, html: bool) -> str:
 
     text = _LINK_RE.sub(
         lambda m: (
-            _escape_html(m.group(1))
+            escape(m.group(1))
             if html and not _safe_url(m.group(2))
             else (
-                f'<a href="{_escape_html(_safe_url(m.group(2)))}" target="_blank" rel="noopener noreferrer">{_escape_html(m.group(1))}</a>'
+                f'<a href="{escape(_safe_url(m.group(2)))}" target="_blank" rel="noopener noreferrer">{escape(m.group(1))}</a>'
             )
             if html
             else _convert_basic(f"[{m.group(1)}]({m.group(2)})", html)
