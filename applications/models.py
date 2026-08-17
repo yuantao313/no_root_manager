@@ -44,6 +44,8 @@ class Application(models.Model):
         REJECTED = "rejected", "已驳回"
         WITHDRAWN = "withdrawn", "已撤回"
 
+    BLOCKING_STATUSES = (Status.PENDING, Status.APPROVED)
+
     # 申请人（登录用户，地位平等；身份信息见 applicant_name/contact）
     applicant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -53,7 +55,7 @@ class Application(models.Model):
         null=True,
         blank=True,
     )
-    # 申请时填写的身份信息
+    # 提交时从平台账号复制的身份快照
     applicant_name = models.CharField("申请人姓名", max_length=50, default="")
     username = models.CharField("用户名", max_length=50, default="")
     email = models.EmailField("邮箱", max_length=100, default="")

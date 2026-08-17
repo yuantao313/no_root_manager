@@ -45,8 +45,9 @@ class ApplicationForm(forms.ModelForm):
             "description": "申请理由",
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user, **kwargs):
         super().__init__(*args, **kwargs)
+        self.user = user
         # 目标服务器从数据库服务器表导出下拉选择（select2 可搜索）
         self.fields["target_server"].queryset = Server.objects.all()
         self.fields["target_server"].required = True
@@ -62,7 +63,35 @@ class ApplicationForm(forms.ModelForm):
         elif apply_type != Application.ApplyType.GROUP:
             # 隐藏字段也必须由后端归一化，防止给其他申请类型夹带无效权限组。
             cleaned_data["user_groups"] = []
+        is_transfer = apply_type == Application.ApplyType.TRANSFER
+        if is_transfer:
+            if not cleaned_data.get("transfer_username"):
+                self.add_error("transfer_username", "请输入要接管的已有机器用户名。")
+        else:
+            cleaned_data["transfer_username"] = ""
+        username = cleaned_data.get("transfer_username") or getattr(self.user, "username", "")
+        server = cleaned_data.get("target_server")
+        duplicate = Application.objects.filter(
+            target_server=server,
+            username=username,
+            status__in=Application.BLOCKING_STATUSES,
+        ).exclude(pk=self.instance.pk)
+        if username and server and duplicate.exists():
+            self.add_error(None, f"服务器上用户 {username} 已存在进行中的申请，请勿重复申请。")
         return cleaned_data
+
+    def save(self, commit=True):
+        application = super().save(commit=False)
+        user = self.user
+        application.applicant = user
+        application.applicant_name = user.first_name or user.username
+        application.email = user.email
+        application.employee_id = getattr(getattr(user, "profile", None), "employee_id", "") or ""
+        application.user_groups = ",".join(self.cleaned_data.get("user_groups") or [])
+        application.username = self.cleaned_data["transfer_username"] or user.username
+        if commit:
+            application.save()
+        return application
 
 
 class ApplicationReviewForm(forms.Form):

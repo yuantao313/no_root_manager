@@ -201,43 +201,11 @@ def my_applications(request):
     # 避免以 gc<id> 占位身份进入系统
     needs_name = request.user.socialaccount_set.filter(provider="gitcode").exists() and not request.user.first_name
 
-    form = ApplicationForm()
+    form = ApplicationForm(user=request.user)
     if request.method == "POST" and not needs_name:
-        form = ApplicationForm(request.POST)
+        form = ApplicationForm(request.POST, user=request.user)
         if form.is_valid():
             application = form.save(commit=False)
-            application.applicant = request.user
-            # 身份信息/工号/目标用户名全部来自账号，不再由申请表单填写
-            application.applicant_name = request.user.first_name or request.user.username
-            application.email = request.user.email
-            application.employee_id = getattr(getattr(request.user, "profile", None), "employee_id", "") or ""
-            # 申请的用户组（创建类型）：逗号分隔存储
-            user_groups = form.cleaned_data.get("user_groups") or []
-            application.user_groups = ",".join(user_groups)
-
-            if application.apply_type == Application.ApplyType.TRANSFER:
-                # 转移类型：目标机器已有用户名（从前端机器用户下拉选择）
-                application.username = (form.cleaned_data.get("transfer_username") or "").strip()
-                if not application.username:
-                    messages.error(request, "请从机器用户列表中选择要接管的账号。")
-                    return redirect("applications:my")
-            else:
-                # 创建/管理员类型：用户名直接用登录用户名
-                application.username = request.user.username
-
-            # 防重复申请：同一服务器 + 用户名 已有进行中的申请（待审批/已通过）则禁止提交
-            dup = Application.objects.filter(
-                target_server=application.target_server,
-                username=application.username,
-                status__in=[Application.Status.PENDING, Application.Status.APPROVED],
-            ).exclude(pk=application.pk)
-            if dup.exists():
-                messages.error(
-                    request,
-                    f"服务器上用户 {application.username} 已存在进行中的申请，请勿重复申请。",
-                )
-                return redirect("applications:my")
-
             try:
                 with transaction.atomic():
                     application.save()

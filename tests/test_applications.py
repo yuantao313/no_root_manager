@@ -8,6 +8,8 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
 
+from accounts.models import UserProfile
+from applications.forms import ApplicationForm
 from applications.models import Application
 from credentials.models import Credential
 from servers.models import Server, ServerAdminBinding
@@ -96,6 +98,126 @@ class TestRequireLogin:
 
     def test_anonymous_cannot_see_list(self, client):
         assert client.get(reverse("applications:list")).status_code == 302
+
+
+class TestApplicationForm:
+    @pytest.fixture
+    def applicant(self):
+        user = User.objects.create_user(
+            username="applicant", password="x", first_name="张三", email="zhangsan@example.com"
+        )
+        UserProfile.objects.create(user=user, employee_id="E100")
+        return user
+
+    @pytest.mark.parametrize("apply_type", [Application.ApplyType.CREATE, Application.ApplyType.ADMIN])
+    def test_save_builds_application_from_user(self, applicant, server, apply_type):
+        form = ApplicationForm(
+            {
+                "apply_type": apply_type,
+                "target_server": server.pk,
+                "description": "创建账号",
+                "transfer_username": "ignored",
+                "user_groups": ["sudo"],
+            },
+            user=applicant,
+        )
+
+        assert form.is_valid()
+        application = form.save(commit=False)
+        assert application.pk is None
+        assert application.applicant == applicant
+        assert application.applicant_name == "张三"
+        assert application.email == "zhangsan@example.com"
+        assert application.employee_id == "E100"
+        assert application.username == "applicant"
+        assert application.user_groups == ""
+
+    def test_save_normalizes_transfer_and_group_types(self, applicant, server):
+        transfer = ApplicationForm(
+            {
+                "apply_type": Application.ApplyType.TRANSFER,
+                "target_server": server.pk,
+                "description": "接管账号",
+                "transfer_username": "machine_user",
+            },
+            user=applicant,
+        )
+        group = ApplicationForm(
+            {
+                "apply_type": Application.ApplyType.GROUP,
+                "target_server": server.pk,
+                "description": "申请用户组",
+                "user_groups": ["sudo", "docker"],
+            },
+            user=applicant,
+        )
+
+        assert transfer.is_valid() and group.is_valid()
+        assert transfer.save(commit=False).username == "machine_user"
+        group_application = group.save(commit=False)
+        assert group_application.username == "applicant"
+        assert group_application.user_groups == "sudo,docker"
+
+    def test_transfer_username_is_validated_by_form(self, client, applicant, server):
+        client.force_login(applicant)
+        response = client.post(
+            reverse("applications:my"),
+            {
+                "apply_type": Application.ApplyType.TRANSFER,
+                "target_server": server.pk,
+                "description": "接管账号",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "请输入要接管的已有机器用户名" in response.content.decode()
+        assert not Application.objects.exists()
+
+    @pytest.mark.parametrize(
+        ("status", "provisioned"),
+        [
+            (Application.Status.PENDING, False),
+            (Application.Status.APPROVED, True),
+        ],
+    )
+    def test_active_or_provisioned_application_blocks_duplicate(self, applicant, server, status, provisioned):
+        Application.objects.create(
+            applicant=applicant,
+            username=applicant.username,
+            target_server=server,
+            status=status,
+            provisioned_at=timezone.now() if provisioned else None,
+        )
+        form = ApplicationForm(
+            {
+                "apply_type": Application.ApplyType.CREATE,
+                "target_server": server.pk,
+                "description": "重复申请",
+            },
+            user=applicant,
+        )
+
+        assert not form.is_valid()
+        assert "已存在进行中的申请" in form.non_field_errors()[0]
+
+    @pytest.mark.parametrize("status", [Application.Status.REJECTED, Application.Status.WITHDRAWN])
+    def test_finished_application_allows_new_request(self, applicant, server, status):
+        Application.objects.create(
+            applicant=applicant,
+            username=applicant.username,
+            target_server=server,
+            status=status,
+        )
+        form = ApplicationForm(
+            {
+                "apply_type": Application.ApplyType.CREATE,
+                "target_server": server.pk,
+                "description": "重新申请",
+            },
+            user=applicant,
+        )
+
+        assert form.is_valid()
 
 
 class TestRegister:
