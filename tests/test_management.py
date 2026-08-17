@@ -150,6 +150,53 @@ class TestManagedUsersBinding:
         assert "m_user_c" in html
 
 
+class TestMotdPush:
+    def test_reuses_rendered_announcement_for_all_servers(self, root_server, ubuntu_server):
+        from servers.management import push_notices
+
+        with (
+            patch("servers.management._announcement_text", return_value="rendered") as render,
+            patch("servers.management.write_server_motd", return_value=(True, "ok")) as write,
+        ):
+            ok, message = push_notices()
+
+        assert ok is True
+        assert "2 台服务器" in message
+        render.assert_called_once_with()
+        assert write.call_count == 2
+        write.assert_any_call(root_server, "rendered")
+        write.assert_any_call(ubuntu_server, "rendered")
+
+    def test_empty_announcement_clears_existing_motd(self, ubuntu_server):
+        from servers.management import push_notices
+
+        with (
+            patch("servers.management._announcement_text", return_value=""),
+            patch("servers.management.write_server_motd", return_value=(True, "已清除")) as write,
+        ):
+            ok, message = push_notices(ubuntu_server)
+
+        assert ok is True
+        assert "1 台服务器" in message
+        write.assert_called_once_with(ubuntu_server, "")
+
+    def test_reports_partial_failure(self, root_server, ubuntu_server):
+        from servers.management import push_notices
+
+        with (
+            patch("servers.management._announcement_text", return_value="rendered"),
+            patch(
+                "servers.management.write_server_motd",
+                side_effect=[(True, "ok"), (False, "连接失败")],
+            ),
+        ):
+            ok, message = push_notices()
+
+        assert ok is False
+        assert "1 台服务器" in message
+        assert "ubuntu机：连接失败" in message
+
+
 class TestUserGroups:
     """用户所属组：目标机批量查询 + 增加/删除用户组（详情页用户管理区）。"""
 
@@ -232,6 +279,14 @@ class TestUserGroups:
         with patch("servers.management._run_mgmt") as mock:
             ok, msg = remove_user_group(ubuntu_server, "alice", "nrm_managed")
         assert ok is False and "不能直接移除" in msg
+        mock.assert_not_called()
+
+    def test_remove_user_group_blocks_primary_group(self, ubuntu_server):
+        from servers.management import remove_user_group
+
+        with patch("servers.management._run_mgmt") as mock:
+            ok, msg = remove_user_group(ubuntu_server, "alice", "alice")
+        assert ok is False and "受保护" in msg
         mock.assert_not_called()
 
     def test_get_user_groups_cached(self, ubuntu_server):
@@ -361,6 +416,26 @@ class TestUserGroups:
         # 移出列表 = docker（nrm_managed 被强制保留），加入列表 = sudo
         mock_add.assert_called_once_with(ubuntu_server, "alice", "sudo")
         mock_rm.assert_called_once_with(ubuntu_server, "alice", "docker")
+
+    def test_update_user_groups_keeps_primary_group(self, client, ubuntu_server, django_user_model):
+        su = django_user_model.objects.create_user(username="su10", password="x12345!", is_superuser=True)
+        client.force_login(su)
+        with (
+            patch(
+                "servers.views.get_user_groups_cached",
+                return_value={"alice": ["alice", "nrm_managed", "docker"]},
+            ),
+            patch("servers.views.add_user_group") as mock_add,
+            patch("servers.views.remove_user_group", return_value=(True, "ok")) as mock_remove,
+            patch("servers.views.clear_user_groups_cache"),
+        ):
+            client.post(
+                reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
+                {"username": "alice", "groups": "nrm_managed"},
+            )
+
+        mock_add.assert_not_called()
+        mock_remove.assert_called_once_with(ubuntu_server, "alice", "docker")
 
     def test_update_user_groups_requires_superuser(self, client, ubuntu_server, django_user_model):
         """非超级管理员访问批量切换接口 → 重定向。"""

@@ -335,8 +335,8 @@ def remove_user_group(server, username, group):
     group = (group or "").strip()
     if not username or not group:
         return False, "参数错误"
-    if group == NRM_GROUP:
-        return False, f"{NRM_GROUP} 是受管用户标识组，不能直接移除"
+    if group in {NRM_GROUP, username}:
+        return False, f"{group} 是受保护的用户组，不能直接移除"
     ok, out, err = _run_mgmt(server, ["del_group", username, group])
     if ok:
         return True, f"用户 {username} 已从 {group} 组移除"
@@ -357,11 +357,12 @@ def _announcement_text():
     return "\n\n".join(markdown_to_ansi(n.content) for n in notices)
 
 
-def write_server_motd(server):
+def write_server_motd(server, content=None):
     """把启用中的公告写入目标服务器 motd（/etc/motd.d/nrm_notifications），
     所有用户 SSH 登录时自动显示；无启用公告时清除 motd 文件。返回 (ok, msg)。
     """
-    content = _announcement_text()
+    if content is None:
+        content = _announcement_text()
     motd_file = "/etc/motd.d/nrm_notifications"
     # Ubuntu 使用 /etc/motd.d/ 聚合展示；确保目录存在后写入（root 权限）
     # 注意：不能用 `echo x > file`（重定向由当前 shell 执行，sudo 无法提权），
@@ -386,14 +387,13 @@ def push_notices(server=None):
 
     server 为空则推送全部服务器。返回 (ok, msg)。
     """
-    if not _announcement_text():
-        return True, "无启用公告，跳过"
+    content = _announcement_text()
     servers = [server] if server else list(Server.objects.all())
     done, fail = 0, []
     for s in servers:
-        ok, msg = write_server_motd(s)
+        ok, msg = write_server_motd(s, content)
         if ok:
             done += 1
         else:
             fail.append(f"{s.name}：{msg}")
-    return True, f"公告推送完成：{done} 台服务器 motd" + (f"；失败：{'；'.join(fail)}" if fail else "")
+    return not fail, f"公告推送完成：{done} 台服务器 motd" + (f"；失败：{'；'.join(fail)}" if fail else "")

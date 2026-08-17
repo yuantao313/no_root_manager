@@ -503,7 +503,8 @@ def _settings_save_announcement(request, announcement):
     announcement.enabled = "enabled" in request.POST
     announcement.save()
     ok, push_message = push_notices()
-    messages.success(request, "公告已保存并自动推送到服务器。" + (push_message if ok else ""))
+    add_message = messages.success if ok else messages.warning
+    add_message(request, f"公告已保存。{push_message}")
 
 
 @login_required

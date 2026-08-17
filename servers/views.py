@@ -226,8 +226,8 @@ def server_change_user_group(request, pk, action):
     if not username or not group:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
-    if action == "remove" and group == NRM_GROUP:
-        messages.error(request, f"{NRM_GROUP} 是受管用户标识组，不能直接移除。")
+    if action == "remove" and group in {NRM_GROUP, username}:
+        messages.error(request, f"{group} 是受保护的用户组，不能直接移除。")
         return redirect("servers:detail", pk=pk)
     handler = add_user_group if action == "add" else remove_user_group
     ok, msg = handler(server, username, group)
@@ -254,7 +254,8 @@ def server_update_user_groups(request, pk):
     target.add(NRM_GROUP)  # 受管标识组强制保留
     current = set(get_user_groups_cached(server, [username]).get(username, []))
     to_add = target - current
-    to_remove = current - target
+    # 用户同名主组和受管标识组都不属于可编辑附加组，不能尝试移除。
+    to_remove = current - target - {username, NRM_GROUP}
     ok_all = True
     for g in sorted(to_add):
         ok, msg = add_user_group(server, username, g)
@@ -262,8 +263,6 @@ def server_update_user_groups(request, pk):
             ok_all = False
             messages.error(request, msg)
     for g in sorted(to_remove):
-        if g == NRM_GROUP:
-            continue
         ok, msg = remove_user_group(server, username, g)
         if not ok:
             ok_all = False

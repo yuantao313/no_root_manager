@@ -194,6 +194,21 @@ class TestSettingsActionDispatch:
         assert announcement.enabled is True
         push.assert_called_once_with()
 
+    def test_announcement_save_warns_when_push_fails(self, client):
+        client.force_login(_superuser())
+        with patch("accounts.views.push_notices", return_value=(False, "失败：测试机连接超时")):
+            response = client.post(
+                reverse("accounts:settings"),
+                {"add_announcement": "1", "content": "# 维护通知", "enabled": "on"},
+                follow=True,
+            )
+
+        messages = list(response.context["messages"])
+        assert len(messages) == 1
+        assert messages[0].level_tag == "warning"
+        assert "公告已保存" in str(messages[0])
+        assert "测试机连接超时" in str(messages[0])
+
 
 class TestGlobalWebhook:
     def test_save_reuses_form_and_preserves_secret_and_switch(self, client):
