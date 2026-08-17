@@ -308,6 +308,8 @@ class TestWebhook:
         assert event == "application.created"
         assert payload["title"] == "通知测试"
         assert payload["username"] == "zs"
+        assert payload["status_display"] == application.get_status_display()
+        assert payload["provision_note"] == application.provision_note
 
 
 class TestFeishuWebhook:
@@ -352,6 +354,28 @@ class TestFeishuWebhook:
         assert "工号：t00967490" in text
         assert "审批链接" in text and "applications/15/" in text
         assert '"applicant_name"' not in text  # 不再直接展示原始 JSON
+
+    def test_feishu_reuses_complete_application_details(self):
+        import json as _json
+
+        from notifications.services import _build_webhook_body
+
+        body = _build_webhook_body(
+            "feishu",
+            "https://open.feishu.cn/open-apis/bot/v2/hook/abc",
+            "application.reviewed",
+            {
+                "id": 16,
+                "status": "approved",
+                "status_display": "已通过",
+                "review_comment": "审批通过",
+                "provision_note": "账号已开通",
+            },
+        )
+        text = _json.loads(body)["content"]["text"]
+        assert "状态：已通过" in text
+        assert "审批意见：审批通过" in text
+        assert "开通结果：账号已开通" in text
 
     def test_non_feishu_platform_keeps_generic_format(self):
         import json as _json

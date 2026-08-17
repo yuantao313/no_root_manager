@@ -52,6 +52,31 @@ def _record_provision(application, ok, note, password=""):
     application.save(update_fields=update_fields)
 
 
+def _provision_existing_user(application, server):
+    """执行不创建账号的申请，返回结果；未知类型返回 None。"""
+    if application.apply_type == Application.ApplyType.TRANSFER:
+        ok, message = take_over_user(server, application.username)
+        return ok, f"已接管：{message}" if ok else f"接管失败：{message}"
+
+    if application.apply_type == Application.ApplyType.ADMIN:
+        ok, group, message = grant_sudo(server, application.username)
+        return ok, f"已授予 sudo（{group}）：{message}" if ok else f"授予 sudo 失败：{message}"
+
+    if application.apply_type != Application.ApplyType.GROUP:
+        return None
+    groups = [group.strip() for group in (application.user_groups or "").split(",") if group.strip()]
+    if not groups:
+        return False, "未选择用户组"
+    errors = []
+    for group in groups:
+        ok, message = usermod_add_group(server, application.username, group)
+        if not ok:
+            errors.append(f"{group}:{message}")
+    if errors:
+        return False, f"加入用户组失败：{'；'.join(errors)}"
+    return True, f"已加入用户组：{','.join(groups)}"
+
+
 def _bg_provision(application_pk):
     """后台任务：审批通过后开通账号（SSH 操作耗时，不阻塞审批请求）。
 
@@ -72,38 +97,11 @@ def _bg_provision(application_pk):
         _record_provision(application, False, "开通失败：该申请包含 root 级权限，但审批人不是超级管理员。")
         return
 
-    # 转移类型：将目标机器已有用户接管为受管用户（用户信息实时扫描，不落库）
-    if application.apply_type == Application.ApplyType.TRANSFER:
-        ok, msg = take_over_user(server, application.username)
-        _record_provision(application, ok, f"已接管：{msg}" if ok else f"接管失败：{msg}")
-        return
-
-    # 平台管理员类型：不开新账号，直接授予所选服务器的 sudo 权限（username=登录用户名）
-    if application.apply_type == Application.ApplyType.ADMIN:
-        ok, group, msg = grant_sudo(server, application.username)
-        note = f"已授予 sudo（{group}）：{msg}" if ok else f"授予 sudo 失败：{msg}"
-        _record_provision(application, ok, note)
-        return
-
-    # 申请用户组类型：不建号不转移，把登录用户加入所选用户组（usermod -aG）
-    if application.apply_type == Application.ApplyType.GROUP:
-        group_list = [g.strip() for g in (application.user_groups or "").split(",") if g.strip()]
-        if not group_list:
-            _record_provision(application, False, "未选择用户组")
-            return
-        ok = True
-        errors = []
-        for g in group_list:
-            g_ok, g_msg = usermod_add_group(server, application.username, g)
-            if not g_ok:
-                ok = False
-                errors.append(f"{g}:{g_msg}")
-        note = f"已加入用户组：{','.join(group_list)}" if ok else f"加入用户组失败：{'；'.join(errors)}"
-        _record_provision(application, ok, note)
-        return
-
     if application.apply_type != Application.ApplyType.CREATE:
-        _record_provision(application, False, f"不支持的申请类型：{application.apply_type}")
+        result = _provision_existing_user(application, server)
+        if result is None:
+            result = False, f"不支持的申请类型：{application.apply_type}"
+        _record_provision(application, *result)
         return
 
     # 创建类型：开通新账号

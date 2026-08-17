@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
 
-from accounts.models import SystemConfig
+from accounts.models import Announcement, SystemConfig
 from notifications.models import EmailConfig, WebhookConfig
 
 pytestmark = pytest.mark.django_db
@@ -119,6 +119,80 @@ class TestSiteBaseUrl:
         link = _review_link({"id": 42})
         assert link.startswith("http://myhost:7777/applications/42/")
         assert "example.com" not in link
+
+
+class TestSettingsActionDispatch:
+    def test_only_first_recognized_action_runs(self, client):
+        from allauth.socialaccount.models import SocialApp
+
+        client.force_login(_superuser())
+        client.post(
+            reverse("accounts:settings"),
+            {
+                "save_site_base_url": "1",
+                "site_base_url": "https://nrm.example.com/",
+                "save_gitcode": "1",
+                "gitcode_client_id": "must-not-run",
+            },
+        )
+
+        assert SystemConfig.get_singleton().site_base_url == "https://nrm.example.com"
+        assert not SocialApp.objects.filter(provider="gitcode").exists()
+
+    def test_mail_webhook_action_preserves_blank_secrets(self, client):
+        client.force_login(_superuser())
+        config = EmailConfig.objects.create(
+            host="smtp.example.com",
+            username="mailer",
+            mail_webhook_url="https://hooks.example.com/mail",
+            mail_webhook_token="keep-token",
+        )
+
+        client.post(
+            reverse("accounts:settings"),
+            {
+                "save_mail_webhook": "1",
+                "send_via": EmailConfig.SEND_VIA_WEBHOOK,
+                "mail_webhook_url": "",
+                "mail_webhook_token": "",
+            },
+        )
+
+        config.refresh_from_db()
+        assert config.send_via == EmailConfig.SEND_VIA_WEBHOOK
+        assert config.mail_webhook_url == "https://hooks.example.com/mail"
+        assert config.mail_webhook_token == "keep-token"
+
+    def test_gitcode_action_updates_allauth_social_app(self, client):
+        from allauth.socialaccount.models import SocialApp
+        from django.contrib.sites.models import Site
+
+        client.force_login(_superuser())
+        client.post(
+            reverse("accounts:settings"),
+            {
+                "save_gitcode": "1",
+                "gitcode_client_id": "client-id",
+                "gitcode_client_secret": "client-secret",
+            },
+        )
+
+        app = SocialApp.objects.get(provider="gitcode")
+        assert (app.client_id, app.secret) == ("client-id", "client-secret")
+        assert list(app.sites.all()) == [Site.objects.get_current()]
+
+    def test_announcement_action_saves_and_pushes(self, client):
+        client.force_login(_superuser())
+        with patch("accounts.views.push_notices", return_value=(True, "已推送")) as push:
+            client.post(
+                reverse("accounts:settings"),
+                {"add_announcement": "1", "content": "# 维护通知", "enabled": "on"},
+            )
+
+        announcement = Announcement.objects.get()
+        assert announcement.content == "# 维护通知"
+        assert announcement.enabled is True
+        push.assert_called_once_with()
 
 
 class TestGlobalWebhook:

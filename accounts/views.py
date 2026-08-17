@@ -382,6 +382,153 @@ def _test_webhook(request, hook):
     (messages.success if ok else messages.error)(request, f"Webhook 测试：{msg}")
 
 
+def _first_form_error(form):
+    return next(iter(form.errors.values()))[0]
+
+
+def _settings_save_site_base_url(request, syscfg):
+    base_url = request.POST.get("site_base_url", "").strip().rstrip("/")
+    syscfg.site_base_url = base_url
+    syscfg.save()
+    messages.success(request, "站点地址已保存。")
+
+
+def _settings_save_mail_webhook(request, email_cfg):
+    send_via = request.POST.get("send_via", "").strip()
+    if send_via not in dict(EmailConfig.SEND_VIA_CHOICES):
+        messages.error(request, "发送方式无效。")
+        return
+
+    email_cfg = email_cfg or EmailConfig()
+    new_url = request.POST.get("mail_webhook_url", "").strip()
+    effective_url = new_url or email_cfg.mail_webhook_url
+    if send_via == EmailConfig.SEND_VIA_WEBHOOK:
+        try:
+            effective_url = validate_webhook_url(effective_url)
+        except UnsafeWebhookURL as exc:
+            messages.error(request, f"邮件 Webhook 配置无效：{exc}")
+            return
+
+    email_cfg.send_via = send_via
+    if new_url:
+        email_cfg.mail_webhook_url = effective_url
+    new_token = request.POST.get("mail_webhook_token", "").strip()
+    if new_token:
+        email_cfg.mail_webhook_token = new_token
+    email_cfg.save()
+    messages.success(request, "邮件 Webhook 配置已保存。")
+
+
+def _settings_save_gitcode(request):
+    client_id = request.POST.get("gitcode_client_id", "").strip()
+    if not client_id:
+        messages.error(request, "请填写 GitCode Client ID。")
+        return
+
+    app, _ = SocialApp.objects.get_or_create(provider="gitcode")
+    app.name = "GitCode"
+    app.client_id = client_id
+    new_secret = request.POST.get("gitcode_client_secret", "").strip()
+    if new_secret:
+        app.secret = new_secret
+    app.save()
+    app.sites.add(Site.objects.get_current())
+    messages.success(request, "GitCode 配置已保存。")
+
+
+def _settings_send_smtp_code(request, email_cfg, cooldown_remaining):
+    if cooldown_remaining > 0:
+        messages.error(request, f"发送过于频繁，请 {cooldown_remaining} 秒后再试。")
+        return
+
+    _clear_pending_smtp(request)
+    smtp_form = SMTPConfigForm(request.POST)
+    if not smtp_form.is_valid():
+        messages.error(request, _first_form_error(smtp_form))
+        return
+
+    pending = smtp_form.cleaned_data
+    request.session["pending_smtp"] = pending
+    password = pending["password"] or (email_cfg.password if email_cfg else "")
+    sender = partial(
+        send_email_with_config,
+        pending["host"],
+        pending["port"],
+        pending["username"],
+        password,
+        pending["from_email"],
+        pending["use_ssl"],
+    )
+    if send_smtp_code(pending["verify_email"], sender):
+        request.session["smtp_code_sent_at"] = int(timezone.now().timestamp())
+        messages.success(request, f"验证码已发送至 {pending['verify_email']}，请查收并点击“验证”。")
+        return
+
+    messages.error(request, "验证码发送失败：当前 SMTP 配置不可用（请检查服务器/端口/认证），未保存。")
+    _clear_pending_smtp(request)
+
+
+def _settings_verify_smtp_code(request):
+    pending = request.session.get("pending_smtp")
+    if not pending:
+        messages.error(request, "请先发送验证码。")
+        return
+
+    ok, error = verify_code(
+        pending.get("verify_email", ""),
+        request.POST.get("code", ""),
+        EmailVerification.PURPOSE_SMTP_CONFIG,
+        user=None,
+    )
+    if ok:
+        request.session["smtp_verified"] = True
+        messages.success(request, "验证通过，配置已解锁，请点击“保存配置”。")
+    else:
+        messages.error(request, f"验证失败：{error}")
+
+
+def _settings_save_smtp(request, email_cfg):
+    pending = request.session.get("pending_smtp")
+    if not pending:
+        messages.error(request, "请先发送验证码并验证。")
+        return
+    if not request.session.get("smtp_verified"):
+        messages.error(request, "请先验证验证码，验证通过后才能保存。")
+        return
+
+    email_cfg = email_cfg or EmailConfig()
+    for field in ("host", "port", "username", "from_email", "use_ssl"):
+        setattr(email_cfg, field, pending[field])
+    if pending.get("password"):
+        email_cfg.password = pending["password"]
+    email_cfg.send_via = EmailConfig.SEND_VIA_SMTP
+    email_cfg.save()
+    _clear_pending_smtp(request)
+    messages.success(request, "SMTP 配置已通过验证并保存。")
+
+
+def _settings_save_webhook(request, hook):
+    form = WebhookForm(request.POST, instance=hook)
+    if _save_webhook(form, hook, None):
+        messages.success(request, "全局 Webhook 已保存。")
+    else:
+        messages.error(request, _first_form_error(form))
+
+
+def _settings_save_announcement(request, announcement):
+    content = request.POST.get("content", "").strip()
+    if not content:
+        messages.error(request, "公告内容必填。")
+        return
+
+    announcement = announcement or Announcement()
+    announcement.content = content
+    announcement.enabled = "enabled" in request.POST
+    announcement.save()
+    ok, push_message = push_notices()
+    messages.success(request, "公告已保存并自动推送到服务器。" + (push_message if ok else ""))
+
+
 @login_required
 def profile(request):
     """个人中心：资料行内编辑 + 邮箱验证码确认 + 内嵌 Webhook（仅管理员）。"""
@@ -449,142 +596,20 @@ def settings(request):
     smtp_verified = bool(request.session.get("smtp_verified", False))
 
     if request.method == "POST":
-        if "save_site_base_url" in request.POST:
-            # 站点基准地址：GitCode 回调与 webhook 审批链接统一使用
-            base_url = request.POST.get("site_base_url", "").strip().rstrip("/")
-            syscfg.site_base_url = base_url
-            syscfg.save()
-            messages.success(request, "站点地址已保存。")
-        elif "save_mail_webhook" in request.POST:
-            # 邮件 Webhook（独立于通知 Webhook）：发送方式显式选择 + URL/Token
-            send_via = request.POST.get("send_via", "").strip()
-            new_url = request.POST.get("mail_webhook_url", "").strip()
-            new_token = request.POST.get("mail_webhook_token", "").strip()
-            if send_via in dict(EmailConfig.SEND_VIA_CHOICES):
-                email_cfg = email_cfg or EmailConfig()
-                effective_url = new_url or email_cfg.mail_webhook_url
-                if send_via == EmailConfig.SEND_VIA_WEBHOOK:
-                    try:
-                        effective_url = validate_webhook_url(effective_url)
-                    except UnsafeWebhookURL as exc:
-                        messages.error(request, f"邮件 Webhook 配置无效：{exc}")
-                        return redirect("accounts:settings")
-                email_cfg.send_via = send_via
-                if new_url:
-                    email_cfg.mail_webhook_url = effective_url
-                if new_token:
-                    email_cfg.mail_webhook_token = new_token
-                email_cfg.save()
-                messages.success(request, "邮件 Webhook 配置已保存。")
-            else:
-                messages.error(request, "发送方式无效。")
-        elif "save_gitcode" in request.POST:
-            # 唯一配置源：allauth SocialApp（由 django-allauth 插件管理）
-            client_id = request.POST.get("gitcode_client_id", "").strip()
-            # secret 留空表示不修改（不展示明文）
-            new_secret = request.POST.get("gitcode_client_secret", "").strip()
-            if client_id:
-                app, _ = SocialApp.objects.get_or_create(provider="gitcode")
-                app.name = "GitCode"
-                app.client_id = client_id
-                if new_secret:
-                    app.secret = new_secret
-                app.save()
-                app.sites.add(Site.objects.get_current())
-                messages.success(request, "GitCode 配置已保存。")
-            else:
-                messages.error(request, "请填写 GitCode Client ID。")
-        elif "save_email" in request.POST:
-            # 第一步：发送验证码（60 秒冷却），用表单配置（未入库）发信
-            if cooldown_remaining > 0:
-                messages.error(request, f"发送过于频繁，请 {cooldown_remaining} 秒后再试。")
-                return redirect("accounts:settings")
-            _clear_pending_smtp(request)
-            smtp_form = SMTPConfigForm(request.POST)
-            if smtp_form.is_valid():
-                # 暂存待验证配置到 session（密码仅存于会话，验证通过后入库）
-                pending = smtp_form.cleaned_data
-                request.session["pending_smtp"] = pending
-                # 密码留空时复用已保存值进行验证，但 pending 仍保留空值，最终保存不覆盖。
-                password = pending["password"] or (email_cfg.password if email_cfg else "")
-                sender = partial(
-                    send_email_with_config,
-                    pending["host"],
-                    pending["port"],
-                    pending["username"],
-                    password,
-                    pending["from_email"],
-                    pending["use_ssl"],
-                )
-                ok = send_smtp_code(pending["verify_email"], sender)
-                if ok:
-                    # 存时间戳（秒），session JSON 序列化不支持 datetime
-                    request.session["smtp_code_sent_at"] = int(timezone.now().timestamp())
-                    messages.success(request, f"验证码已发送至 {pending['verify_email']}，请查收并点击“验证”。")
-                else:
-                    messages.error(request, "验证码发送失败：当前 SMTP 配置不可用（请检查服务器/端口/认证），未保存。")
-                    _clear_pending_smtp(request)
-            else:
-                messages.error(request, next(iter(smtp_form.errors.values()))[0])
-            return redirect("accounts:settings")
-        elif "verify_smtp_code" in request.POST:
-            # 第二步：校验验证码，通过后允许保存（模板据此启用保存按钮）
-            pending = request.session.get("pending_smtp")
-            if not pending:
-                messages.error(request, "请先发送验证码。")
-                return redirect("accounts:settings")
-            target = pending.get("verify_email", "")
-            ok, err = verify_code(
-                target, request.POST.get("code", ""), EmailVerification.PURPOSE_SMTP_CONFIG, user=None
-            )
-            if ok:
-                request.session["smtp_verified"] = True
-                messages.success(request, "验证通过，配置已解锁，请点击“保存配置”。")
-            else:
-                messages.error(request, f"验证失败：{err}")
-            return redirect("accounts:settings")
-        elif "save_email_final" in request.POST:
-            # 第三步：已验证通过才允许写入数据库
-            pending = request.session.get("pending_smtp")
-            if not pending:
-                messages.error(request, "请先发送验证码并验证。")
-                return redirect("accounts:settings")
-            if not request.session.get("smtp_verified"):
-                messages.error(request, "请先验证验证码，验证通过后才能保存。")
-                return redirect("accounts:settings")
-            email_cfg = email_cfg or EmailConfig()
-            for field in ("host", "port", "username", "from_email", "use_ssl"):
-                setattr(email_cfg, field, pending[field])
-            if pending.get("password"):
-                email_cfg.password = pending["password"]
-            # 发送方式与页面单选联动（SMTP 保存时固定为 smtp）
-            email_cfg.send_via = EmailConfig.SEND_VIA_SMTP
-            email_cfg.save()
-            _clear_pending_smtp(request)
-            messages.success(request, "SMTP 配置已通过验证并保存。")
-        elif "add_webhook" in request.POST:
-            webhook_form = WebhookForm(request.POST, instance=hook)
-            if _save_webhook(webhook_form, hook, None):
-                messages.success(request, "全局 Webhook 已保存。")
-            else:
-                messages.error(request, next(iter(webhook_form.errors.values()))[0])
-        elif "test_webhook" in request.POST:
-            _test_webhook(request, hook)
-        elif "add_announcement" in request.POST:
-            # 公告内容为 markdown 子集（# 标题 / **加粗** / *斜体* / {颜色} / [链接](url)），
-            # 保存后由转换器分别渲染到首页公告栏（HTML）与服务器 motd（ANSI）
-            content = request.POST.get("content", "").strip()
-            if content:
-                # 公告单例：有则更新，无则新建（save 内自动清理其他记录）
-                ann = announcement or Announcement()
-                ann.content = content
-                ann.enabled = "enabled" in request.POST
-                ann.save()
-                # 默认自动推送公告到全部服务器 motd（无需手动）
-                ok_push, msg_push = push_notices()
-                messages.success(request, "公告已保存并自动推送到服务器。" + (msg_push if ok_push else ""))
-            else:
-                messages.error(request, "公告内容必填。")
+        actions = (
+            ("save_site_base_url", partial(_settings_save_site_base_url, request, syscfg)),
+            ("save_mail_webhook", partial(_settings_save_mail_webhook, request, email_cfg)),
+            ("save_gitcode", partial(_settings_save_gitcode, request)),
+            ("save_email", partial(_settings_send_smtp_code, request, email_cfg, cooldown_remaining)),
+            ("verify_smtp_code", partial(_settings_verify_smtp_code, request)),
+            ("save_email_final", partial(_settings_save_smtp, request, email_cfg)),
+            ("add_webhook", partial(_settings_save_webhook, request, hook)),
+            ("test_webhook", partial(_test_webhook, request, hook)),
+            ("add_announcement", partial(_settings_save_announcement, request, announcement)),
+        )
+        handler = next((callback for action, callback in actions if action in request.POST), None)
+        if handler:
+            handler()
         return redirect("accounts:settings")
 
     return render(

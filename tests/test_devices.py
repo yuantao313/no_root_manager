@@ -54,6 +54,16 @@ def test_parse_host_intel_hides_vendor(server):
     assert cpu == "Intel(R) Xeon(R) Platinum 8480C @3.2GHz 32核"
 
 
+def test_parse_host_ignores_unknown_keys_and_invalid_frequency(server):
+    from servers.devices import _parse_host
+
+    out = "CPU_VENDOR_EXTRA=must-not-leak\nCPU_VENDOR=AMD\nCPU_MODEL=EPYC=Special\nCPU_FREQ_MHZ=invalid\nCPU_CORES=64\n"
+    cpu, memory, disk = _parse_host(out)
+    assert cpu == "AMD EPYC=Special 64核"
+    assert memory == ""
+    assert disk == ""
+
+
 def test_collect_device_info(server):
     from servers.devices import _collect_device_info
 

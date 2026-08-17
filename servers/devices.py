@@ -16,40 +16,27 @@ def _host_script():
 
 def _parse_host(out: str) -> tuple[str, str, str]:
     """解析 host_info.sh 输出，返回 CPU、内存和根分区信息。"""
-    cpu_vendor = ""
-    cpu_model = ""
-    cpu_freq = 0.0
-    cpu_cores = ""
-    memory = ""
-    disk = ""
+    values = {}
     for line in (out or "").splitlines():
-        line = line.strip()
-        if line.startswith("CPU_VENDOR="):
-            cpu_vendor = line.split("=", 1)[1].strip()
-        elif line.startswith("CPU_MODEL="):
-            cpu_model = line.split("=", 1)[1].strip()
-        elif line.startswith("CPU_FREQ_MHZ="):
-            try:
-                cpu_freq = float(line.split("=", 1)[1].strip() or 0)
-            except ValueError:
-                cpu_freq = 0.0
-        elif line.startswith("CPU_CORES="):
-            cpu_cores = line.split("=", 1)[1].strip()
-        elif line.startswith("MEM_TOTAL="):
-            memory = line.split("=", 1)[1].strip()
-        elif line.startswith("DISK_ROOT="):
-            disk = line.split("=", 1)[1].strip()
-    parts = []
-    if cpu_vendor and cpu_vendor not in ("未知", "GenuineIntel"):
-        parts.append(cpu_vendor)
-    if cpu_model and cpu_model not in ("未知", ""):
-        parts.append(cpu_model)
-    if cpu_freq > 0:
-        parts.append(f"@{cpu_freq / 1000:.1f}GHz")
+        key, separator, value = line.strip().partition("=")
+        if separator:
+            values[key] = value.strip()
+
+    unknown = {"", "未知"}
+    vendor = values.get("CPU_VENDOR", "")
+    model = values.get("CPU_MODEL", "")
+    parts = [value for value in (vendor if vendor != "GenuineIntel" else "", model) if value not in unknown]
+    try:
+        frequency = float(values.get("CPU_FREQ_MHZ", "") or 0)
+    except ValueError:
+        frequency = 0.0
+    if frequency > 0:
+        parts.append(f"@{frequency / 1000:.1f}GHz")
     cpu = " ".join(parts)
-    if cpu_cores and cpu_cores not in ("未知", ""):
-        cpu = f"{cpu} {cpu_cores}核" if cpu else f"{cpu_cores}核"
-    return cpu, memory, disk
+    cores = values.get("CPU_CORES", "")
+    if cores not in unknown:
+        cpu = f"{cpu} {cores}核" if cpu else f"{cores}核"
+    return cpu, values.get("MEM_TOTAL", ""), values.get("DISK_ROOT", "")
 
 
 def _collect_device_info(server) -> dict:

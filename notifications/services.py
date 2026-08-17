@@ -167,26 +167,35 @@ def admin_emails(application=None) -> list[str]:
     return list(_application_reviewers(application).exclude(email="").values_list("email", flat=True))
 
 
+def _application_detail_lines(payload: dict) -> list[str]:
+    """把邮件与飞书共用的申请字段格式化为可读文本行。"""
+    lines = []
+    name = payload.get("applicant_name") or ""
+    username = payload.get("username") or ""
+    if name or username:
+        lines.append(f"申请人：{name}（{username}）")
+    fields = (
+        ("工号", payload.get("employee_id")),
+        ("类型", payload.get("apply_type_display")),
+        ("目标服务器", (payload.get("target_server") or {}).get("name")),
+        ("申请内容", payload.get("description")),
+        ("状态", payload.get("status_display") or payload.get("status")),
+        ("审批意见", payload.get("review_comment")),
+        ("开通结果", payload.get("provision_note")),
+    )
+    lines.extend(f"{label}：{value}" for label, value in fields if value)
+    return lines
+
+
 def _format_mail_details(application) -> str:
     """生成邮件正文的完整申请详情（与 webhook 信息一致：工单号/申请人/工号/类型/服务器/内容/状态/审批意见/链接）。
 
     供 notify_new_application / notify_review_result 复用，避免邮件只有标题没有详情。
     """
-    lines = [f"工单 #{application.pk}"]
-    lines.append(f"申请人：{application.applicant_name}（{application.username}）")
-    if application.employee_id:
-        lines.append(f"工号：{application.employee_id}")
-    lines.append(f"类型：{application.get_apply_type_display()}")
-    if application.target_server:
-        lines.append(f"目标服务器：{application.target_server.name}")
-    if application.description:
-        lines.append(f"申请内容：{application.description}")
-    lines.append(f"状态：{application.get_status_display()}")
-    if application.review_comment:
-        lines.append(f"审批意见：{application.review_comment}")
-    if application.provision_note:
-        lines.append(f"开通结果：{application.provision_note}")
-    link = f"{_site_base_url()}{reverse('applications:detail', args=[application.pk])}"
+    payload = _application_payload(application)
+    payload["review_comment"] = application.review_comment
+    lines = [f"工单 #{application.pk}", *_application_detail_lines(payload)]
+    link = _review_link(payload)
     if link:
         lines.append(f"工单链接：{link}")
     return "\n".join(lines)
@@ -292,23 +301,7 @@ def _format_feishu_text(event: str, payload: dict) -> str:
     app_id = payload.get("id")
     if app_id:
         lines.append(f"工单 #{app_id}")
-    name = payload.get("applicant_name") or ""
-    username = payload.get("username") or ""
-    if name or username:
-        lines.append(f"申请人：{name}（{username}）")
-    if payload.get("employee_id"):
-        lines.append(f"工号：{payload['employee_id']}")
-    if payload.get("apply_type_display"):
-        lines.append(f"类型：{payload['apply_type_display']}")
-    server = payload.get("target_server") or {}
-    if server.get("name"):
-        lines.append(f"目标服务器：{server['name']}")
-    if payload.get("description"):
-        lines.append(f"申请内容：{payload['description']}")
-    if payload.get("status"):
-        lines.append(f"状态：{payload['status']}")
-    if payload.get("review_comment"):
-        lines.append(f"审批意见：{payload['review_comment']}")
+    lines.extend(_application_detail_lines(payload))
     link = _review_link(payload)
     if link:
         lines.append(f"审批链接：{link}")
@@ -438,7 +431,9 @@ def _application_payload(application) -> dict:
             else None
         ),
         "status": application.status,
+        "status_display": application.get_status_display(),
         "description": application.description,
+        "provision_note": application.provision_note,
     }
 
 
