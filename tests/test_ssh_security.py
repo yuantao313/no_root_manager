@@ -168,7 +168,7 @@ class TestServerFingerprintForm:
         assert not form.is_valid()
         assert "root 级权限组" in form.errors["default_group"][0]
 
-    @pytest.mark.parametrize("group", ["BadGroup", "bad group", "-ops", "a" * 33])
+    @pytest.mark.parametrize("group", ["bad group", "-ops", "a" * 33])
     def test_default_group_rejects_invalid_linux_group_names(self, credential, group):
         form = ServerForm(
             self._data(
@@ -180,6 +180,18 @@ class TestServerFingerprintForm:
 
         assert not form.is_valid()
         assert "用户组名称不合法" in form.errors["default_group"][0]
+
+    def test_default_group_accepts_uppercase_linux_group_names(self, credential):
+        form = ServerForm(
+            self._data(
+                credential,
+                ssh_host_key_fingerprint=_fingerprint(),
+                default_group="DevOps,AI_Group",
+            )
+        )
+
+        assert form.is_valid(), form.errors
+        assert form.cleaned_data["default_group"] == "DevOps,AI_Group"
 
     def test_default_group_is_trimmed_and_deduplicated(self, credential):
         form = ServerForm(

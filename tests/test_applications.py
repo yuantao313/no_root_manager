@@ -345,6 +345,22 @@ class TestPermission:
         resp = client.get(reverse("applications:detail", args=[app.pk]))
         assert resp.status_code == 404
 
+    def test_review_actions_share_one_comment_field(self, client, normal, staff, server):
+        application = Application.objects.create(
+            applicant=normal,
+            username="pending-user",
+            target_server=server,
+            description="待审批工单",
+        )
+        client.force_login(staff)
+
+        html = client.get(reverse("applications:detail", args=[application.pk])).content.decode()
+
+        assert html.count('name="comment"') == 1
+        assert 'id="review-comment"' in html
+        assert f'formaction="{reverse("applications:review", args=[application.pk, "approve"])}"' in html
+        assert f'formaction="{reverse("applications:review", args=[application.pk, "reject"])}"' in html
+
     def test_staff_scope_is_shared_by_list_detail_and_review(self, client, normal, server):
         reviewer = User.objects.create_user(username="reviewer", password="x", is_staff=True)
         other_server = Server.objects.create(

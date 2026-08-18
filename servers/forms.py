@@ -51,10 +51,10 @@ class ServerForm(forms.ModelForm):
             raise forms.ValidationError(
                 f"默认用户组不能包含 root 级权限组：{', '.join(dangerous)}；请改走独立权限申请。"
             )
-        invalid = [group for group in groups if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", group)]
+        invalid = [group for group in groups if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]{0,31}", group)]
         if invalid:
             raise forms.ValidationError(
-                f"用户组名称不合法：{', '.join(invalid)}；请使用小写字母、数字、下划线或连字符。"
+                f"用户组名称不合法：{', '.join(invalid)}；请使用英文字母、数字、下划线或连字符。"
             )
         # 保持管理员填写顺序，同时避免脚本重复处理同一分组。
         return ",".join(dict.fromkeys(groups))

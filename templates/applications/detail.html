@@ -76,15 +76,20 @@
         {% if can_review and application.status == "pending" %}
         <div class="review-box">
             <strong>审批操作</strong>
-            {% if can_approve %}<form method="post" action="{% url 'applications:review' application.pk 'approve' %}" class="nrm-form-grid" style="margin-top:14px;">
+            {% if not can_approve %}<p class="text-warning">该申请包含 root 级权限，仅超级管理员可以批准。</p>{% endif %}
+            <form method="post" action="{% url 'applications:review' application.pk 'reject' %}" class="nrm-form-grid nrm-review-form" style="margin-top:14px;">
                 {% csrf_token %}
-                <div class="nrm-form-row"><label for="comment">审批意见</label><div class="nrm-form-field"><textarea name="comment" id="comment" rows="3" class="form-control" placeholder="选填"></textarea></div></div>
-                <div class="nrm-form-actions"><div><button type="submit" class="btn btn-success">通过</button></div></div>
-            </form>{% else %}<p class="text-warning">该申请包含 root 级权限，仅超级管理员可以批准。</p>{% endif %}
-            <form method="post" action="{% url 'applications:review' application.pk 'reject' %}" class="nrm-form-grid" style="margin-top:22px;">
-                {% csrf_token %}
-                <div class="nrm-form-row"><label for="reject-comment">驳回原因</label><div class="nrm-form-field"><textarea name="comment" id="reject-comment" rows="2" class="form-control" required></textarea><span class="help-block">必填，请说明需要申请人修改的内容。</span></div></div>
-                <div class="nrm-form-actions"><div><button type="submit" class="btn btn-danger">驳回</button></div></div>
+                <div class="nrm-form-row">
+                    <label for="review-comment">审批意见</label>
+                    <div class="nrm-form-field">
+                        <textarea name="comment" id="review-comment" rows="3" class="form-control" placeholder="通过时选填；驳回时请说明原因"></textarea>
+                        <span class="help-block">通过时选填；驳回时必填，请说明需要申请人修改的内容。</span>
+                    </div>
+                </div>
+                <div class="nrm-form-actions"><div>
+                    {% if can_approve %}<button type="submit" class="btn btn-success" formaction="{% url 'applications:review' application.pk 'approve' %}">通过</button>{% endif %}
+                    <button type="submit" class="btn btn-danger" formaction="{% url 'applications:review' application.pk 'reject' %}">驳回</button>
+                </div></div>
             </form>
         </div>
         {% endif %}

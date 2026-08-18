@@ -63,7 +63,7 @@ dl dd { margin: 4px 0 0; }
 .nrm-form-panel > .panel-body { padding: 24px 28px; }
 
 .nrm-form-grid {
-    --nrm-form-axis: 41%;
+    --nrm-form-axis: 36%;
     --nrm-form-gap: 40px;
     position: relative;
     max-width: 900px;
