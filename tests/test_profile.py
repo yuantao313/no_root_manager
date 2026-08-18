@@ -84,7 +84,9 @@ class TestProfileEdit:
         assert "field-edit" in html
         assert 'id="field-name"' in html
         assert 'id="field-email"' in html
-        assert "nrm-profile-table" in html
+        assert "nrm-profile-grid" in html
+        assert "nrm-info-grid" in html
+        assert "nrm-profile-table" not in html
         assert "/static/js/app.js" in html
 
     def test_auth_forms_use_shared_axis_layout(self, client):

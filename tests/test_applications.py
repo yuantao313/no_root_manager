@@ -329,7 +329,10 @@ class TestPermission:
         client.force_login(normal)
         resp = client.get(reverse("applications:detail", args=[app.pk]))
         assert resp.status_code == 200
-        assert "甲" in resp.content.decode()
+        html = resp.content.decode()
+        assert "甲" in html
+        assert "nrm-info-grid" in html
+        assert "dl-horizontal" not in html
 
     def test_normal_user_cannot_view_others_application(self, client, normal, staff, server):
         """普通用户查看他人工单：404 防越权。"""

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}申请详情 - NRM{% endblock %}
 {% block content %}
-<div class="panel panel-default">
+<div class="panel panel-default nrm-form-panel">
     <div class="panel-heading">
         <div class="row">
             <div class="col-xs-8">
@@ -13,44 +13,39 @@
         </div>
     </div>
     <div class="panel-body">
-        <dl class="dl-horizontal">
-            <dt>申请人</dt>
-            <dd>{{ application.applicant_name }}{% if application.applicant %}（账号：{{ application.applicant.username }}）{% endif %}</dd>
-            <dt>用户名</dt>
-            <dd>{{ application.username|default:"—" }}</dd>
-            <dt>邮箱</dt>
-            <dd>{{ application.email|default:"—" }}</dd>
-            <dt>工号</dt>
-            <dd>{{ application.employee_id|default:"—" }}</dd>
-            <dt>申请类型</dt>
-            <dd>{{ application.get_apply_type_display }}</dd>
+        <div class="nrm-form-grid nrm-info-grid">
+            <div class="nrm-form-row"><span class="nrm-form-label">申请人</span><div class="nrm-form-field nrm-info-value">{{ application.applicant_name }}{% if application.applicant %}（账号：{{ application.applicant.username }}）{% endif %}</div></div>
+            <div class="nrm-form-row"><span class="nrm-form-label">用户名</span><div class="nrm-form-field nrm-info-value">{{ application.username|default:"—" }}</div></div>
+            <div class="nrm-form-row"><span class="nrm-form-label">邮箱</span><div class="nrm-form-field nrm-info-value">{{ application.email|default:"—" }}</div></div>
+            <div class="nrm-form-row"><span class="nrm-form-label">工号</span><div class="nrm-form-field nrm-info-value">{{ application.employee_id|default:"—" }}</div></div>
+            <div class="nrm-form-row"><span class="nrm-form-label">申请类型</span><div class="nrm-form-field nrm-info-value">{{ application.get_apply_type_display }}</div></div>
             {% if application.target_server %}
-            <dt>目标服务器</dt>
-            <dd>{% if user.is_superuser %}<a href="{% url 'servers:detail' application.target_server.pk %}">{% endif %}{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）{% if user.is_superuser %}</a>{% endif %}</dd>
+            <div class="nrm-form-row"><span class="nrm-form-label">目标服务器</span><div class="nrm-form-field nrm-info-value">{% if user.is_superuser %}<a href="{% url 'servers:detail' application.target_server.pk %}">{% endif %}{{ application.target_server.name }}（{{ application.target_server.host }}:{{ application.target_server.port }}）{% if user.is_superuser %}</a>{% endif %}</div></div>
             {% endif %}
-            <dt>申请内容</dt>
-            <dd>{{ application.description|linebreaks }}</dd>
-            <dt>提交时间</dt>
-            <dd>{{ application.created_at|date:"Y-m-d H:i" }}</dd>
-        </dl>
+            {% if application.user_groups %}<div class="nrm-form-row"><span class="nrm-form-label">申请用户组</span><div class="nrm-form-field nrm-info-value">{{ application.user_groups }}</div></div>{% endif %}
+            <div class="nrm-form-row"><span class="nrm-form-label">申请内容</span><div class="nrm-form-field nrm-info-value">{{ application.description|linebreaks }}</div></div>
+            <div class="nrm-form-row"><span class="nrm-form-label">提交时间</span><div class="nrm-form-field nrm-info-value">{{ application.created_at|date:"Y-m-d H:i" }}</div></div>
+        </div>
 
         {% if application.reviewer %}
         <div class="review-box">
-            <strong>审批结果：</strong>{{ application.get_status_display }}
-            （审批人：{{ application.reviewer.username }}，{{ application.reviewed_at|date:"Y-m-d H:i" }}）
-            {% if application.review_comment %}<br>审批意见：{{ application.review_comment }}{% endif %}
+            <div class="nrm-form-grid nrm-info-grid nrm-info-grid-compact">
+                <div class="nrm-form-row"><span class="nrm-form-label">审批结果</span><div class="nrm-form-field nrm-info-value">{{ application.get_status_display }}</div></div>
+                <div class="nrm-form-row"><span class="nrm-form-label">审批人</span><div class="nrm-form-field nrm-info-value">{{ application.reviewer.username }}</div></div>
+                <div class="nrm-form-row"><span class="nrm-form-label">审批时间</span><div class="nrm-form-field nrm-info-value">{{ application.reviewed_at|date:"Y-m-d H:i" }}</div></div>
+                {% if application.review_comment %}<div class="nrm-form-row"><span class="nrm-form-label">审批意见</span><div class="nrm-form-field nrm-info-value">{{ application.review_comment|linebreaksbr }}</div></div>{% endif %}
+            </div>
         </div>
         {% endif %}
 
         {% if can_view_initial_password %}
         <div class="review-box alert alert-warning">
             <strong>初始密码</strong>（首次登录必须修改）
-            <p style="margin:8px 0 0;">
-                账号 <code>{{ application.username }}</code> 的初始密码：<code>{{ application.initial_password }}</code><br>
-                <span class="text-muted" style="font-size:13px;">
-                    服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。
-                </span>
-            </p>
+            <div class="nrm-form-grid nrm-info-grid nrm-info-grid-compact" style="margin-top:10px;">
+                <div class="nrm-form-row"><span class="nrm-form-label">账号</span><div class="nrm-form-field nrm-info-value"><code>{{ application.username }}</code></div></div>
+                <div class="nrm-form-row"><span class="nrm-form-label">初始密码</span><div class="nrm-form-field nrm-info-value"><code>{{ application.initial_password }}</code></div></div>
+            </div>
+            <p class="nrm-form-note">服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。</p>
             {% if can_resend_initial_password %}
             {% include "applications/_resend_credentials_form.html" with button_class="btn btn-warning btn-sm" button_label="重发邮件" show_help=True %}
             {% endif %}

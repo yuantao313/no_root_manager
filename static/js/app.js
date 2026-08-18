@@ -426,36 +426,134 @@
         });
     }
 
-    /* ===== 服务器详情页：用户组按钮灯编辑（点击切换 → 保存按钮亮起） =====
-       模板约定：每行一个 data-group-form（含 hidden groups），组按钮带
-       data-group/data-active，nrm_managed 标识组由后端强制保留不参与收集。 */
+    /* ===== 服务器详情页：用户组状态编辑 =====
+       现有组点击后标记待删除；虚线按钮录入的新组标记待添加；最后统一确认。 */
     document.querySelectorAll("[data-group-form]").forEach(function (form) {
         var row = form.closest("tr");
         var saveBtn = form.querySelector("[data-save-groups]");
-        if (!row || !saveBtn) return;
-        row.querySelectorAll(".group-toggle").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-                // 切换灯状态：active=1 亮（btn-primary），active=0 灰（btn-default）
-                var active = btn.getAttribute("data-active") === "1";
-                if (active) {
-                    btn.setAttribute("data-active", "0");
-                    btn.classList.remove("btn-primary");
-                    btn.classList.add("btn-default");
-                } else {
-                    btn.setAttribute("data-active", "1");
-                    btn.classList.remove("btn-default");
-                    btn.classList.add("btn-primary");
-                }
-                saveBtn.disabled = false; // 保存按钮亮起
+        var editor = row && row.querySelector("[data-group-editor]");
+        if (!row || !saveBtn || !editor) return;
+        var chips = editor.querySelector(".nrm-group-chips");
+        var addTrigger = editor.querySelector("[data-group-add]");
+        var addEntry = editor.querySelector("[data-group-entry]");
+        var addInput = editor.querySelector("[data-group-input]");
+        var addCancel = editor.querySelector("[data-group-add-cancel]");
+        var error = editor.querySelector("[data-group-error]");
+
+        function setError(message) {
+            if (error) error.textContent = message || "";
+        }
+
+        function refreshDirtyState() {
+            var dirty = false;
+            chips.querySelectorAll("[data-group]").forEach(function (chip) {
+                var original = chip.getAttribute("data-original") === "1";
+                var active = chip.getAttribute("data-active") === "1";
+                if ((original && !active) || (!original && active)) dirty = true;
             });
+            saveBtn.disabled = !dirty;
+        }
+
+        function setExistingState(chip, active) {
+            chip.setAttribute("data-active", active ? "1" : "0");
+            chip.setAttribute("aria-pressed", active ? "true" : "false");
+            chip.classList.toggle("nrm-group-chip-current", active);
+            chip.classList.toggle("nrm-group-chip-remove", !active);
+            chip.title = active
+                ? "点击标记删除 " + chip.getAttribute("data-group")
+                : "待删除；再次点击可撤销";
+        }
+
+        function closeAddEntry() {
+            addEntry.hidden = true;
+            addTrigger.hidden = false;
+            addInput.value = "";
+        }
+
+        function findGroup(name) {
+            var matched = null;
+            chips.querySelectorAll("[data-group]").forEach(function (chip) {
+                if (chip.getAttribute("data-group") === name) matched = chip;
+            });
+            return matched;
+        }
+
+        function addPendingGroup() {
+            var name = addInput.value.trim();
+            if (!/^[a-zA-Z_][a-zA-Z0-9_-]{0,31}$/.test(name)) {
+                setError("组名需以英文字母或下划线开头，最长 32 位。");
+                addInput.focus();
+                return;
+            }
+            var existing = findGroup(name);
+            if (existing) {
+                if (existing.getAttribute("data-original") === "1" && existing.getAttribute("data-active") !== "1") {
+                    setExistingState(existing, true);
+                    setError("");
+                    closeAddEntry();
+                    refreshDirtyState();
+                    return;
+                }
+                setError("该用户组已在列表中。");
+                addInput.focus();
+                return;
+            }
+            var chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "nrm-group-chip nrm-group-chip-add group-toggle";
+            chip.textContent = name;
+            chip.setAttribute("data-group", name);
+            chip.setAttribute("data-active", "1");
+            chip.setAttribute("data-original", "0");
+            chip.setAttribute("aria-pressed", "true");
+            chip.title = "待添加；点击可取消";
+            chips.insertBefore(chip, addTrigger);
+            setError("");
+            closeAddEntry();
+            refreshDirtyState();
+        }
+
+        chips.addEventListener("click", function (event) {
+            var chip = event.target.closest(".group-toggle");
+            if (!chip || !chips.contains(chip)) return;
+            if (chip.getAttribute("data-original") === "0") {
+                chip.remove();
+            } else {
+                setExistingState(chip, chip.getAttribute("data-active") !== "1");
+            }
+            setError("");
+            refreshDirtyState();
         });
-        // 提交前收集该行所有亮着的组（逗号分隔写入 hidden groups）
+
+        addTrigger.addEventListener("click", function () {
+            addTrigger.hidden = true;
+            addEntry.hidden = false;
+            setError("");
+            addInput.focus();
+        });
+        addCancel.addEventListener("click", function () {
+            setError("");
+            closeAddEntry();
+        });
+        addInput.addEventListener("keydown", function (event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                addPendingGroup();
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                setError("");
+                closeAddEntry();
+            }
+        });
+
+        // 提交前收集所有未标记删除的组，交给后端批量计算差异。
         form.addEventListener("submit", function () {
             var groups = [];
-            row.querySelectorAll("[data-active='1']").forEach(function (b) {
-                groups.push(b.getAttribute("data-group"));
+            chips.querySelectorAll("[data-group][data-active='1']").forEach(function (chip) {
+                groups.push(chip.getAttribute("data-group"));
             });
             form.querySelector('input[name="groups"]').value = groups.join(",");
         });
+        refreshDirtyState();
     });
 })();

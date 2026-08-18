@@ -345,6 +345,8 @@ class TestServerCredentialTabs:
         html = response.content.decode()
         assert "新账号默认分组" in html
         assert "dev,ops" in html
+        assert "nrm-info-grid" in html
+        assert "info-table" not in html
         assert f'action="{reverse("servers:test", args=[server.pk])}"' in html
         assert f'action="{reverse("servers:sync_users", args=[server.pk])}"' in html
         assert client.get(reverse("servers:test", args=[server.pk])).status_code == 405

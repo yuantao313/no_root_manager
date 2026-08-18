@@ -7,79 +7,60 @@
         <div class="panel panel-default nrm-form-panel">
             <div class="panel-heading"><h3 class="panel-title">个人资料</h3></div>
             <div class="panel-body">
-                <form method="post" id="profile-form" data-verify-url="{% url 'accounts:verify_email_code_ajax' %}" data-current-email="{{ user.email|escapejs }}">
+                <form method="post" id="profile-form" class="nrm-form-grid nrm-info-grid nrm-profile-grid" data-verify-url="{% url 'accounts:verify_email_code_ajax' %}" data-current-email="{{ user.email|escapejs }}">
                     {% csrf_token %}
-                    <table class="table table-hover nrm-profile-table" style="margin-bottom:0;">
-                        <tbody>
-                        <tr>
-                            <th style="width:120px;">姓名</th>
-                            <td>
+                        <div class="nrm-form-row">
+                            <span class="nrm-form-label">姓名</span>
+                            <div class="nrm-form-field nrm-info-value">
                                 <span class="field-text" data-field="name">{{ user.first_name|default:"—" }}</span>
                                 <button type="button" class="btn btn-link btn-xs field-edit" data-field="name">编辑</button>
                                 <span id="field-name" class="field-input" style="display:none;white-space:nowrap;">
-                                    <input type="text" name="name" class="form-control" style="display:inline-block;width:60%;" value="{{ user.first_name }}">
+                                    <input type="text" name="name" class="form-control" value="{{ user.first_name }}">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
                                     <button type="button" class="btn btn-default btn-xs field-cancel" data-field="name">取消</button>
                                 </span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>工号</th>
-                            <td>
+                            </div>
+                        </div>
+                        <div class="nrm-form-row">
+                            <span class="nrm-form-label">工号</span>
+                            <div class="nrm-form-field nrm-info-value">
                                 <span class="field-text" data-field="employee_id">{{ user.profile.employee_id|default:"—" }}</span>
                                 <button type="button" class="btn btn-link btn-xs field-edit" data-field="employee_id">编辑</button>
                                 <span id="field-employee_id" class="field-input" style="display:none;white-space:nowrap;">
-                                    <input type="text" name="employee_id" class="form-control" style="display:inline-block;width:60%;" value="{{ user.profile.employee_id }}">
+                                    <input type="text" name="employee_id" class="form-control" value="{{ user.profile.employee_id }}">
                                     <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
                                     <button type="button" class="btn btn-default btn-xs field-cancel" data-field="employee_id">取消</button>
                                 </span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>邮箱</th>
-                            <td>
+                            </div>
+                        </div>
+                        <div class="nrm-form-row">
+                            <span class="nrm-form-label">邮箱</span>
+                            <div class="nrm-form-field nrm-info-value">
                                 <span class="field-text" data-field="email">{{ user.email|default:"—" }}</span>
                                 <button type="button" class="btn btn-link btn-xs field-edit" data-field="email">编辑</button>
                                 <span id="field-email" class="field-input" style="display:none;">
-                                    <span style="white-space:nowrap;">
-                                        <input type="email" name="email" id="field-email-input" class="form-control" style="display:inline-block;width:70%;" value="{{ user.email }}">
+                                    <span class="nrm-profile-input-line">
+                                        <input type="email" name="email" id="field-email-input" class="form-control" value="{{ user.email }}">
                                         <button type="button" id="btn-send-code" class="btn btn-default btn-xs" data-send-url="{% url 'accounts:send_email_code_ajax' %}">发送验证码</button>
                                     </span>
-                                    <br>
-                                    <span style="white-space:nowrap;">
-                                        <input type="text" name="code" id="field-code-input" class="form-control" style="display:inline-block;width:45%;margin-top:6px;" placeholder="邮箱验证码">
+                                    <span class="nrm-profile-input-line">
+                                        <input type="text" name="code" id="field-code-input" class="form-control" placeholder="邮箱验证码">
                                         <button type="submit" name="save_profile" class="btn btn-primary btn-xs">保存</button>
                                         <button type="button" class="btn btn-default btn-xs field-cancel" data-field="email">取消</button>
                                     </span>
-                                    <br>
                                     <span id="email-code-tip" class="text-danger" style="font-size:13px;display:none;" data-cooldown="{{ email_code_cooldown }}"></span>
                                 </span>
-                            </td>
-                        </tr>
-                        </tbody>
-                    </table>
+                            </div>
+                        </div>
                 </form>
-                <table class="table table-hover nrm-profile-table" style="margin-bottom:0;">
-                    <tbody>
-                    <tr>
-                        <th style="width:120px;">用户 ID</th>
-                        <td>{{ user.pk }}</td>
-                    </tr>
-                    <tr>
-                        <th>用户名</th>
-                        <td>{{ user.username }}</td>
-                    </tr>
-                    <tr>
-                        <th>角色</th>
-                        <td>{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</td>
-                    </tr>
-                    <tr>
-                        <th>注册时间</th>
-                        <td>{{ user.date_joined|date:"Y-m-d H:i" }}</td>
-                    </tr>
-                    <tr>
-                        <th>GitCode</th>
-                        <td>
+                <div class="nrm-form-grid nrm-info-grid nrm-profile-grid nrm-profile-readonly">
+                    <div class="nrm-form-row"><span class="nrm-form-label">用户 ID</span><div class="nrm-form-field nrm-info-value">{{ user.pk }}</div></div>
+                    <div class="nrm-form-row"><span class="nrm-form-label">用户名</span><div class="nrm-form-field nrm-info-value">{{ user.username }}</div></div>
+                    <div class="nrm-form-row"><span class="nrm-form-label">角色</span><div class="nrm-form-field nrm-info-value">{% if user.is_staff %}管理员{% else %}普通用户{% endif %}</div></div>
+                    <div class="nrm-form-row"><span class="nrm-form-label">注册时间</span><div class="nrm-form-field nrm-info-value">{{ user.date_joined|date:"Y-m-d H:i" }}</div></div>
+                    <div class="nrm-form-row">
+                        <span class="nrm-form-label">GitCode</span>
+                        <div class="nrm-form-field nrm-info-value">
                             {% with gc_account=user.socialaccount_set.all|first %}
                             {% if gc_account %}
                             <span class="label label-success">已绑定</span> gitcode#{{ gc_account.uid }}
@@ -101,10 +82,9 @@
                             {% endif %}
                             {% endif %}
                             {% endwith %}
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

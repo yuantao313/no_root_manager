@@ -494,7 +494,7 @@ class TestUserGroups:
         mock_rm.assert_not_called()
 
     def test_detail_shows_user_groups(self, client, ubuntu_server, django_user_model):
-        """详情页受管用户列表显示所属组（按钮灯：nrm_managed 为不可编辑标识组，其他组可切换）。"""
+        """详情页用统一标签编辑用户组，并区分现有组与受管标识组。"""
         su = django_user_model.objects.create_user(username="su5", password="x12345!", is_staff=True, is_superuser=True)
         client.force_login(su)
         with (
@@ -508,12 +508,15 @@ class TestUserGroups:
             resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
         html = resp.content.decode()
         assert "用户组" in html  # 列头
-        # nrm_managed 为标识组 label，不渲染成可切换按钮
-        assert "nrm_managed" in html
-        assert 'data-group="nrm_managed"' not in html
-        # sudo/docker 渲染为按钮灯（data-active=1 表示在组中）
+        # nrm_managed 与其他组使用同一标签结构，但有独立颜色且不可切换。
+        assert 'class="nrm-group-chip nrm-group-chip-managed"' in html
+        assert 'data-group="nrm_managed"' in html
+        # sudo/docker 渲染为现有组标签（data-active=1 表示提交时保留）。
+        assert "nrm-group-chip-current group-toggle" in html
         assert 'data-group="sudo"' in html
         assert 'data-group="docker"' in html
-        # 每行有保存组按钮（默认 disabled，点击按钮灯后由 JS 亮起）
+        # 每行只保留统一确认按钮，组尾部用虚线添加入口，不常驻输入框。
         assert "data-save-groups" in html
-        assert "加组" in html  # 加组按钮
+        assert "确认组变更" in html
+        assert "data-group-add" in html
+        assert 'name="group"' not in html
