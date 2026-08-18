@@ -235,6 +235,8 @@ class TestServerFormViews:
         assert "获取指纹 / 测试并保存" in html
         assert "新账号默认用户组" in html
         assert f"next={reverse('servers:create')}" in html
+        assert 'class="nrm-form-grid"' in html
+        assert html.count("nrm-form-row") >= len(ServerForm.Meta.fields)
 
     def test_failed_connection_test_does_not_save(self, client, credential):
         admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")

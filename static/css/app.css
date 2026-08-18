@@ -40,3 +40,220 @@ dl dd { margin: 4px 0 0; }
 .info-table { margin-bottom: 0; font-size: 14px; }
 .info-table > tbody > tr > th:first-child { width: 120px; }
 .info-table > thead > tr > th { font-weight: 700; }
+
+/* 业务表单：以一条稳定中轴组织“项目名 / 输入内容”。
+   仅作用于显式添加 nrm-form-grid 的自定义页面，不覆盖 Django Admin。 */
+.nrm-form-panel {
+    border-color: #dfe3e8;
+    box-shadow: 0 8px 24px rgba(31, 45, 61, .06);
+}
+
+.nrm-form-panel > .panel-heading {
+    padding: 14px 18px;
+    background: #fafbfc;
+    border-color: #e6e9ed;
+}
+
+.panel-primary.nrm-form-panel > .panel-heading {
+    color: #fff;
+    background: #337ab7;
+    border-color: #337ab7;
+}
+
+.nrm-form-panel > .panel-body { padding: 24px 28px; }
+
+.nrm-form-grid {
+    --nrm-form-axis: 41%;
+    --nrm-form-gap: 40px;
+    position: relative;
+    max-width: 900px;
+    margin-right: auto;
+    margin-left: auto;
+}
+
+.nrm-form-grid::before {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: var(--nrm-form-axis);
+    width: 1px;
+    background: #e2e6ea;
+    content: "";
+}
+
+.nrm-form-grid > .form-group,
+.nrm-form-grid > .nrm-form-row,
+.nrm-form-grid fieldset > .nrm-form-row,
+.nrm-form-grid .nrm-form-section > .nrm-form-row {
+    position: relative;
+    display: grid;
+    grid-template-columns:
+        minmax(0, calc(var(--nrm-form-axis) - (var(--nrm-form-gap) / 2)))
+        minmax(0, calc(100% - var(--nrm-form-axis) - (var(--nrm-form-gap) / 2)));
+    column-gap: var(--nrm-form-gap);
+    align-items: start;
+    margin-bottom: 18px;
+}
+
+.nrm-form-grid > .form-group > label,
+.nrm-form-row > label:first-child,
+.nrm-form-label {
+    grid-column: 1;
+    margin: 0;
+    padding-top: 8px;
+    color: #34404c;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: right;
+}
+
+.nrm-form-grid > .form-group > .controls,
+.nrm-form-row > .form-control,
+.nrm-form-row > .input-group,
+.nrm-form-row > .nrm-form-field,
+.nrm-form-row > select,
+.nrm-form-row > textarea {
+    grid-column: 2;
+    min-width: 0;
+}
+
+.nrm-form-grid .form-control,
+.nrm-form-field > input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.nrm-form-field > select,
+.nrm-form-field > textarea {
+    display: block;
+    width: 100%;
+    height: 38px;
+    padding: 8px 12px;
+    color: #34404c;
+    background-color: #fff;
+    border-color: #cfd6dd;
+    border-style: solid;
+    border-width: 1px;
+    border-radius: 3px;
+    box-shadow: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.nrm-form-grid textarea.form-control,
+.nrm-form-field > textarea {
+    height: auto;
+    min-height: 96px;
+    resize: vertical;
+}
+
+.nrm-form-grid .form-control:focus,
+.nrm-form-field > input:focus,
+.nrm-form-field > select:focus,
+.nrm-form-field > textarea:focus {
+    outline: 0;
+    border-color: #337ab7;
+    box-shadow: 0 0 0 3px rgba(51, 122, 183, .12);
+}
+
+.nrm-form-grid .help-block,
+.nrm-form-grid .helptext,
+.nrm-form-grid .errorlist,
+.nrm-form-row > .help-block,
+.nrm-form-row > .helptext,
+.nrm-form-row > .errorlist {
+    grid-column: 2;
+    margin: 6px 0 0;
+    color: #6b7682;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.nrm-form-grid .errorlist {
+    padding: 7px 10px;
+    color: #a94442;
+    list-style: none;
+    background: #fff5f5;
+    border-left: 3px solid #d9534f;
+}
+
+.nrm-form-grid .has-error .form-control { border-color: #d9534f; }
+
+.nrm-callback-box {
+    margin-bottom: 20px;
+    padding: 16px 0;
+    background: #f7f9fb;
+    border: 1px solid #e3e8ed;
+    border-radius: 4px;
+}
+
+.nrm-callback-box::before {
+    top: 16px;
+    bottom: 16px;
+}
+
+.nrm-callback-box > .nrm-form-row {
+    margin-bottom: 0;
+    padding: 0 18px;
+}
+
+.nrm-copy-input[readonly] {
+    color: #44515e;
+    background: #fff;
+    cursor: text;
+}
+
+.nrm-form-actions {
+    position: relative;
+    display: grid;
+    grid-template-columns:
+        minmax(0, calc(var(--nrm-form-axis) - (var(--nrm-form-gap) / 2)))
+        minmax(0, calc(100% - var(--nrm-form-axis) - (var(--nrm-form-gap) / 2)));
+    column-gap: var(--nrm-form-gap);
+    margin-top: 6px;
+}
+
+.nrm-form-actions > div {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.nrm-form-note {
+    margin: 0 0 18px calc(var(--nrm-form-axis) + (var(--nrm-form-gap) / 2));
+    color: #6b7682;
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.nrm-form-field .checkbox,
+.nrm-form-field .radio { margin-top: 7px; }
+
+.nrm-form-field > input[type="checkbox"],
+.nrm-form-field > input[type="radio"] { margin-top: 11px; }
+
+.nrm-form-field .checkbox label,
+.nrm-form-field .radio label { padding-left: 22px; font-weight: 400; }
+
+.nrm-form-field .nrm-inline-options {
+    display: flex;
+    gap: 22px;
+    align-items: center;
+    min-height: 38px;
+}
+
+.nrm-form-field .nrm-inline-options label { margin: 0; font-weight: 400; }
+
+.nrm-profile-table > tbody > tr > th {
+    width: 50%;
+    padding: 14px 22px 14px 8px;
+    color: #34404c;
+    text-align: right;
+    border-right: 1px solid #e2e6ea;
+}
+
+.nrm-profile-table > tbody > tr > td { padding: 14px 8px 14px 22px; }
+
+.nrm-profile-table .field-input .form-control {
+    display: inline-block;
+    width: min(360px, 70%) !important;
+    height: 34px;
+}

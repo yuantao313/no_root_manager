@@ -1,0 +1,8 @@
+<div class="nrm-form-row{% if field.errors %} has-error{% endif %}">
+    {{ field.label_tag }}
+    <div class="nrm-form-field">
+        {{ field }}
+        {% if field.help_text %}<span class="help-block">{{ field.help_text }}</span>{% endif %}
+        {{ field.errors }}
+    </div>
+</div>

@@ -2,8 +2,8 @@
 {% block title %}关联 GitCode 账号 - NRM{% endblock %}
 {% block content %}
 <div class="row">
-    <div class="col-sm-8 col-sm-offset-2 col-md-6 col-md-offset-3">
-        <div class="panel panel-primary">
+    <div class="col-sm-10 col-sm-offset-1 col-md-8 col-md-offset-2">
+        <div class="panel panel-primary nrm-form-panel">
             <div class="panel-heading">
                 <h3 class="panel-title">关联 GitCode 账号</h3>
             </div>
@@ -26,40 +26,42 @@
                 <div class="tab-content" style="padding-top:16px;">
                     <!-- Tab 1：创建新账号（注册要素完整） -->
                     <div role="tabpanel" class="tab-pane active" id="tab-create">
-                        <form method="post" action="{% url 'socialaccount_signup' %}">
+                        <form method="post" action="{% url 'socialaccount_signup' %}" class="nrm-form-grid">
                             {% csrf_token %}
                             {% if form.non_field_errors %}
                             <div class="alert alert-danger">{{ form.non_field_errors }}</div>
                             {% endif %}
                             {% for field in form %}
-                            <div class="form-group{% if field.errors %} has-error{% endif %}">
-                                <label>{{ field.label }}</label>
-                                {{ field }}
-                                {% if field.help_text %}<span class="help-block" style="font-size:13px;">{{ field.help_text }}</span>{% endif %}
-                                {% for error in field.errors %}<span class="help-block" style="color:#a94442;">{{ error }}</span>{% endfor %}
+                            <div class="nrm-form-row{% if field.errors %} has-error{% endif %}">
+                                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                <div class="nrm-form-field">
+                                    {{ field }}
+                                    {% if field.help_text %}<span class="help-block">{{ field.help_text }}</span>{% endif %}
+                                    {% for error in field.errors %}<span class="help-block text-danger">{{ error }}</span>{% endfor %}
+                                </div>
                             </div>
                             {% endfor %}
                             {% if redirect_field_value %}
                             <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
                             {% endif %}
-                            <button type="submit" class="btn btn-primary btn-block">创建新账号并登录</button>
+                            <div class="nrm-form-actions"><div><button type="submit" class="btn btn-primary">创建新账号并登录</button></div></div>
                         </form>
                     </div>
 
                     <!-- Tab 2：绑定已有账号（直接在此绑定，无需先登录） -->
                     <div role="tabpanel" class="tab-pane" id="tab-bind">
-                        <form method="post" action="{% url 'socialaccount_signup' %}">
+                        <form method="post" action="{% url 'socialaccount_signup' %}" class="nrm-form-grid">
                             {% csrf_token %}
-                            <div class="form-group">
-                                <label>用户名</label>
-                                <input type="text" name="bind_username" class="form-control" required>
+                            <div class="nrm-form-row">
+                                <label for="bind-username">用户名</label>
+                                <input type="text" id="bind-username" name="bind_username" class="form-control" required>
                             </div>
-                            <div class="form-group">
-                                <label>密码</label>
-                                <input type="password" name="bind_password" class="form-control" required>
+                            <div class="nrm-form-row">
+                                <label for="bind-password">密码</label>
+                                <input type="password" id="bind-password" name="bind_password" class="form-control" required>
                             </div>
-                            <button type="submit" name="bind_existing" class="btn btn-success btn-block">绑定到已有账号</button>
-                            <p class="text-muted" style="font-size:13px;margin-top:10px;margin-bottom:0;">
+                            <div class="nrm-form-actions"><div><button type="submit" name="bind_existing" class="btn btn-success">绑定到已有账号</button></div></div>
+                            <p class="nrm-form-note" style="margin-top:10px;margin-bottom:0;">
                                 验证通过后，该 NRM 账号将与本 GitCode 账号绑定，之后可用 GitCode 快速登录。
                             </p>
                         </form>

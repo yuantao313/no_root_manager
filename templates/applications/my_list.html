@@ -11,7 +11,7 @@
 </div>
 {% endif %}
 <!-- 上方：新建申请 -->
-<div class="panel panel-primary" style="margin-bottom:16px;">
+<div class="panel panel-primary nrm-form-panel" style="margin-bottom:16px;">
     <div class="panel-heading">
         <h3 class="panel-title">新建申请</h3>
     </div>
@@ -22,40 +22,49 @@
             <p style="margin:8px 0 0;">GitCode 登录用户需要先在<a href="{% url 'accounts:profile' %}">个人中心</a>设置姓名后才能提交申请。</p>
         </div>
         {% else %}
-        <form method="post" id="application-form">
+        <form method="post" id="application-form" class="nrm-form-grid">
             {% csrf_token %}
-            <p data-field-for="all">
-                {{ form.apply_type.label_tag }} {{ form.apply_type|add_class:"form-control" }}
-                {{ form.apply_type.errors }}
-            </p>
-            <p data-field-for="all">
-                {{ form.target_server.label_tag }} {{ form.target_server }}
-                <span class="helptext">{{ form.target_server.help_text }}</span>
-                {{ form.target_server.errors }}
-            </p>
+            <div class="nrm-form-row" data-field-for="all">
+                {{ form.apply_type.label_tag }}
+                <div class="nrm-form-field">{{ form.apply_type|add_class:"form-control" }}{{ form.apply_type.errors }}</div>
+            </div>
+            <div class="nrm-form-row" data-field-for="all">
+                {{ form.target_server.label_tag }}
+                <div class="nrm-form-field">
+                    {{ form.target_server }}
+                    <span class="helptext">{{ form.target_server.help_text }}</span>
+                    {{ form.target_server.errors }}
+                </div>
+            </div>
             <!-- 申请理由 -->
-            <p data-field-for="all">
-                {{ form.description.label_tag }} {{ form.description|add_class:"form-control" }}
-                {{ form.description.errors }}
-            </p>
+            <div class="nrm-form-row" data-field-for="all">
+                {{ form.description.label_tag }}
+                <div class="nrm-form-field">{{ form.description|add_class:"form-control" }}{{ form.description.errors }}</div>
+            </div>
             <!-- 申请用户组：仅"申请用户组"类型显示 -->
-            <div data-field-for="group" id="user-groups-field" style="margin-bottom:10px;">
-                <label>申请用户组:</label>
-                <div id="id_user_groups">{{ form.user_groups }}</div>
-                <span class="helptext">{{ form.user_groups.help_text }}</span>
-                {{ form.user_groups.errors }}
+            <div class="nrm-form-row" data-field-for="group" id="user-groups-field">
+                <label>申请用户组</label>
+                <div class="nrm-form-field" id="id_user_groups">
+                    {{ form.user_groups }}
+                    <span class="helptext">{{ form.user_groups.help_text }}</span>
+                    {{ form.user_groups.errors }}
+                </div>
             </div>
             <!-- 转移类型：只填写本人已知账号，不向普通用户枚举目标机用户名。 -->
-            <p data-field-for="transfer" id="transfer-field">
-                {{ form.transfer_username.label_tag }} {{ form.transfer_username }}
-                <span class="helptext">{{ form.transfer_username.help_text }}</span>
-                {{ form.transfer_username.errors }}
-            </p>
+            <div class="nrm-form-row" data-field-for="transfer" id="transfer-field">
+                {{ form.transfer_username.label_tag }}
+                <div class="nrm-form-field">
+                    {{ form.transfer_username }}
+                    <span class="helptext">{{ form.transfer_username.help_text }}</span>
+                    {{ form.transfer_username.errors }}
+                </div>
+            </div>
             <!-- 平台管理员：仅"申请平台管理员"类型显示 -->
-            <p data-field-for="admin" id="admin-field">
-                <span class="helptext">申请成为所选服务器的平台管理员（授予 sudo 权限），一次仅限一台机器。</span>
-            </p>
-            <button type="submit" class="btn btn-primary btn-block">提交申请</button>
+            <div class="nrm-form-row" data-field-for="admin" id="admin-field">
+                <span class="nrm-form-label">权限说明</span>
+                <div class="nrm-form-field"><span class="helptext">申请成为所选服务器的平台管理员（授予 sudo 权限），一次仅限一台机器。</span></div>
+            </div>
+            <div class="nrm-form-actions"><div><button type="submit" class="btn btn-primary">提交申请</button></div></div>
         </form>
         {% endif %}
     </div>

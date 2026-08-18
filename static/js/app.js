@@ -227,6 +227,28 @@
         });
     });
 
+    /* ===== 只读配置值：一键复制（如 GitCode 回调地址） ===== */
+    document.querySelectorAll("[data-copy-target]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            var target = document.querySelector(button.dataset.copyTarget);
+            if (!target) return;
+            var originalLabel = button.textContent;
+            function showCopied() {
+                button.textContent = "已复制";
+                window.setTimeout(function () { button.textContent = originalLabel; }, 1500);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(target.value).then(showCopied).catch(function () {
+                    target.select();
+                    if (document.execCommand("copy")) showCopied();
+                });
+            } else {
+                target.select();
+                if (document.execCommand("copy")) showCopied();
+            }
+        });
+    });
+
     /* ===== 服务器表单：填入已核对的候选 SSH 主机指纹 ===== */
     var fillHostKey = document.querySelector("[data-fill-host-key]");
     if (fillHostKey) {

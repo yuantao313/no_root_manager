@@ -1,16 +1,15 @@
 {% extends "base.html" %}
-{% load crispy_forms_tags %}
 {% load socialaccount %}
 {% block title %}个人中心 - NRM{% endblock %}
 {% block content %}
 <div class="row">
-    <div class="col-md-6">
-        <div class="panel panel-default">
+    <div class="col-md-10 col-md-offset-1">
+        <div class="panel panel-default nrm-form-panel">
             <div class="panel-heading"><h3 class="panel-title">个人资料</h3></div>
             <div class="panel-body">
                 <form method="post" id="profile-form" data-verify-url="{% url 'accounts:verify_email_code_ajax' %}" data-current-email="{{ user.email|escapejs }}">
                     {% csrf_token %}
-                    <table class="table table-hover" style="margin-bottom:0;">
+                    <table class="table table-hover nrm-profile-table" style="margin-bottom:0;">
                         <tbody>
                         <tr>
                             <th style="width:120px;">姓名</th>
@@ -60,7 +59,7 @@
                         </tbody>
                     </table>
                 </form>
-                <table class="table table-hover" style="margin-bottom:0;">
+                <table class="table table-hover nrm-profile-table" style="margin-bottom:0;">
                     <tbody>
                     <tr>
                         <th style="width:120px;">用户 ID</th>
@@ -111,19 +110,23 @@
     </div>
 
     {% if user.is_staff %}
-    <div class="col-md-6">
-        <div class="panel panel-default">
+    <div class="col-md-10 col-md-offset-1">
+        <div class="panel panel-default nrm-form-panel">
             <div class="panel-heading"><h3 class="panel-title">我的 Webhook</h3></div>
             <div class="panel-body">
                 <p class="text-muted" style="font-size:13px;">
                     申请事件推送 JSON 到指定 URL；每人仅保留一个个人 Webhook，保存即覆盖。
                 </p>
-                <form method="post">
+                <form method="post" class="nrm-form-grid">
                     {% csrf_token %}
-                    {{ webhook_form|crispy }}
-                    <button type="submit" name="add_webhook" class="btn btn-primary">保存 Webhook</button>
-                    <button type="submit" name="test_webhook" class="btn btn-default">测试推送</button>
-                    <span class="text-muted" style="font-size:13px;">测试推送将向表单中的 URL 发送一条测试事件（不会保存配置）。</span>
+                    {% for field in webhook_form %}
+                        {% include "includes/form_row.html" with field=field %}
+                    {% endfor %}
+                    <div class="nrm-form-actions"><div>
+                        <button type="submit" name="add_webhook" class="btn btn-primary">保存 Webhook</button>
+                        <button type="submit" name="test_webhook" class="btn btn-default">测试推送</button>
+                        <span class="text-muted" style="font-size:13px;">测试推送将向表单中的 URL 发送一条测试事件（不会保存配置）。</span>
+                    </div></div>
                 </form>
             </div>
         </div>

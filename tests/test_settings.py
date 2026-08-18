@@ -108,6 +108,11 @@ class TestSiteBaseUrl:
         cfg.save()
         html = client.get(reverse("accounts:settings")).content.decode()
         assert "http://myhost:9999/accounts/allauth/gitcode/login/callback/" in html
+        assert 'class="nrm-form-grid"' in html
+        assert "nrm-form-row" in html
+        assert 'id="gitcode-callback-url"' in html
+        assert "readonly" in html
+        assert 'data-copy-target="#gitcode-callback-url"' in html
 
     def test_webhook_review_link_uses_site_base_url(self, client):
         """webhook 审批链接使用系统设置的站点地址（不再用 Site.domain）。"""

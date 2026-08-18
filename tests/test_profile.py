@@ -84,7 +84,14 @@ class TestProfileEdit:
         assert "field-edit" in html
         assert 'id="field-name"' in html
         assert 'id="field-email"' in html
+        assert "nrm-profile-table" in html
         assert "/static/js/app.js" in html
+
+    def test_auth_forms_use_shared_axis_layout(self, client):
+        for route in ("accounts:login", "accounts:register", "accounts:password_reset"):
+            response = client.get(reverse(route))
+            assert response.status_code == 200
+            assert 'class="nrm-form-grid"' in response.content.decode()
 
     def test_update_name_without_email_change(self, client):
         # 仅改姓名（邮箱不变）无需验证码
