@@ -2,7 +2,7 @@
 # NRM 目标机用户管理脚本（由 NRM 平台经 SFTP 上传到目标机后以 root 执行）。
 #
 # 设计原则：
-# - 所有常用服务器操作（建用户/接管/锁定/解锁/sudo 授权）收敛到本脚本，
+# - 所有常用服务器操作（建用户/接管/状态切换/sudo 授权）收敛到本脚本，
 #   不散落在 Python 代码的字符串命令里
 # - 子命令模式：nrm_mgmt.sh <子命令> [参数...]
 # - 每个子命令成功输出 "OK <子命令> ..."，失败以非零退出码 + stderr 提示
@@ -124,20 +124,39 @@ case "${1:-}" in
         echo "OK takeover $username"
         ;;
 
-    lock)
-        # lock <username>：禁用用户
+    toggle_lock)
+        # toggle_lock <username>：读取目标机真实状态后切换，避免页面猜测。
         username="$2"
         require_user "$username"
-        passwd -l "$username" >/dev/null
-        echo "OK lock $username"
+        lock_status="$(passwd -S "$username" | awk '{print $2}')"
+        case "$lock_status" in
+            L|LK)
+                passwd -u "$username" >/dev/null
+                echo "OK toggle_lock $username state=enabled"
+                ;;
+            *)
+                passwd -l "$username" >/dev/null
+                echo "OK toggle_lock $username state=disabled"
+                ;;
+        esac
         ;;
 
-    unlock)
-        # unlock <username>：启用用户
+    reset_password)
+        # reset_password <username>：新密码经 stdin 传入，避免出现在命令行和进程列表。
         username="$2"
         require_user "$username"
-        passwd -u "$username" >/dev/null
-        echo "OK unlock $username"
+        read -r userpass || { log "未收到新密码"; exit 4; }
+        case "$userpass" in
+            "$username":*) ;;
+            *) log "密码输入的用户名与目标用户不一致"; exit 4 ;;
+        esac
+        printf '%s\n' "$userpass" | chpasswd
+        if ! chage -d 0 "$username"; then
+            passwd -l "$username" >/dev/null 2>&1 || true
+            log "密码已改变但强制改密设置失败，账号已锁定，请重试"
+            exit 6
+        fi
+        echo "OK reset_password $username"
         ;;
 
     grant_sudo)
@@ -184,6 +203,50 @@ case "${1:-}" in
         done
         ;;
 
+    snapshot_users)
+        # 一次采集详情页需要的受管用户、可接管用户及受管用户组，避免重复 SSH。
+        group_line="$(getent group "$NRM_GROUP" || true)"
+        managed_csv="${group_line##*:}"
+        IFS=',' read -ra managed_users <<< "$managed_csv"
+        for u in "${managed_users[@]}"; do
+            [ -n "$u" ] || continue
+            echo "MANAGED_USER $u"
+            if id -u "$u" >/dev/null 2>&1; then
+                user_groups=$(id -nG "$u" | tr ' ' ',')
+                echo "USER_GROUPS $u ${user_groups:--}"
+            fi
+        done
+        while IFS= read -r u; do
+            [ -n "$u" ] || continue
+            case ",$managed_csv," in
+                *",$u,"*) ;;
+                *) echo "AVAILABLE_USER $u" ;;
+            esac
+        done < <(awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd)
+        ;;
+
+    update_groups)
+        # update_groups <username> <add_csv|-> <remove_csv|->：一次连接完成全部组变更。
+        username="$2"; add_csv="${3:--}"; remove_csv="${4:--}"
+        require_user "$username"
+        if [ "$add_csv" != "-" ]; then
+            ensure_groups "$add_csv"
+            usermod -aG "$add_csv" "$username"
+        fi
+        if [ "$remove_csv" != "-" ]; then
+            IFS=',' read -ra remove_groups <<< "$remove_csv"
+            for group in "${remove_groups[@]}"; do
+                [ -n "$group" ] || continue
+                [ "$group" != "$NRM_GROUP" ] && [ "$group" != "$username" ] || {
+                    log "拒绝移除受保护组 $group"
+                    exit 2
+                }
+                remove_group_membership "$username" "$group" || exit 6
+            done
+        fi
+        echo "OK update_groups $username add=$add_csv remove=$remove_csv"
+        ;;
+
     add_group)
         # add_group <username> <group>：将用户加入指定用户组（组不存在自动创建）
         username="$2"; group="$3"
@@ -210,7 +273,7 @@ case "${1:-}" in
         ;;
 
     *)
-        log "用法: nrm_mgmt.sh <provision|takeover|lock|unlock|grant_sudo|grant_docker|ensure_group|list_groups|add_group|del_group> [参数...]"
+        log "用法: nrm_mgmt.sh <provision|takeover|toggle_lock|reset_password|grant_sudo|grant_docker|ensure_group|snapshot_users|list_groups|update_groups|add_group|del_group> [参数...]"
         exit 1
         ;;
 esac

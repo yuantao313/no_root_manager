@@ -1,6 +1,6 @@
 """目标机器用户接管与开通服务：所有受管用户加入 nrm_managed 组。
 
-常用服务器操作（建用户/接管/锁定/解锁/sudo 授权）统一收敛到
+常用服务器操作（建用户/接管/密码与状态管理/sudo 授权）统一收敛到
 servers/scripts/nrm_mgmt.sh 脚本，经 SFTP 上传目标机后以 root 执行，
 不再在 Python 中散落字符串命令。
 """
@@ -20,6 +20,7 @@ _CACHE_TIMEOUT = 1800
 _FAILURE_CACHE_TIMEOUT = 30
 _MANAGED_USERS_CACHE_KEY = "nrm:managed-users:{}"
 _USER_GROUPS_CACHE_KEY = "nrm:user-groups:{}"
+_USER_SNAPSHOT_CACHE_KEY = "nrm:user-snapshot:{}"
 
 # 服务器管理脚本（代码库内，经 SFTP 上传目标机执行）
 MGMT_SCRIPT = str(Path(__file__).parent / "scripts" / "nrm_mgmt.sh")
@@ -119,8 +120,14 @@ def get_managed_users_cached(server, force_refresh=False):
 
     返回 (members:list[str], msg)。force_refresh=True 时强制重新扫描。
     """
+    if force_refresh:
+        snapshot = get_server_users_snapshot(server, force_refresh=True)
+        return snapshot["managed"], snapshot["message"]
     key = _MANAGED_USERS_CACHE_KEY.format(server.pk)
-    cached = None if force_refresh else cache.get(key)
+    snapshot = cache.get(_USER_SNAPSHOT_CACHE_KEY.format(server.pk))
+    if snapshot is not None:
+        return snapshot["managed"], snapshot["message"]
+    cached = cache.get(key)
     if cached is not None:
         return cached
     ok, members, msg = list_nrm_members(server)
@@ -132,28 +139,42 @@ def get_managed_users_cached(server, force_refresh=False):
 def clear_managed_users_cache(server):
     """清空指定服务器的受管用户缓存（刷新按钮调用）。"""
     cache.delete(_MANAGED_USERS_CACHE_KEY.format(server.pk))
+    cache.delete(_USER_SNAPSHOT_CACHE_KEY.format(server.pk))
 
 
-def _set_user_locked(server, username, locked):
-    """设置目标机器用户锁定状态，供启用/禁用公开操作复用。"""
+def toggle_user_lock(server, username):
+    """按目标机器当前状态切换用户启用状态。返回 (ok, msg)。"""
     username = (username or "").strip()
     if not username:
         return False, "用户名为空"
-    action, state = ("lock", "禁用") if locked else ("unlock", "启用")
-    ok, _, err = _run_mgmt(server, [action, username])
-    if ok:
-        return True, f"用户 {username} 已{state}"
-    return False, err or f"{state}失败：{username}"
+    ok, output, error = _run_mgmt(server, ["toggle_lock", username])
+    if not ok:
+        return False, error or f"切换用户状态失败：{username}"
+    if "state=enabled" in output:
+        state = "启用"
+    elif "state=disabled" in output:
+        state = "禁用"
+    else:
+        return False, "目标机器未返回有效的用户状态，请人工核查"
+    return True, f"用户 {username} 已{state}"
 
 
-def lock_user(server, username):
-    """禁用目标机器用户（passwd -l）。返回 (ok, msg)。"""
-    return _set_user_locked(server, username, True)
-
-
-def unlock_user(server, username):
-    """启用目标机器用户（passwd -u）。返回 (ok, msg)。"""
-    return _set_user_locked(server, username, False)
+def reset_user_password(server, username):
+    """重置目标机器用户密码并强制下次登录修改。返回 (ok, password, msg)。"""
+    username = (username or "").strip()
+    if not username:
+        return False, "", "用户名为空"
+    password = get_random_string(16)
+    ok, output, error = _run_mgmt(
+        server,
+        ["reset_password", username],
+        stdin_data=f"{username}:{password}",
+    )
+    if not ok:
+        return False, "", error or f"重置密码失败：{username}"
+    if f"OK reset_password {username}" not in output:
+        return False, "", "目标机器未确认密码重置结果，请人工核查"
+    return True, password, f"用户 {username} 的密码已重置并设置为下次登录强制修改"
 
 
 def list_system_users(server):
@@ -162,16 +183,37 @@ def list_system_users(server):
     返回 (ok, available_users:list, msg)。用于接管按钮化的候选列表。
     排除已受管成员（nrm_managed 组）与系统账号（uid<1000、nobody 65534）。
     """
-    # 读取用户配置文件 /etc/passwd：取 uid 1000~65533 的真实登录用户
-    # （仅扫描 /home 目录会漏掉 home 不在 /home 下的用户）
-    cmd = r"awk -F: '$3>=1000 && $3<65534 {print $1}' /etc/passwd"
-    ok, out, err = _exec(server, cmd)
-    if not ok:
-        return False, [], err or "读取用户列表失败"
-    names = [n for n in out.split() if n]
-    _, members, _ = list_nrm_members(server)
-    available = [n for n in names if n not in members]
+    snapshot = get_server_users_snapshot(server)
+    if not snapshot["ok"]:
+        return False, [], snapshot["message"]
+    available = snapshot["available"]
     return True, available, f"共 {len(available)} 个可接管用户"
+
+
+def get_server_users_snapshot(server, force_refresh=False):
+    """一次 SSH 获取详情页所需的用户全集，并缓存解析结果。"""
+    key = _USER_SNAPSHOT_CACHE_KEY.format(server.pk)
+    cached = None if force_refresh else cache.get(key)
+    if cached is not None:
+        return cached
+    ok, output, error = _run_mgmt(server, ["snapshot_users"])
+    snapshot = {"ok": ok, "managed": [], "available": [], "groups": {}}
+    if ok:
+        for line in output.splitlines():
+            parts = line.split(maxsplit=2)
+            if len(parts) >= 2 and parts[0] == "MANAGED_USER":
+                snapshot["managed"].append(parts[1])
+            elif len(parts) >= 2 and parts[0] == "AVAILABLE_USER":
+                snapshot["available"].append(parts[1])
+            elif len(parts) >= 2 and parts[0] == "USER_GROUPS":
+                raw_groups = parts[2] if len(parts) > 2 else "-"
+                snapshot["groups"][parts[1]] = [] if raw_groups == "-" else raw_groups.split(",")
+        snapshot["message"] = f"已读取 {len(snapshot['managed'])} 个受管用户"
+        cache.set(key, snapshot, _CACHE_TIMEOUT)
+    else:
+        snapshot["message"] = error or "读取目标机器用户失败"
+        cache.set(key, snapshot, _FAILURE_CACHE_TIMEOUT)
+    return snapshot
 
 
 def provision_user(server, username, groups=None, with_home=True, force_pwd_change=True):
@@ -296,6 +338,9 @@ def get_user_groups_cached(server, usernames, force_refresh=False):
     返回 {username: [groups]}；查询失败返回空 dict（详情页展示降级为空组）。
     """
     names = [u for u in (usernames or []) if u]
+    snapshot = None if force_refresh else cache.get(_USER_SNAPSHOT_CACHE_KEY.format(server.pk))
+    if snapshot is not None and all(username in snapshot["groups"] for username in names):
+        return snapshot["groups"]
     key = _USER_GROUPS_CACHE_KEY.format(server.pk)
     cached = None if force_refresh else cache.get(key)
     if cached is not None and all(username in cached for username in names):
@@ -310,6 +355,32 @@ def get_user_groups_cached(server, usernames, force_refresh=False):
 def clear_user_groups_cache(server):
     """清空指定服务器的用户组缓存（增删组后或刷新时调用）。"""
     cache.delete(_USER_GROUPS_CACHE_KEY.format(server.pk))
+    cache.delete(_USER_SNAPSHOT_CACHE_KEY.format(server.pk))
+
+
+def set_user_groups(server, username, target_groups, current_groups):
+    """一次 SSH 将用户组更新为目标集合，返回 (ok, msg)。"""
+    username = (username or "").strip()
+    if not username:
+        return False, "用户名为空"
+    target = {group.strip() for group in target_groups if group and group.strip()}
+    current = {group.strip() for group in current_groups if group and group.strip()}
+    target.add(NRM_GROUP)
+    invalid = sorted(group for group in target | current if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_\-]{0,31}", group))
+    if invalid:
+        return False, f"非法组名：{invalid[0]}"
+    to_add = sorted(target - current)
+    to_remove = sorted(current - target - {username, NRM_GROUP})
+    if not to_add and not to_remove:
+        return True, f"用户 {username} 的用户组无需变更"
+    ok, output, error = _run_mgmt(
+        server,
+        ["update_groups", username, ",".join(to_add) or "-", ",".join(to_remove) or "-"],
+    )
+    if not ok:
+        return False, error or f"更新用户组失败：{username}"
+    clear_user_groups_cache(server)
+    return True, output or f"已更新 {username} 的用户组配置"
 
 
 def add_user_group(server, username, group):

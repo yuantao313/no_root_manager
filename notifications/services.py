@@ -255,6 +255,23 @@ def send_provision_credentials(application, password) -> bool:
     return send_email(subject, body, [application.email])
 
 
+def send_machine_password_reset(user, server, username, password) -> bool:
+    """将目标机器账号的新临时密码发送给绑定的平台用户。"""
+    if not user or not user.email or not username or not password:
+        return False
+    display_name = user.get_full_name().strip() or user.username
+    subject = f"[NRM] 您的服务器账号密码已重置：{username}"
+    body = (
+        f"您好，{display_name}：\n\n"
+        f"管理员已重置您在 {server} 上的机器账号密码。\n\n"
+        f"机器用户名：{username}\n"
+        f"临时密码：{password}\n"
+        f"服务器：{server}\n\n"
+        f"【重要】下次登录必须立即修改密码。若您未申请此次重置，请及时联系管理员。"
+    )
+    return send_email(subject, body, [user.email])
+
+
 # ------------------------- Webhook -------------------------
 
 

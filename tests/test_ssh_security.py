@@ -279,13 +279,12 @@ class TestServerFormViews:
     @pytest.mark.parametrize(
         ("route", "handler", "payload"),
         [
-            ("lock_user", "servers.views.lock_user", {"username": "alice"}),
-            ("unlock_user", "servers.views.unlock_user", {"username": "alice"}),
+            ("toggle_user_lock", "servers.views.toggle_user_lock", {"username": "alice"}),
             ("add_user_group", "servers.views.add_user_group", {"username": "alice", "group": "dev"}),
             ("remove_user_group", "servers.views.remove_user_group", {"username": "alice", "group": "dev"}),
         ],
     )
-    def test_paired_user_action_routes_keep_existing_contract(self, client, credential, route, handler, payload):
+    def test_user_action_routes_keep_existing_contract(self, client, credential, route, handler, payload):
         admin = get_user_model().objects.create_superuser("admin", "admin@example.com", "x12345!")
         server = Server.objects.create(
             name="server", host="10.0.0.8", credential=credential, ssh_host_key_fingerprint=_fingerprint()
@@ -343,12 +342,13 @@ class TestServerCredentialTabs:
             response = client.get(reverse("servers:detail", args=[server.pk]))
 
         html = response.content.decode()
+        user_html = client.get(reverse("servers:user_management", args=[server.pk])).content.decode()
         assert "新账号默认分组" in html
         assert "dev,ops" in html
         assert "nrm-info-grid" in html
         assert "info-table" not in html
         assert f'action="{reverse("servers:test", args=[server.pk])}"' in html
-        assert f'action="{reverse("servers:sync_users", args=[server.pk])}"' in html
+        assert f'action="{reverse("servers:sync_users", args=[server.pk])}"' in user_html
         assert client.get(reverse("servers:test", args=[server.pk])).status_code == 405
         assert client.get(reverse("servers:sync_users", args=[server.pk])).status_code == 405
 

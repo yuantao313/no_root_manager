@@ -5,10 +5,12 @@ from django.contrib.auth.models import User
 from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
+from applications.models import Application
 from config.decorators import superuser_required
 from credentials.models import Credential
+from notifications.services import send_machine_password_reset
 
 from .devices import clear_device_info_cache, get_device_info
 from .forms import ServerForm
@@ -17,16 +19,16 @@ from .management import (
     add_user_group,
     clear_managed_users_cache,
     clear_user_groups_cache,
-    ensure_nrm_group,
     get_managed_users_cached,
     get_user_groups_cached,
     list_system_users,
-    lock_user,
     remove_user_group,
+    reset_user_password,
     run_init_script,
+    set_user_groups,
     sort_user_groups,
     take_over_user,
-    unlock_user,
+    toggle_user_lock,
 )
 from .models import MachineUserBinding, Server
 from .ssh import test_server_connection
@@ -99,6 +101,11 @@ def _server_form(request, server=None):
                     )
             server.save()
             form.save_m2m()
+            if editing:
+                # 地址、凭据或主机信息可能已变化，不能继续复用旧目标机快照。
+                clear_managed_users_cache(server)
+                clear_user_groups_cache(server)
+                clear_device_info_cache(server)
             messages.success(request, ("服务器已更新。" if editing else "服务器已添加。") + (test_msg or ""))
             return redirect("servers:detail", pk=server.pk) if editing else redirect("servers:list")
     return render(request, "servers/form.html", {"form": form, "editing": editing})
@@ -132,21 +139,17 @@ def server_device_api(request, pk):
     return JsonResponse(device, json_dumps_params={"ensure_ascii": False})
 
 
-@superuser_required
-def server_detail(request, pk):
-    """服务器详情（仅超级管理员），含受管用户列表与可接管用户候选。
-
-    受管用户实时扫描目标机并缓存到内存（不落库）；设备信息不再同步查询
-    （避免 SSH 阻塞页面渲染），由前端经 device_api 异步 fetch + 加载中提示填充。
-    """
-    server = get_object_or_404(Server, pk=pk)
+def _server_user_context(server):
+    """构建用户管理局部模板上下文；远程数据统一由单次快照读取。"""
     available_users = []
     managed_users = []
+    scan_error = ""
     if server.credential:
         try:
-            ok, available_users, _ = list_system_users(server)
+            ok, available_users, scan_message = list_system_users(server)
             if not ok:
                 available_users = []
+                scan_error = scan_message
             # 受管用户（内存缓存）→ 关联归属平台用户（MachineUserBinding）
             managed_members, _ = get_managed_users_cached(server)
             bindings = {
@@ -169,18 +172,31 @@ def server_detail(request, pk):
         except Exception:  # noqa: BLE001 —— SSH 不可达时降级为空列表
             available_users = []
             managed_users = []
-    return render(
-        request,
-        "servers/detail.html",
-        {
-            "server": server,
-            "available_users": available_users,
-            # 受管用户：机器用户名 + 归属系统用户（dict 列表，模板按 item.username/item.user 渲染）
-            "managed_users": managed_users,
-            # 手动接管时可选绑定的平台用户（下拉）
-            "sys_users": User.objects.order_by("username"),
-        },
-    )
+            scan_error = "读取目标机器用户失败，请稍后重试。"
+    else:
+        scan_error = "该服务器未关联管理凭据。"
+    return {
+        "server": server,
+        "available_users": available_users,
+        "managed_users": managed_users,
+        "sys_users": User.objects.order_by("username"),
+        "scan_error": scan_error,
+    }
+
+
+@superuser_required
+def server_detail(request, pk):
+    """服务器详情外壳；设备与用户状态均由浏览器并行异步加载。"""
+    server = get_object_or_404(Server, pk=pk)
+    return render(request, "servers/detail.html", {"server": server})
+
+
+@superuser_required
+@require_GET
+def server_user_management(request, pk):
+    """异步返回用户管理区域；缓存未命中时只进行一次 SSH 快照采集。"""
+    server = get_object_or_404(Server, pk=pk)
+    return render(request, "servers/_user_management.html", _server_user_context(server))
 
 
 @superuser_required
@@ -191,11 +207,7 @@ def server_sync_users(request, pk):
     if not server.credential:
         messages.error(request, "该服务器未关联凭据，无法同步。")
         return redirect("servers:detail", pk=pk)
-    ok, msg = ensure_nrm_group(server)
-    if not ok:
-        messages.error(request, msg)
-        return redirect("servers:detail", pk=pk)
-    # 强制刷新缓存（受管用户 + 设备信息）
+    # 刷新是只读动作：直接强制采集快照，不额外连接目标机创建用户组。
     clear_managed_users_cache(server)
     clear_device_info_cache(server)
     members, scan_msg = get_managed_users_cached(server, force_refresh=True)
@@ -227,6 +239,8 @@ def server_takeover_user(request, pk):
                 "source": "manual",
             },
         )
+        clear_managed_users_cache(server)
+        clear_user_groups_cache(server)
         messages.success(request, msg)
     else:
         messages.error(request, msg)
@@ -235,16 +249,49 @@ def server_takeover_user(request, pk):
 
 @superuser_required
 @require_POST
-def server_set_user_lock(request, pk, action):
-    """锁定或解锁目标机器用户（仅超级管理员）。"""
+def server_toggle_user_lock(request, pk):
+    """根据目标机器真实状态切换用户启用状态（仅超级管理员）。"""
     server = get_object_or_404(Server, pk=pk)
     username = request.POST.get("username", "").strip()
     if not username:
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
-    handler = lock_user if action == "lock" else unlock_user
-    ok, msg = handler(server, username)
+    ok, msg = toggle_user_lock(server, username)
     _message_result(request, ok, msg)
+    return redirect("servers:detail", pk=pk)
+
+
+@superuser_required
+@require_POST
+def server_reset_user_password(request, pk):
+    """重置受管机器用户密码，并发送给其绑定的平台用户。"""
+    server = get_object_or_404(Server, pk=pk)
+    username = request.POST.get("username", "").strip()
+    if not username:
+        messages.error(request, "参数错误。")
+        return redirect("servers:detail", pk=pk)
+    binding = (
+        MachineUserBinding.objects.select_related("user")
+        .filter(server=server, username=username, user__isnull=False)
+        .first()
+    )
+    if not binding:
+        messages.error(request, "该机器用户尚未绑定平台用户，无法发送重置密码。")
+        return redirect("servers:detail", pk=pk)
+    if not binding.user.email:
+        messages.error(request, "绑定的平台用户未配置邮箱，无法发送重置密码。")
+        return redirect("servers:detail", pk=pk)
+
+    ok, password, message = reset_user_password(server, username)
+    if not ok:
+        messages.error(request, message)
+        return redirect("servers:detail", pk=pk)
+    # 旧工单中的初始密码已经失效，必须清空以免用户查看或重发错误凭据。
+    Application.objects.filter(target_server=server, username=username).update(initial_password="")
+    if send_machine_password_reset(binding.user, server, username, password):
+        messages.success(request, f"{message}，临时密码已发送至 {binding.user.email}。")
+    else:
+        messages.warning(request, f"{message}，但邮件发送失败；请修复邮件配置后再次重置。")
     return redirect("servers:detail", pk=pk)
 
 
@@ -283,25 +330,9 @@ def server_update_user_groups(request, pk):
         messages.error(request, "参数错误。")
         return redirect("servers:detail", pk=pk)
     target = {g.strip() for g in request.POST.get("groups", "").split(",") if g.strip()}
-    target.add(NRM_GROUP)  # 受管标识组强制保留
     current = set(get_user_groups_cached(server, [username]).get(username, []))
-    to_add = target - current
-    # 用户同名主组和受管标识组都不属于可编辑附加组，不能尝试移除。
-    to_remove = current - target - {username, NRM_GROUP}
-    ok_all = True
-    for g in sorted(to_add):
-        ok, msg = add_user_group(server, username, g)
-        if not ok:
-            ok_all = False
-            messages.error(request, msg)
-    for g in sorted(to_remove):
-        ok, msg = remove_user_group(server, username, g)
-        if not ok:
-            ok_all = False
-            messages.error(request, msg)
-    clear_user_groups_cache(server)
-    if ok_all:
-        messages.success(request, f"已更新 {username} 的用户组配置。")
+    ok, msg = set_user_groups(server, username, target, current)
+    _message_result(request, ok, msg)
     return redirect("servers:detail", pk=pk)
 
 

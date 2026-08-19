@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load user_display %}
 {% block title %}申请列表 - NRM{% endblock %}
 {% block content %}
 <div class="page-header-row">
@@ -26,7 +27,7 @@
             {% for app in applications %}
             <tr>
                 <td>{{ app.description|truncatechars:40 }}</td>
-                <td>{{ app.applicant_name }}{% if app.applicant %}（{{ app.applicant.username }}）{% endif %}</td>
+                <td>{% if app.applicant %}{{ app.applicant|user_label:app.applicant_name }}{% else %}{{ app.applicant_name }}{% endif %}</td>
                 <td>{{ app.employee_id|default:"—" }}</td>
                 <td>{% if app.target_server %}{{ app.target_server.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                 <td>{{ app.get_apply_type_display }}</td>

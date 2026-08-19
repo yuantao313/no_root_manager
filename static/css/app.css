@@ -282,9 +282,10 @@ body { padding-top: 70px; background: #f5f5f5; }
     max-width: 360px;
 }
 
-/* 用户组编辑：现有、待删除、待添加和受管标识共享标签形态，以颜色表达状态。 */
+/* 用户组编辑：沿用 Bootstrap 3 小按钮，以颜色表达编辑状态。 */
 .nrm-user-table > tbody > tr > td { vertical-align: middle; }
-.nrm-group-cell { min-width: 330px; }
+.nrm-group-cell { min-width: 420px; }
+.nrm-user-actions { white-space: nowrap; }
 
 .nrm-group-legend {
     display: flex;
@@ -310,102 +311,48 @@ body { padding-top: 70px; background: #f5f5f5; }
 
 .nrm-group-chips {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-wrap: nowrap;
+    gap: 5px;
     align-items: center;
+    max-width: 100%;
+    padding-bottom: 2px;
+    overflow-x: auto;
+    white-space: nowrap;
 }
 
 .nrm-group-chip,
 .nrm-group-add-trigger {
-    display: inline-flex;
-    align-items: center;
-    min-height: 25px;
-    padding: 3px 9px;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.3;
-    border-radius: 13px;
+    flex: 0 0 auto;
 }
 
-button.nrm-group-chip {
-    appearance: none;
-    cursor: pointer;
-}
-
-.nrm-group-chip-current {
-    color: #315f8c;
-    background: #e9f1f8;
-    border: 1px solid #9dbbd6;
-}
-
-.nrm-group-chip-current:hover,
-.nrm-group-chip-current:focus {
-    color: #244d74;
-    background: #dce9f4;
-    outline: 0;
-}
-
-.nrm-group-chip-remove {
-    color: #9b3f3f;
-    text-decoration: line-through;
-    background: #fbeaea;
-    border: 1px solid #dfa2a2;
-}
-
-.nrm-group-chip-add {
-    color: #2f7549;
-    background: #e7f5ec;
-    border: 1px solid #96caaa;
-}
-
-.nrm-group-chip-managed {
-    color: #654f86;
-    background: #f0ebf7;
-    border: 1px solid #b8a7cf;
-}
+.nrm-group-chip-remove { text-decoration: line-through; }
 
 .nrm-group-add-trigger {
-    color: #66727e;
-    background: transparent;
     border: 1px dashed #9ba7b3;
-    cursor: pointer;
 }
 
-.nrm-group-add-trigger:hover,
-.nrm-group-add-trigger:focus {
-    color: #337ab7;
-    background: #f5f9fc;
-    border-color: #337ab7;
-    outline: 0;
-}
+.nrm-group-add-trigger[hidden] { display: none; }
 
 .nrm-group-add-entry {
     display: inline-flex;
+    flex: 0 0 auto;
+    gap: 4px;
     align-items: center;
-    position: relative;
 }
 
 .nrm-group-add-entry[hidden] { display: none; }
 
 .nrm-group-add-entry .form-control {
-    width: 150px;
-    height: 27px;
-    padding-right: 24px;
+    width: 135px;
+    height: 24px;
+    padding: 2px 7px;
     font-size: 12px;
-}
-
-.nrm-group-add-cancel {
-    position: absolute;
-    right: 5px;
-    padding: 0;
-    color: #8a949e;
-    background: transparent;
-    border: 0;
 }
 
 .nrm-group-error {
     display: block;
-    min-height: 16px;
     margin-top: 4px;
     font-size: 11px;
 }
+
+.nrm-group-error:empty { display: none; }

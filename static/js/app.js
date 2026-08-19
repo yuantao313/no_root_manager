@@ -297,15 +297,21 @@
        不能用 disabled 禁用按钮：disabled 的 submit 按钮不会随表单提交 name，
        会导致后端按按钮 name 分发（save_mail_webhook / save_email_final 等）失效、保存不了。
        改用 dataset 标志拦截重复提交（页面导航后自然重置）。 */
-    document.querySelectorAll("form").forEach(function (f) {
-        f.addEventListener("submit", function (e) {
-            if (f.dataset.submitting === "1") {
-                e.preventDefault();
-                return;
-            }
-            f.dataset.submitting = "1";
+    function initializeSubmitGuards(root) {
+        root.querySelectorAll("form:not([data-submit-guard])").forEach(function (form) {
+            form.setAttribute("data-submit-guard", "1");
+            form.addEventListener("submit", function (event) {
+                // 带确认框的表单先交给下方委托监听器；取消确认后仍应可再次提交。
+                if (form.getAttribute("data-confirm") && !form.dataset.confirmed) return;
+                if (form.dataset.submitting === "1") {
+                    event.preventDefault();
+                    return;
+                }
+                form.dataset.submitting = "1";
+            });
         });
-    });
+    }
+    initializeSubmitGuards(document);
 
     /* ===== 危险操作统一确认（复用 Bootstrap Modal，data-confirm 属性触发） ===== */
     var confirmModal = document.getElementById("confirm-modal");
@@ -428,7 +434,8 @@
 
     /* ===== 服务器详情页：用户组状态编辑 =====
        现有组点击后标记待删除；虚线按钮录入的新组标记待添加；最后统一确认。 */
-    document.querySelectorAll("[data-group-form]").forEach(function (form) {
+    function initializeGroupEditors(root) {
+        root.querySelectorAll("[data-group-form]").forEach(function (form) {
         var row = form.closest("tr");
         var saveBtn = form.querySelector("[data-save-groups]");
         var editor = row && row.querySelector("[data-group-editor]");
@@ -437,6 +444,7 @@
         var addTrigger = editor.querySelector("[data-group-add]");
         var addEntry = editor.querySelector("[data-group-entry]");
         var addInput = editor.querySelector("[data-group-input]");
+        var addConfirm = editor.querySelector("[data-group-add-confirm]");
         var addCancel = editor.querySelector("[data-group-add-cancel]");
         var error = editor.querySelector("[data-group-error]");
 
@@ -459,6 +467,8 @@
             chip.setAttribute("aria-pressed", active ? "true" : "false");
             chip.classList.toggle("nrm-group-chip-current", active);
             chip.classList.toggle("nrm-group-chip-remove", !active);
+            chip.classList.toggle("btn-primary", active);
+            chip.classList.toggle("btn-danger", !active);
             chip.title = active
                 ? "点击标记删除 " + chip.getAttribute("data-group")
                 : "待删除；再次点击可撤销";
@@ -500,7 +510,7 @@
             }
             var chip = document.createElement("button");
             chip.type = "button";
-            chip.className = "nrm-group-chip nrm-group-chip-add group-toggle";
+            chip.className = "btn btn-success btn-xs nrm-group-chip nrm-group-chip-add group-toggle";
             chip.textContent = name;
             chip.setAttribute("data-group", name);
             chip.setAttribute("data-active", "1");
@@ -531,6 +541,7 @@
             setError("");
             addInput.focus();
         });
+        addConfirm.addEventListener("click", addPendingGroup);
         addCancel.addEventListener("click", function () {
             setError("");
             closeAddEntry();
@@ -554,6 +565,37 @@
             });
             form.querySelector('input[name="groups"]').value = groups.join(",");
         });
-        refreshDirtyState();
-    });
+            refreshDirtyState();
+        });
+    }
+
+    initializeGroupEditors(document);
+
+    /* ===== 服务器详情页：用户区异步加载 =====
+       页面外壳不等待 SSH；设备与用户快照由浏览器并行请求。 */
+    var userManagement = document.getElementById("server-user-management");
+    if (userManagement) {
+        function loadUserManagement() {
+            fetch(userManagement.dataset.userManagementUrl, {
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+            }).then(function (response) {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                    throw new Error("redirected");
+                }
+                if (!response.ok) throw new Error("HTTP " + response.status);
+                return response.text();
+            }).then(function (html) {
+                userManagement.innerHTML = html;
+                initializeSubmitGuards(userManagement);
+                initializeGroupEditors(userManagement);
+            }).catch(function (error) {
+                if (error.message === "redirected") return;
+                userManagement.innerHTML = '<div class="alert alert-danger">读取用户状态失败。' +
+                    '<button type="button" class="btn btn-danger btn-xs" data-user-retry>重试</button></div>';
+                userManagement.querySelector("[data-user-retry]").addEventListener("click", loadUserManagement);
+            });
+        }
+        loadUserManagement();
+    }
 })();

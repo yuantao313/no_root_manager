@@ -1,13 +1,13 @@
-{% load static %}
+{% load static user_display %}
 <!DOCTYPE html>
 <html lang="zh-hans">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}NRM · No Root Manager{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260818-info-grid">
+    <link rel="stylesheet" href="{% static 'vendor/bootstrap/3.4.1/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" href="{% static 'vendor/select2/4.1.0-rc.0/css/select2.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260818-server-ops">
 </head>
 <body>
     <nav class="navbar navbar-inverse navbar-fixed-top">
@@ -40,7 +40,7 @@
                 <ul class="nav navbar-nav navbar-right">
                     {% if user.is_authenticated %}
                     <li style="padding-top:15px;white-space:nowrap;">
-                        <span style="color:#cfd8dc;vertical-align:middle;"><a href="{% url 'accounts:profile' %}" style="color:#cfd8dc;">{{ user.username }}{% if user.is_staff %}（管理员）{% endif %}</a></span>
+                        <span style="color:#cfd8dc;vertical-align:middle;"><a href="{% url 'accounts:profile' %}" style="color:#cfd8dc;">{{ user|user_label }}{% if user.is_staff %}（管理员）{% endif %}</a></span>
                         <form method="post" action="{% url 'accounts:logout' %}" style="display:inline-block;vertical-align:middle;margin:0 0 0 10px;">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-danger btn-xs"><span class="glyphicon glyphicon-log-out"></span> 退出</button>
@@ -84,9 +84,9 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/jquery@1.11.3/dist/jquery.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@3.4.1/dist/js/bootstrap.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    <script src="{% static 'js/app.js' %}?v=20260818-info-grid"></script>
+    <script src="{% static 'vendor/jquery/1.11.3/jquery.min.js' %}"></script>
+    <script src="{% static 'vendor/bootstrap/3.4.1/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'vendor/select2/4.1.0-rc.0/js/select2.min.js' %}"></script>
+    <script src="{% static 'js/app.js' %}?v=20260818-server-ops"></script>
 </body>
 </html>

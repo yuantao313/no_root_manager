@@ -5,6 +5,8 @@ from django.utils import timezone
 
 from notifications.services import notify_application, send_provision_credentials
 from servers.management import (
+    clear_managed_users_cache,
+    clear_user_groups_cache,
     grant_sudo,
     provision_user,
     take_over_user,
@@ -38,6 +40,8 @@ def _record_provision(application, ok, note, password=""):
             username=application.username,
             defaults={"user": application.applicant, "source": application.apply_type},
         )
+        clear_managed_users_cache(application.target_server)
+        clear_user_groups_cache(application.target_server)
     application.save(update_fields=update_fields)
 
 

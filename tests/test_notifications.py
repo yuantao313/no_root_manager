@@ -14,6 +14,7 @@ from notifications.services import (
     notify_new_application,
     notify_review_result,
     send_email,
+    send_machine_password_reset,
     send_webhook,
     webhook_new_application,
 )
@@ -30,6 +31,34 @@ def application():
         employee_id="E1",
         title="通知测试",
     )
+
+
+def test_machine_password_reset_email_contains_login_details(django_user_model):
+    user = django_user_model.objects.create_user(
+        username="zhangsanfeng",
+        first_name="张三丰",
+        email="zhang@example.com",
+    )
+    server = type("ServerLabel", (), {"__str__": lambda self: "训练机 (10.0.0.8:22)"})()
+
+    with patch("notifications.services.send_email", return_value=True) as send:
+        assert send_machine_password_reset(user, server, "machine-user", "TemporaryPass123") is True
+
+    subject, body, recipients = send.call_args.args
+    assert "密码已重置" in subject
+    assert "张三丰" in body
+    assert "machine-user" in body
+    assert "TemporaryPass123" in body
+    assert "下次登录必须立即修改密码" in body
+    assert recipients == ["zhang@example.com"]
+
+
+def test_machine_password_reset_email_requires_recipient(django_user_model):
+    user = django_user_model.objects.create_user(username="no-mail", email="")
+
+    with patch("notifications.services.send_email") as send:
+        assert send_machine_password_reset(user, "server", "machine-user", "TemporaryPass123") is False
+    send.assert_not_called()
 
 
 class TestSendEmailWebhook:

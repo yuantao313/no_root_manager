@@ -162,6 +162,9 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    # 必须位于 django.contrib.staticfiles 之前，以覆盖 runserver/collectstatic
+    # 并在命令执行前自动补齐固定版本的第三方前端资源。
+    "vendor_assets",
     "django.contrib.staticfiles",
     "django.contrib.sites",
     "crispy_forms",

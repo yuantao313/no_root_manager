@@ -5,13 +5,14 @@ from unittest.mock import patch
 import pytest
 from django.urls import reverse
 
+from applications.models import Application
 from credentials.models import Credential
 from servers.management import (
     _sudo_wrap,
     provision_user,
     take_over_user,
 )
-from servers.models import Server
+from servers.models import MachineUserBinding, Server
 
 pytestmark = pytest.mark.django_db
 
@@ -77,26 +78,76 @@ class TestTakeOver:
 
 class TestUserLock:
     @pytest.mark.parametrize(
-        ("handler_name", "command", "state"),
-        [("lock_user", "lock", "禁用"), ("unlock_user", "unlock", "启用")],
+        ("output", "state"),
+        [
+            ("OK toggle_lock alice state=enabled", "启用"),
+            ("OK toggle_lock alice state=disabled", "禁用"),
+        ],
     )
-    def test_paired_operations_share_contract(self, ubuntu_server, handler_name, command, state):
-        from servers import management
+    def test_toggle_uses_target_state(self, ubuntu_server, output, state):
+        from servers.management import toggle_user_lock
 
-        with patch("servers.management._run_mgmt", return_value=(True, "ok", "")) as run:
-            ok, message = getattr(management, handler_name)(ubuntu_server, " alice ")
+        with patch("servers.management._run_mgmt", return_value=(True, output, "")) as run:
+            ok, message = toggle_user_lock(ubuntu_server, " alice ")
 
         assert ok is True
         assert message == f"用户 alice 已{state}"
-        run.assert_called_once_with(ubuntu_server, [command, "alice"])
+        run.assert_called_once_with(ubuntu_server, ["toggle_lock", "alice"])
 
-    @pytest.mark.parametrize("handler_name", ["lock_user", "unlock_user"])
-    def test_empty_username_is_rejected(self, ubuntu_server, handler_name):
-        from servers import management
+    def test_toggle_rejects_empty_username(self, ubuntu_server):
+        from servers.management import toggle_user_lock
 
         with patch("servers.management._run_mgmt") as run:
-            assert getattr(management, handler_name)(ubuntu_server, " ") == (False, "用户名为空")
+            assert toggle_user_lock(ubuntu_server, " ") == (False, "用户名为空")
         run.assert_not_called()
+
+    def test_toggle_rejects_unknown_target_response(self, ubuntu_server):
+        from servers.management import toggle_user_lock
+
+        with patch("servers.management._run_mgmt", return_value=(True, "OK", "")):
+            ok, message = toggle_user_lock(ubuntu_server, "alice")
+
+        assert ok is False
+        assert "未返回有效" in message
+
+
+class TestResetUserPassword:
+    def test_password_is_passed_over_stdin(self, ubuntu_server):
+        from servers.management import reset_user_password
+
+        with (
+            patch("servers.management.get_random_string", return_value="TemporaryPass123"),
+            patch(
+                "servers.management._run_mgmt",
+                return_value=(True, "OK reset_password alice", ""),
+            ) as run,
+        ):
+            ok, password, message = reset_user_password(ubuntu_server, " alice ")
+
+        assert ok is True
+        assert password == "TemporaryPass123"
+        assert "强制修改" in message
+        run.assert_called_once_with(
+            ubuntu_server,
+            ["reset_password", "alice"],
+            stdin_data="alice:TemporaryPass123",
+        )
+
+    def test_failure_does_not_return_generated_password(self, ubuntu_server):
+        from servers.management import reset_user_password
+
+        with (
+            patch("servers.management.get_random_string", return_value="MustNotLeak123"),
+            patch("servers.management._run_mgmt", return_value=(False, "", "remote failed")),
+        ):
+            assert reset_user_password(ubuntu_server, "alice") == (False, "", "remote failed")
+
+    def test_empty_username_is_rejected_before_generating_password(self, ubuntu_server):
+        from servers.management import reset_user_password
+
+        with patch("servers.management.get_random_string") as generate:
+            assert reset_user_password(ubuntu_server, " ") == (False, "", "用户名为空")
+        generate.assert_not_called()
 
 
 class TestProvisionUser:
@@ -163,7 +214,7 @@ class TestManagedUsersBinding:
                 return_value=(["m_user_a", "m_user_b", "m_user_c"], "ok"),
             ),
         ):
-            resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
+            resp = client.get(reverse("servers:user_management", args=[ubuntu_server.pk]))
         assert resp.status_code == 200
         html = resp.content.decode()
         assert "系统用户" in html  # 列头
@@ -337,6 +388,73 @@ class TestUserGroups:
             assert get_managed_users_cached(ubuntu_server) == (["alice"], "ok")
         assert scan.call_count == 2
 
+    def test_detail_user_queries_share_one_snapshot_connection(self, ubuntu_server):
+        from servers.management import (
+            clear_managed_users_cache,
+            clear_user_groups_cache,
+            get_managed_users_cached,
+            get_user_groups_cached,
+            list_system_users,
+        )
+
+        clear_managed_users_cache(ubuntu_server)
+        clear_user_groups_cache(ubuntu_server)
+        output = "\n".join(
+            [
+                "MANAGED_USER alice",
+                "USER_GROUPS alice alice,nrm_managed,docker",
+                "AVAILABLE_USER bob",
+            ]
+        )
+        with patch("servers.management._run_mgmt", return_value=(True, output, "")) as run:
+            assert list_system_users(ubuntu_server)[1] == ["bob"]
+            assert get_managed_users_cached(ubuntu_server)[0] == ["alice"]
+            assert get_user_groups_cached(ubuntu_server, ["alice"])["alice"] == [
+                "alice",
+                "nrm_managed",
+                "docker",
+            ]
+
+        run.assert_called_once_with(ubuntu_server, ["snapshot_users"])
+        clear_managed_users_cache(ubuntu_server)
+        clear_user_groups_cache(ubuntu_server)
+
+    def test_set_user_groups_uses_one_script_call(self, ubuntu_server):
+        from servers.management import set_user_groups
+
+        with patch(
+            "servers.management._run_mgmt",
+            return_value=(True, "OK update_groups alice add=sudo remove=docker", ""),
+        ) as run:
+            ok, message = set_user_groups(
+                ubuntu_server,
+                "alice",
+                {"nrm_managed", "sudo"},
+                {"alice", "nrm_managed", "docker"},
+            )
+
+        assert ok is True
+        assert "update_groups" in message
+        run.assert_called_once_with(
+            ubuntu_server,
+            ["update_groups", "alice", "sudo", "docker"],
+        )
+
+    def test_set_user_groups_skips_ssh_without_changes(self, ubuntu_server):
+        from servers.management import set_user_groups
+
+        with patch("servers.management._run_mgmt") as run:
+            ok, message = set_user_groups(
+                ubuntu_server,
+                "alice",
+                {"nrm_managed"},
+                {"nrm_managed"},
+            )
+
+        assert ok is True
+        assert "无需变更" in message
+        run.assert_not_called()
+
     def test_add_group_view_requires_superuser(self, client, ubuntu_server, django_user_model):
         """已登录的非超级管理员访问加组接口时明确返回 403。"""
         normal = django_user_model.objects.create_user(username="norm2", password="x12345!")
@@ -394,7 +512,7 @@ class TestUserGroups:
         assert "已从 docker 组移除" in resp.content.decode()
 
     def test_update_user_groups_view_diff(self, client, ubuntu_server, django_user_model):
-        """批量切换接口：按目标组全集对比当前组，执行加入/移出差异。"""
+        """批量切换接口把目标组全集交给单次 SSH 服务。"""
         su = django_user_model.objects.create_user(username="su7", password="x12345!", is_staff=True, is_superuser=True)
         client.force_login(su)
         with (
@@ -402,9 +520,7 @@ class TestUserGroups:
                 "servers.views.get_user_groups_cached",
                 return_value={"alice": ["nrm_managed", "docker"]},
             ),
-            patch("servers.views.add_user_group", return_value=(True, "用户 alice 已加入 sudo 组")) as mock_add,
-            patch("servers.views.remove_user_group", return_value=(True, "用户 alice 已从 docker 组移除")) as mock_rm,
-            patch("servers.views.clear_user_groups_cache") as mock_clear,
+            patch("servers.views.set_user_groups", return_value=(True, "已更新 alice 的用户组配置")) as update,
         ):
             resp = client.post(
                 reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
@@ -412,10 +528,12 @@ class TestUserGroups:
                 follow=True,
             )
         assert resp.status_code == 200
-        # 差异：加入 sudo、移出 docker；nrm_managed 保持不变
-        mock_add.assert_called_once_with(ubuntu_server, "alice", "sudo")
-        mock_rm.assert_called_once_with(ubuntu_server, "alice", "docker")
-        mock_clear.assert_called_once()
+        update.assert_called_once_with(
+            ubuntu_server,
+            "alice",
+            {"nrm_managed", "sudo"},
+            {"nrm_managed", "docker"},
+        )
         assert "已更新 alice 的用户组配置" in resp.content.decode()
 
     def test_update_user_groups_keeps_nrm_managed(self, client, ubuntu_server, django_user_model):
@@ -427,9 +545,7 @@ class TestUserGroups:
                 "servers.views.get_user_groups_cached",
                 return_value={"alice": ["nrm_managed", "docker"]},
             ),
-            patch("servers.views.add_user_group", return_value=(True, "用户 alice 已加入 sudo 组")) as mock_add,
-            patch("servers.views.remove_user_group", return_value=(True, "用户 alice 已从 docker 组移除")) as mock_rm,
-            patch("servers.views.clear_user_groups_cache"),
+            patch("servers.views.set_user_groups", return_value=(True, "ok")) as update,
         ):
             resp = client.post(
                 reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
@@ -437,9 +553,12 @@ class TestUserGroups:
                 follow=True,
             )
         assert resp.status_code == 200
-        # 移出列表 = docker（nrm_managed 被强制保留），加入列表 = sudo
-        mock_add.assert_called_once_with(ubuntu_server, "alice", "sudo")
-        mock_rm.assert_called_once_with(ubuntu_server, "alice", "docker")
+        update.assert_called_once_with(
+            ubuntu_server,
+            "alice",
+            {"sudo"},
+            {"nrm_managed", "docker"},
+        )
 
     def test_update_user_groups_keeps_primary_group(self, client, ubuntu_server, django_user_model):
         su = django_user_model.objects.create_user(username="su10", password="x12345!", is_superuser=True)
@@ -449,17 +568,19 @@ class TestUserGroups:
                 "servers.views.get_user_groups_cached",
                 return_value={"alice": ["alice", "nrm_managed", "docker"]},
             ),
-            patch("servers.views.add_user_group") as mock_add,
-            patch("servers.views.remove_user_group", return_value=(True, "ok")) as mock_remove,
-            patch("servers.views.clear_user_groups_cache"),
+            patch("servers.views.set_user_groups", return_value=(True, "ok")) as update,
         ):
             client.post(
                 reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
                 {"username": "alice", "groups": "nrm_managed"},
             )
 
-        mock_add.assert_not_called()
-        mock_remove.assert_called_once_with(ubuntu_server, "alice", "docker")
+        update.assert_called_once_with(
+            ubuntu_server,
+            "alice",
+            {"nrm_managed"},
+            {"alice", "nrm_managed", "docker"},
+        )
 
     def test_update_user_groups_requires_superuser(self, client, ubuntu_server, django_user_model):
         """已登录的非超级管理员访问批量切换接口时明确返回 403。"""
@@ -480,9 +601,7 @@ class TestUserGroups:
                 "servers.views.get_user_groups_cached",
                 return_value={"alice": ["nrm_managed"]},
             ),
-            patch("servers.views.add_user_group") as mock_add,
-            patch("servers.views.remove_user_group") as mock_rm,
-            patch("servers.views.clear_user_groups_cache"),
+            patch("servers.views.set_user_groups", return_value=(True, "无需变更")) as update,
         ):
             resp = client.post(
                 reverse("servers:update_user_groups", args=[ubuntu_server.pk]),
@@ -490,12 +609,22 @@ class TestUserGroups:
                 follow=True,
             )
         assert resp.status_code == 200
-        mock_add.assert_not_called()
-        mock_rm.assert_not_called()
+        update.assert_called_once_with(
+            ubuntu_server,
+            "alice",
+            {"nrm_managed"},
+            {"nrm_managed"},
+        )
 
     def test_detail_shows_user_groups(self, client, ubuntu_server, django_user_model):
         """详情页用统一标签编辑用户组，并区分现有组与受管标识组。"""
         su = django_user_model.objects.create_user(username="su5", password="x12345!", is_staff=True, is_superuser=True)
+        owner = django_user_model.objects.create_user(
+            username="alice-owner",
+            first_name="张三丰",
+            email="alice@example.com",
+        )
+        MachineUserBinding.objects.create(server=ubuntu_server, username="alice", user=owner)
         client.force_login(su)
         with (
             patch("servers.views.list_system_users", return_value=(True, [], "ok")),
@@ -505,18 +634,154 @@ class TestUserGroups:
                 return_value={"alice": ["nrm_managed", "sudo", "docker"]},
             ),
         ):
-            resp = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
+            resp = client.get(reverse("servers:user_management", args=[ubuntu_server.pk]))
         html = resp.content.decode()
         assert "用户组" in html  # 列头
         # nrm_managed 与其他组使用同一标签结构，但有独立颜色且不可切换。
-        assert 'class="nrm-group-chip nrm-group-chip-managed"' in html
+        assert 'class="btn btn-info btn-xs nrm-group-chip nrm-group-chip-managed"' in html
         assert 'data-group="nrm_managed"' in html
         # sudo/docker 渲染为现有组标签（data-active=1 表示提交时保留）。
-        assert "nrm-group-chip-current group-toggle" in html
+        assert "btn btn-primary btn-xs nrm-group-chip nrm-group-chip-current group-toggle" in html
         assert 'data-group="sudo"' in html
         assert 'data-group="docker"' in html
         # 每行只保留统一确认按钮，组尾部用虚线添加入口，不常驻输入框。
         assert "data-save-groups" in html
         assert "确认组变更" in html
         assert "data-group-add" in html
+        assert "data-group-add-confirm" in html
+        assert "data-group-add-cancel" in html
+        assert html.count("切换状态") == 1
+        assert html.count("重置密码") == 1
+        assert reverse("servers:reset_user_password", args=[ubuntu_server.pk]) in html
+        assert "alice@example.com" in html
+        assert "确定禁用用户" not in html
         assert 'name="group"' not in html
+
+    def test_detail_shell_does_not_wait_for_ssh(self, client, ubuntu_server, django_user_model):
+        admin = django_user_model.objects.create_superuser("async-admin", password="x12345!")
+        client.force_login(admin)
+
+        with patch("servers.views.list_system_users") as scan:
+            response = client.get(reverse("servers:detail", args=[ubuntu_server.pk]))
+
+        assert response.status_code == 200
+        assert reverse("servers:user_management", args=[ubuntu_server.pk]) in response.content.decode()
+        assert "正在异步读取用户状态" in response.content.decode()
+        scan.assert_not_called()
+
+    def test_reset_password_emails_bound_user(self, client, ubuntu_server, django_user_model):
+        admin = django_user_model.objects.create_superuser("reset-admin", password="x12345!")
+        owner = django_user_model.objects.create_user(
+            username="owner",
+            first_name="张三丰",
+            email="owner@example.com",
+        )
+        MachineUserBinding.objects.create(server=ubuntu_server, username="alice", user=owner)
+        application = Application.objects.create(
+            applicant=owner,
+            applicant_name="张三丰",
+            username="alice",
+            target_server=ubuntu_server,
+            initial_password="OldPasswordMustExpire",
+        )
+        client.force_login(admin)
+
+        with (
+            patch(
+                "servers.views.reset_user_password",
+                return_value=(True, "TemporaryPass123", "用户 alice 的密码已重置"),
+            ) as reset,
+            patch("servers.views.send_machine_password_reset", return_value=True) as send,
+        ):
+            response = client.post(
+                reverse("servers:reset_user_password", args=[ubuntu_server.pk]),
+                {"username": "alice"},
+                follow=True,
+            )
+
+        reset.assert_called_once_with(ubuntu_server, "alice")
+        send.assert_called_once_with(owner, ubuntu_server, "alice", "TemporaryPass123")
+        application.refresh_from_db()
+        assert application.initial_password == ""
+        assert "owner@example.com" in response.content.decode()
+
+    def test_reset_password_requires_bound_user_email(self, client, ubuntu_server, django_user_model):
+        admin = django_user_model.objects.create_superuser("reset-admin2", password="x12345!")
+        owner = django_user_model.objects.create_user(username="owner2", email="")
+        MachineUserBinding.objects.create(server=ubuntu_server, username="alice", user=owner)
+        client.force_login(admin)
+
+        with patch("servers.views.reset_user_password") as reset:
+            response = client.post(
+                reverse("servers:reset_user_password", args=[ubuntu_server.pk]),
+                {"username": "alice"},
+                follow=True,
+            )
+
+        reset.assert_not_called()
+        assert "未配置邮箱" in response.content.decode()
+
+    def test_reset_password_reports_email_partial_failure(self, client, ubuntu_server, django_user_model):
+        admin = django_user_model.objects.create_superuser("reset-admin3", password="x12345!")
+        owner = django_user_model.objects.create_user(username="owner3", email="owner3@example.com")
+        MachineUserBinding.objects.create(server=ubuntu_server, username="alice", user=owner)
+        client.force_login(admin)
+
+        with (
+            patch(
+                "servers.views.reset_user_password",
+                return_value=(True, "TemporaryPass123", "用户 alice 的密码已重置"),
+            ),
+            patch("servers.views.send_machine_password_reset", return_value=False),
+        ):
+            response = client.post(
+                reverse("servers:reset_user_password", args=[ubuntu_server.pk]),
+                {"username": "alice"},
+                follow=True,
+            )
+
+        html = response.content.decode()
+        assert "密码已重置" in html
+        assert "邮件发送失败" in html
+        assert "TemporaryPass123" not in html
+
+    def test_reset_password_remote_failure_keeps_existing_credential(self, client, ubuntu_server, django_user_model):
+        admin = django_user_model.objects.create_superuser("reset-admin4", password="x12345!")
+        owner = django_user_model.objects.create_user(username="owner4", email="owner4@example.com")
+        MachineUserBinding.objects.create(server=ubuntu_server, username="alice", user=owner)
+        application = Application.objects.create(
+            applicant=owner,
+            applicant_name="owner4",
+            username="alice",
+            target_server=ubuntu_server,
+            initial_password="StillValidPassword",
+        )
+        client.force_login(admin)
+
+        with (
+            patch("servers.views.reset_user_password", return_value=(False, "", "SSH 重置失败")),
+            patch("servers.views.send_machine_password_reset") as send,
+        ):
+            response = client.post(
+                reverse("servers:reset_user_password", args=[ubuntu_server.pk]),
+                {"username": "alice"},
+                follow=True,
+            )
+
+        application.refresh_from_db()
+        assert application.initial_password == "StillValidPassword"
+        send.assert_not_called()
+        assert "SSH 重置失败" in response.content.decode()
+
+    def test_reset_password_requires_superuser(self, client, ubuntu_server, django_user_model):
+        staff = django_user_model.objects.create_user("reset-staff", is_staff=True)
+        client.force_login(staff)
+
+        with patch("servers.views.reset_user_password") as reset:
+            response = client.post(
+                reverse("servers:reset_user_password", args=[ubuntu_server.pk]),
+                {"username": "alice"},
+            )
+
+        assert response.status_code == 403
+        reset.assert_not_called()
