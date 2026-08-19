@@ -92,7 +92,7 @@ NRM_ENV=prod uv run python manage.py check --deploy
 
 迁移前先按[运维手册](operations.md)备份数据库和 `NRM_SECRET_KEY`，验证通过后再重启服务。
 
-第三方 CSS、JavaScript 和 Bootstrap 字体均从本机静态目录提供。`runserver` 启动前和 `collectstatic` 收集前会自动校验固定版本文件；仅在文件缺失或损坏时从锁定的 jsDelivr 地址重新下载，并在 SHA-256 校验通过后替换，无需额外命令。运行中的 Web 请求不会临时联网下载资源。排障时仍可单独运行 `uv run python scripts/ensure_vendor_assets.py`。
+第三方 CSS、JavaScript 和 Bootstrap 字体不进入 Git，均从部署机的本地静态目录提供。`runserver` 启动前和 `collectstatic` 收集前会自动校验固定版本文件；仅在文件缺失或损坏时从锁定的 jsDelivr 地址重新下载，并在 SHA-256 校验通过后替换，无需额外命令。运行中的 Web 请求不会临时联网下载资源。排障时仍可单独运行 `uv run python scripts/ensure_vendor_assets.py`。
 
 ## 可选集成
 

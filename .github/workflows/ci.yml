@@ -26,9 +26,6 @@ jobs:
       - name: Django system check
         run: uv run python manage.py check
 
-      - name: Check vendored frontend assets
-        run: uv run python scripts/ensure_vendor_assets.py --check
-
       - name: Check migrations are up to date
         run: uv run python manage.py makemigrations --check --dry-run
 

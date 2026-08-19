@@ -1,5 +1,2 @@
 # 脚本必须 LF 行尾：CRLF 会让 Linux 目标机的 bash 报错跑不动
 *.sh text eol=lf
-
-# 第三方发行文件保持上游原始字节（SHA-256 校验依赖），不做换行转换和文本 diff。
-static/vendor/** -text -diff linguist-vendored

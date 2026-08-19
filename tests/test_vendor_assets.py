@@ -4,11 +4,9 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 import pytest
-from django.contrib.staticfiles.management.commands.collectstatic import Command as DjangoCollectStaticCommand
-from django.core.management import get_commands
 
+from manage import prepare_vendor_assets
 from scripts.ensure_vendor_assets import ASSETS, Asset, download_asset, ensure_assets
-from vendor_assets.management.commands.collectstatic import Command as NRMCollectStaticCommand
 
 
 class _Response(BytesIO):
@@ -23,31 +21,26 @@ def _asset(content: bytes) -> Asset:
     return Asset("static/vendor/test.js", "https://cdn.example.test/test.js", sha256(content).hexdigest())
 
 
-def test_checked_in_vendor_assets_match_locked_digests():
-    present, downloaded = ensure_assets(check_only=True)
+def test_vendor_asset_manifest_is_complete_and_locked():
+    paths = [asset.path for asset in ASSETS]
 
-    assert present == len(ASSETS)
-    assert downloaded == 0
-
-
-def test_django_static_commands_use_vendor_assets_overrides():
-    get_commands.cache_clear()
-    commands = get_commands()
-
-    assert commands["collectstatic"] == "vendor_assets"
-    assert commands["runserver"] == "vendor_assets"
+    assert len(paths) == len(set(paths)) == 13
+    assert all(path.startswith("static/vendor/") for path in paths)
+    assert all(asset.url.startswith("https://cdn.jsdelivr.net/") for asset in ASSETS)
+    assert all(len(asset.sha256) == 64 for asset in ASSETS)
 
 
-def test_collectstatic_prepares_vendor_assets_before_parent_command():
-    with (
-        patch("vendor_assets.management.commands._base.ensure_assets", return_value=(12, 1)) as ensure,
-        patch.object(DjangoCollectStaticCommand, "handle", return_value="collected") as parent,
-    ):
-        result = NRMCollectStaticCommand().handle(dry_run=True)
-
-    assert result == "collected"
+@pytest.mark.parametrize("command", ["runserver", "collectstatic"])
+def test_manage_static_commands_prepare_vendor_assets(command):
+    with patch("scripts.ensure_vendor_assets.ensure_assets", return_value=(12, 1)) as ensure:
+        assert prepare_vendor_assets(["manage.py", command]) == (12, 1)
     ensure.assert_called_once_with()
-    parent.assert_called_once_with(dry_run=True)
+
+
+def test_unrelated_manage_command_does_not_check_vendor_assets():
+    with patch("scripts.ensure_vendor_assets.ensure_assets") as ensure:
+        assert prepare_vendor_assets(["manage.py", "migrate"]) is None
+    ensure.assert_not_called()
 
 
 def test_existing_valid_asset_does_not_access_network(tmp_path):

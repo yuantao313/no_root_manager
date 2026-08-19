@@ -20,6 +20,9 @@ db.sqlite3
 # mkdocs build output
 site/
 
+# 第三方前端发行文件由 runserver/collectstatic 按锁定清单自动下载，不进入 Git。
+/static/vendor/
+
 # OS
 .DS_Store
 
