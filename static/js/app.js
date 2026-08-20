@@ -575,8 +575,8 @@
        页面外壳不等待 SSH；设备与用户快照由浏览器并行请求。 */
     var userManagement = document.getElementById("server-user-management");
     if (userManagement) {
-        function loadUserManagement() {
-            fetch(userManagement.dataset.userManagementUrl, {
+        function loadUserManagement(url) {
+            fetch(url || userManagement.dataset.userManagementUrl, {
                 headers: { "X-Requested-With": "XMLHttpRequest" },
             }).then(function (response) {
                 if (response.redirected) {
@@ -596,6 +596,12 @@
                 userManagement.querySelector("[data-user-retry]").addEventListener("click", loadUserManagement);
             });
         }
+        userManagement.addEventListener("click", function (event) {
+            var link = event.target.closest("[data-user-page-link]");
+            if (!link) return;
+            event.preventDefault();
+            loadUserManagement(link.href);
+        });
         loadUserManagement();
     }
 })();

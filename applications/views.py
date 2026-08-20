@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import Announcement
 from config.decorators import staff_required
+from config.pagination import paginate
 from notifications.services import run_in_background, send_provision_credentials
 from servers.models import Server
 
@@ -27,10 +28,11 @@ def _get_visible_application(user, pk):
     return get_object_or_404(qs, pk=pk)
 
 
-def _filter_applications(request, applications, *, include_server=False):
+def _filter_applications(request, applications, *, include_server=False, default_status=""):
     """统一处理工单列表的状态、类型及可选服务器筛选。"""
+    requested_status = request.GET.get("status")
     filters = {
-        "f_status": request.GET.get("status", "").strip(),
+        "f_status": default_status if requested_status is None else requested_status.strip(),
         "f_type": request.GET.get("apply_type", "").strip(),
     }
     if filters["f_status"] in Application.Status.values:
@@ -85,13 +87,21 @@ def application_list(request):
     支持 URL query 筛选：status / apply_type / server（均可选）。
     """
     applications = Application.objects.with_context().reviewable_by(request.user)
-    applications, filters = _filter_applications(request, applications, include_server=True)
+    applications, filters = _filter_applications(
+        request,
+        applications,
+        include_server=True,
+        default_status=Application.Status.PENDING,
+    )
+    page_obj, page_query = paginate(request, applications)
 
     return render(
         request,
         "applications/list.html",
         {
-            "applications": applications,
+            "applications": page_obj.object_list,
+            "page_obj": page_obj,
+            "page_query": page_query,
             **filters,
             "status_choices": Application.Status.choices,
             "type_choices": Application.ApplyType.choices,
@@ -109,6 +119,7 @@ def my_applications(request):
     """
     applications = Application.objects.with_context().filter(applicant=request.user)
     applications, filters = _filter_applications(request, applications)
+    page_obj, page_query = paginate(request, applications)
 
     # GitCode 绑定用户必须先完善个人信息（设置姓名）才能提交申请，
     # 避免以 gc<id> 占位身份进入系统
@@ -134,7 +145,9 @@ def my_applications(request):
         request,
         "applications/my_list.html",
         {
-            "applications": applications,
+            "applications": page_obj.object_list,
+            "page_obj": page_obj,
+            "page_query": page_query,
             "form": form,
             "needs_name": needs_name,
             # 系统首页同步显示启用中的公告

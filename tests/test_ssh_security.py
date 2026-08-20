@@ -325,6 +325,24 @@ class TestServerCredentialTabs:
 
         assert client.get(reverse("servers:list")).status_code == 403
 
+    def test_server_table_is_paginated(self, client, credential):
+        admin = get_user_model().objects.create_superuser("page-admin", "admin@example.com", "x12345!")
+        for index in range(21):
+            Server.objects.create(
+                name=f"server-{index:02d}",
+                host=f"10.0.1.{index + 1}",
+                credential=credential,
+                ssh_host_key_fingerprint=_fingerprint(),
+            )
+        client.force_login(admin)
+
+        response = client.get(reverse("servers:list"), {"tab": "servers", "page": 2})
+
+        assert response.status_code == 200
+        assert response.context["page_obj"].paginator.count == 21
+        assert len(response.context["servers"]) == 1
+        assert "第 2 / 2 页，共 21 条" in response.content.decode()
+
     def test_detail_uses_post_forms_for_remote_actions(self, client, credential):
         admin = get_user_model().objects.create_superuser("actions-admin", "admin@example.com", "x12345!")
         server = Server.objects.create(

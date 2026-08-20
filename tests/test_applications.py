@@ -292,6 +292,49 @@ class TestPermission:
         client.force_login(staff)
         assert client.get(reverse("applications:list")).status_code == 200
 
+    def test_admin_list_defaults_to_pending_and_can_show_all(self, client, normal, staff, server):
+        Application.objects.create(
+            applicant=normal,
+            username="pending-default",
+            target_server=server,
+            description="默认可见待审批",
+        )
+        Application.objects.create(
+            applicant=normal,
+            username="approved-hidden",
+            target_server=server,
+            description="默认隐藏已通过",
+            status=Application.Status.APPROVED,
+        )
+        client.force_login(staff)
+
+        default_html = client.get(reverse("applications:list")).content.decode()
+        all_html = client.get(reverse("applications:list"), {"status": ""}).content.decode()
+
+        assert "默认可见待审批" in default_html
+        assert "默认隐藏已通过" not in default_html
+        assert 'option value="pending" selected' in default_html
+        assert "默认隐藏已通过" in all_html
+
+    def test_admin_application_list_is_paginated_and_keeps_filter(self, client, normal, staff, server):
+        for index in range(21):
+            Application.objects.create(
+                applicant=normal,
+                username=f"page-user-{index:02d}",
+                target_server=server,
+                description=f"分页工单 {index:02d}",
+            )
+        client.force_login(staff)
+
+        response = client.get(reverse("applications:list"), {"status": "pending", "page": 2})
+
+        assert response.status_code == 200
+        assert response.context["page_obj"].paginator.count == 21
+        assert len(response.context["applications"]) == 1
+        html = response.content.decode()
+        assert "第 2 / 2 页，共 21 条" in html
+        assert "status=pending" in html
+
     def test_deleting_applicant_preserves_audit_record(self, normal, server):
         app = Application.objects.create(
             applicant=normal,

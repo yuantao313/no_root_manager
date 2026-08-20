@@ -7,10 +7,10 @@
 
 <ul class="nav nav-tabs" role="tablist" style="margin-bottom:16px;">
     <li role="presentation"{% if active_tab == "servers" %} class="active"{% endif %}>
-        <a href="{% url 'servers:list' %}?tab=servers" role="tab" aria-selected="{% if active_tab == 'servers' %}true{% else %}false{% endif %}">服务器 <span class="badge">{{ servers|length }}</span></a>
+        <a href="{% url 'servers:list' %}?tab=servers" role="tab" aria-selected="{% if active_tab == 'servers' %}true{% else %}false{% endif %}">服务器 <span class="badge">{{ server_count }}</span></a>
     </li>
     <li role="presentation"{% if active_tab == "credentials" %} class="active"{% endif %}>
-        <a href="{% url 'servers:list' %}?tab=credentials" role="tab" aria-selected="{% if active_tab == 'credentials' %}true{% else %}false{% endif %}">凭据 <span class="badge">{{ credentials|length }}</span></a>
+        <a href="{% url 'servers:list' %}?tab=credentials" role="tab" aria-selected="{% if active_tab == 'credentials' %}true{% else %}false{% endif %}">凭据 <span class="badge">{{ credential_count }}</span></a>
     </li>
 </ul>
 
@@ -25,7 +25,8 @@
         </div>
     </div>
     {% if credentials %}
-    <table class="table table-striped table-hover" style="margin-bottom:0;">
+    <div class="table-responsive nrm-table-wrap">
+    <table class="table table-striped table-hover nrm-table">
         <thead>
             <tr>
                 <th>名称</th>
@@ -47,6 +48,8 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    {% include "shared/pagination.html" with page_obj=page_obj page_query=page_query pagination_label="凭据列表分页" %}
     {% else %}
     <div class="panel-body">
         <p class="text-muted">还没有管理凭据。新增服务器前，请先创建密码或私钥凭据。</p>
@@ -55,7 +58,7 @@
     {% endif %}
 </div>
 {% else %}
-{% if not credentials %}
+{% if not credential_count %}
 <div class="alert alert-warning">
     <strong>新增服务器前需要管理凭据。</strong>
     请先到<a href="{% url 'servers:list' %}?tab=credentials">凭据页签</a>创建凭据，再返回新增服务器。
@@ -69,7 +72,8 @@
         </div>
     </div>
     {% if servers %}
-    <table class="table table-striped table-hover" style="margin-bottom:0;">
+    <div class="table-responsive nrm-table-wrap">
+    <table class="table table-striped table-hover nrm-table">
         <thead>
             <tr>
                 <th>名称</th>
@@ -96,6 +100,8 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
+    {% include "shared/pagination.html" with page_obj=page_obj page_query=page_query pagination_label="服务器列表分页" %}
     {% else %}
     <div class="panel-body"><p class="text-muted">暂无服务器。准备好凭据后，点击右上角新增。</p></div>
     {% endif %}

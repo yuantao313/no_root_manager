@@ -1,4 +1,5 @@
 {% load user_display %}
+{% url 'servers:user_management' server.pk as user_management_url %}
 <div class="panel panel-default nrm-form-panel">
     <div class="panel-heading">
         <div class="row">
@@ -20,7 +21,8 @@
             <span><i class="nrm-group-dot nrm-group-dot-add"></i>待添加</span>
             <span><i class="nrm-group-dot nrm-group-dot-managed"></i>受管标识</span>
         </div>
-        <table class="table table-striped nrm-user-table">
+        <div class="table-responsive nrm-table-wrap">
+        <table class="table table-striped nrm-table nrm-user-table">
             <thead>
                 <tr><th>机器用户名</th><th>系统用户</th><th>用户组</th><th>操作</th></tr>
             </thead>
@@ -54,7 +56,7 @@
                             <span class="nrm-group-error text-danger" data-group-error aria-live="polite"></span>
                         </div>
                     </td>
-                    <td class="nrm-user-actions">
+                    <td class="nrm-user-actions"><div class="nrm-table-actions">
                         <form method="post" action="{% url 'servers:update_user_groups' server.pk %}" class="form-inline" style="display:inline;" data-group-form>
                             {% csrf_token %}
                             <input type="hidden" name="username" value="{{ item.username }}">
@@ -75,11 +77,13 @@
                         {% else %}
                         <button type="button" class="btn btn-danger btn-xs" disabled title="需先绑定有邮箱的平台用户">重置密码</button>
                         {% endif %}
-                    </td>
+                    </div></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        {% include "shared/pagination.html" with page_obj=managed_page page_query=managed_page_query page_param="managed_page" pagination_label="受管用户分页" pagination_async=True pagination_url=user_management_url %}
         {% elif not scan_error %}
         <p class="text-muted">暂无受管用户，可点击“刷新”扫描或在下方接管。</p>
         {% endif %}
@@ -90,7 +94,8 @@
     <div class="panel-heading"><h3 class="panel-title">可接管用户（/etc/passwd 中未受管）</h3></div>
     <div class="panel-body">
         {% if available_users %}
-        <table class="table table-striped">
+        <div class="table-responsive nrm-table-wrap">
+        <table class="table table-striped nrm-table">
             <thead><tr><th>用户名</th><th>操作</th></tr></thead>
             <tbody>
                 {% for name in available_users %}
@@ -111,6 +116,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        {% include "shared/pagination.html" with page_obj=available_page page_query=available_page_query page_param="available_page" pagination_label="可接管用户分页" pagination_async=True pagination_url=user_management_url %}
         {% elif not scan_error %}
         <p class="text-muted">无可接管用户。</p>
         {% endif %}

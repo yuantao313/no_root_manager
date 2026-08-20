@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from applications.models import Application
 from config.decorators import superuser_required
+from config.pagination import paginate
 from credentials.models import Credential
 from notifications.services import send_machine_password_reset
 
@@ -51,16 +52,26 @@ def server_list(request):
     if active_tab not in {"servers", "credentials"}:
         active_tab = "servers"
     servers = Server.objects.select_related("credential")
-    credentials = Credential.objects.only("pk", "name", "username", "updated_at").annotate(
-        server_count=Count("servers")
+    credentials = (
+        Credential.objects.only("pk", "name", "username", "updated_at")
+        .annotate(server_count=Count("servers"))
+        .order_by("name", "pk")
     )
+    server_count = servers.count()
+    credential_count = credentials.count()
+    items = servers if active_tab == "servers" else credentials
+    page_obj, page_query = paginate(request, items)
     return render(
         request,
         "servers/list.html",
         {
-            "servers": servers,
-            "credentials": credentials,
+            "servers": page_obj.object_list if active_tab == "servers" else (),
+            "credentials": page_obj.object_list if active_tab == "credentials" else (),
+            "server_count": server_count,
+            "credential_count": credential_count,
             "active_tab": active_tab,
+            "page_obj": page_obj,
+            "page_query": page_query,
         },
     )
 
@@ -139,7 +150,7 @@ def server_device_api(request, pk):
     return JsonResponse(device, json_dumps_params={"ensure_ascii": False})
 
 
-def _server_user_context(server):
+def _server_user_context(request, server):
     """构建用户管理局部模板上下文；远程数据统一由单次快照读取。"""
     available_users = []
     managed_users = []
@@ -175,10 +186,16 @@ def _server_user_context(server):
             scan_error = "读取目标机器用户失败，请稍后重试。"
     else:
         scan_error = "该服务器未关联管理凭据。"
+    managed_page, managed_page_query = paginate(request, managed_users, page_param="managed_page")
+    available_page, available_page_query = paginate(request, available_users, page_param="available_page")
     return {
         "server": server,
-        "available_users": available_users,
-        "managed_users": managed_users,
+        "available_users": available_page.object_list,
+        "managed_users": managed_page.object_list,
+        "managed_page": managed_page,
+        "managed_page_query": managed_page_query,
+        "available_page": available_page,
+        "available_page_query": available_page_query,
         "sys_users": User.objects.order_by("username"),
         "scan_error": scan_error,
     }
@@ -196,7 +213,7 @@ def server_detail(request, pk):
 def server_user_management(request, pk):
     """异步返回用户管理区域；缓存未命中时只进行一次 SSH 快照采集。"""
     server = get_object_or_404(Server, pk=pk)
-    return render(request, "servers/_user_management.html", _server_user_context(server))
+    return render(request, "servers/_user_management.html", _server_user_context(request, server))
 
 
 @superuser_required

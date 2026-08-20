@@ -224,6 +224,35 @@ class TestManagedUsersBinding:
         # 未绑定的机器用户也在列表中
         assert "m_user_c" in html
 
+    def test_machine_user_lists_are_paginated_in_async_panel(self, client, ubuntu_server, django_user_model):
+        from unittest.mock import patch
+
+        su = django_user_model.objects.create_superuser("page-admin", password="x12345!")
+        managed = [f"managed-{index:02d}" for index in range(21)]
+        available = [f"available-{index:02d}" for index in range(21)]
+        client.force_login(su)
+        with (
+            patch("servers.views.list_system_users", return_value=(True, available, "ok")),
+            patch("servers.views.get_managed_users_cached", return_value=(managed, "ok")),
+            patch("servers.views.get_user_groups_cached", return_value={}),
+        ):
+            response = client.get(
+                reverse("servers:user_management", args=[ubuntu_server.pk]),
+                {"managed_page": 2, "available_page": 2},
+            )
+
+        assert response.status_code == 200
+        assert response.context["managed_page"].paginator.count == 21
+        assert response.context["available_page"].paginator.count == 21
+        assert len(response.context["managed_users"]) == 1
+        assert len(response.context["available_users"]) == 1
+        html = response.content.decode()
+        assert "managed-20" in html
+        assert "available-20" in html
+        assert "data-user-page-link" in html
+        assert f"{reverse('servers:user_management', args=[ubuntu_server.pk])}?" in html
+        assert "nrm-table-actions" in html
+
 
 class TestMotdPush:
     def test_reuses_rendered_announcement_for_all_servers(self, root_server, ubuntu_server):

@@ -1,0 +1,17 @@
+{% if page_obj.has_other_pages %}
+<nav class="nrm-pagination" aria-label="{{ pagination_label|default:'列表分页' }}">
+    <ul class="pagination pagination-sm">
+        <li{% if not page_obj.has_previous %} class="disabled"{% endif %}>
+            {% if page_obj.has_previous %}
+            <a href="{{ pagination_url|default:'' }}?{% if page_query %}{{ page_query }}&amp;{% endif %}{{ page_param|default:'page' }}={{ page_obj.previous_page_number }}"{% if pagination_async %} data-user-page-link{% endif %} aria-label="上一页">上一页</a>
+            {% else %}<span>上一页</span>{% endif %}
+        </li>
+        <li class="disabled"><span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页，共 {{ page_obj.paginator.count }} 条</span></li>
+        <li{% if not page_obj.has_next %} class="disabled"{% endif %}>
+            {% if page_obj.has_next %}
+            <a href="{{ pagination_url|default:'' }}?{% if page_query %}{{ page_query }}&amp;{% endif %}{{ page_param|default:'page' }}={{ page_obj.next_page_number }}"{% if pagination_async %} data-user-page-link{% endif %} aria-label="下一页">下一页</a>
+            {% else %}<span>下一页</span>{% endif %}
+        </li>
+    </ul>
+</nav>
+{% endif %}
