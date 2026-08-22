@@ -16,6 +16,9 @@ from .models import Server
 from .ssh import exec_command, run_script
 
 NRM_GROUP = "nrm_managed"
+MACHINE_PASSWORD_LENGTH = 12
+# 排除视觉上容易混淆的 0/O/o、1/I/l，其余字符仅来自 a-zA-Z0-9。
+MACHINE_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 _CACHE_TIMEOUT = 1800
 _FAILURE_CACHE_TIMEOUT = 30
 _MANAGED_USERS_CACHE_KEY = "nrm:managed-users:{}"
@@ -47,6 +50,11 @@ PRIVILEGED_CMDS = (
 def _run_mgmt(server, args, stdin_data=None, timeout=60):
     """上传并执行服务器管理脚本，返回 (ok, stdout, stderr)。"""
     return run_script(server, MGMT_SCRIPT, args, timeout=timeout, stdin_data=stdin_data)
+
+
+def generate_machine_password():
+    """生成用于首次开通或重置的易辨识临时机器密码。"""
+    return get_random_string(MACHINE_PASSWORD_LENGTH, allowed_chars=MACHINE_PASSWORD_ALPHABET)
 
 
 def _sudo_wrap(server, command: str) -> str:
@@ -164,7 +172,7 @@ def reset_user_password(server, username):
     username = (username or "").strip()
     if not username:
         return False, "", "用户名为空"
-    password = get_random_string(16)
+    password = generate_machine_password()
     ok, output, error = _run_mgmt(
         server,
         ["reset_password", username],
@@ -238,7 +246,7 @@ def provision_user(server, username, groups=None, with_home=True, force_pwd_chan
     group_args = ",".join(groups)
 
     # 生成随机密码，经 stdin 传给脚本（避免出现在命令行参数里）
-    password = get_random_string(16)
+    password = generate_machine_password()
     args = [
         "provision",
         username,

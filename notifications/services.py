@@ -249,7 +249,8 @@ def send_provision_credentials(application, password) -> bool:
         f"用户名：{application.username}\n"
         f"初始密码：{password}\n"
         f"服务器：{application.target_server}\n\n"
-        f"【重要】首次登录必须修改密码（服务器已强制设置）。\n\n"
+        f"【重要】请先使用系统终端通过 SSH 登录服务器，并按提示修改初始密码。\n"
+        f"完成修改前，请勿使用 VS Code Remote SSH 等工具登录；密码修改成功后再使用这些工具。\n\n"
         f"如未收到本邮件，可登录 NRM 系统，在「我的申请 → 申请详情」中查看初始密码。"
     )
     return send_email(subject, body, [application.email])
@@ -267,7 +268,9 @@ def send_machine_password_reset(user, server, username, password) -> bool:
         f"机器用户名：{username}\n"
         f"临时密码：{password}\n"
         f"服务器：{server}\n\n"
-        f"【重要】下次登录必须立即修改密码。若您未申请此次重置，请及时联系管理员。"
+        f"【重要】请先使用系统终端通过 SSH 登录服务器，并按提示修改临时密码。\n"
+        f"完成修改前，请勿使用 VS Code Remote SSH 等工具登录；密码修改成功后再使用这些工具。\n\n"
+        f"若您未申请此次重置，请及时联系管理员。"
     )
     return send_email(subject, body, [user.email])
 

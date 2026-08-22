@@ -652,7 +652,9 @@ class TestReviewProvision:
         if sent:
             body = "".join(m.body for m in sent)
             assert "Pass123" in body
-            assert "首次登录必须修改密码" in body
+            assert "请先使用系统终端通过 SSH 登录服务器" in body
+            assert "VS Code Remote SSH" in body
+            assert "密码修改成功后" in body
 
     def test_reject_does_not_provision(self, client, staff, server):
         app = Application.objects.create(

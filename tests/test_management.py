@@ -8,7 +8,10 @@ from django.urls import reverse
 from applications.models import Application
 from credentials.models import Credential
 from servers.management import (
+    MACHINE_PASSWORD_ALPHABET,
+    MACHINE_PASSWORD_LENGTH,
     _sudo_wrap,
+    generate_machine_password,
     provision_user,
     take_over_user,
 )
@@ -112,6 +115,14 @@ class TestUserLock:
 
 
 class TestResetUserPassword:
+    def test_generated_password_is_twelve_unambiguous_alphanumerics(self):
+        password = generate_machine_password()
+
+        assert len(password) == 12 == MACHINE_PASSWORD_LENGTH
+        assert set(password) <= set(MACHINE_PASSWORD_ALPHABET)
+        assert not set(password) & set("0Oo1Il")
+        assert MACHINE_PASSWORD_ALPHABET.isalnum()
+
     def test_password_is_passed_over_stdin(self, ubuntu_server):
         from servers.management import reset_user_password
 
@@ -163,7 +174,8 @@ class TestProvisionUser:
         ) as mock:
             ok, pwd, msg = provision_user(ubuntu_server, "carol", groups=["dev"])
         assert ok is True
-        assert len(pwd) == 16
+        assert len(pwd) == 12
+        assert set(pwd) <= set(MACHINE_PASSWORD_ALPHABET)
         args = mock.call_args.args[1]
         # provision <user> <groups_csv> <with_home> <force_pwd>
         assert args[0] == "provision"

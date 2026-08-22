@@ -49,7 +49,9 @@ def test_machine_password_reset_email_contains_login_details(django_user_model):
     assert "张三丰" in body
     assert "machine-user" in body
     assert "TemporaryPass123" in body
-    assert "下次登录必须立即修改密码" in body
+    assert "请先使用系统终端通过 SSH 登录服务器" in body
+    assert "VS Code Remote SSH" in body
+    assert "密码修改成功后" in body
     assert recipients == ["zhang@example.com"]
 
 

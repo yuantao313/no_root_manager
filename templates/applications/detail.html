@@ -46,7 +46,7 @@
                 <div class="nrm-form-row"><span class="nrm-form-label">账号</span><div class="nrm-form-field nrm-info-value"><code>{{ application.username }}</code></div></div>
                 <div class="nrm-form-row"><span class="nrm-form-label">初始密码</span><div class="nrm-form-field nrm-info-value"><code>{{ application.initial_password }}</code></div></div>
             </div>
-            <p class="nrm-form-note">服务器已设置首次登录强制改密，用户第一次登录后必须修改密码；此密码同时已通过邮件（若启用）发送给申请人。</p>
+            <p class="nrm-form-note">请先使用系统终端通过 SSH 登录服务器并按提示修改初始密码；修改成功后，再使用 VS Code Remote SSH 等工具登录。此密码同时已通过邮件（若启用）发送给申请人。</p>
             {% if can_resend_initial_password %}
             {% include "applications/_resend_credentials_form.html" with button_class="btn btn-warning btn-sm" button_label="重发邮件" show_help=True %}
             {% endif %}
